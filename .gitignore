@@ -6,6 +6,7 @@ input/*.pdf
 input/*.pptx
 input/*.xlsx
 input/*.docx
+input/*.html
 !input/.gitkeep
 runs/state.json
 !runs/state.example.json

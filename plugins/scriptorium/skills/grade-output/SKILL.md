@@ -20,9 +20,9 @@ Three steps:
    each covering a page batch **in parallel**, looking at each rendered PNG
    and judging the assembled output against it — not a script. Each batch
    writes one shard per page it graded (`write_grade_shard.py`), never a
-   whole-document report. For formats with **no** rendered page (`docx`
-   today), there's no pixel ground truth to judge against, so this step is
-   instead one deterministic script (`text_mode_grade.py`, see
+   whole-document report. For formats with **no** rendered page (`docx`,
+   `xlsx`, `html`), there's no pixel ground truth to judge against, so this
+   step is instead one deterministic script (`text_mode_grade.py`, see
    `text-rubric.md`) that writes the same per-page shards itself — no
    subagent spawned at all for this step.
 3. **Merge** (`merge_grades.py`) — deterministic, combines the gates result
@@ -42,8 +42,8 @@ uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
   "${CLAUDE_PLUGIN_ROOT}/skills/grade-output/scripts/write_grade_shard.py" \
   --doc <doc-name> --page <n> --score 0.93 --issues dropped_text
 
-# OR, for a no-rendered-page format (docx): one script call replaces every
-# grader subagent for this document — see text-rubric.md
+# OR, for a no-rendered-page format (docx/xlsx/html): one script call
+# replaces every grader subagent for this document — see text-rubric.md
 uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
   "${CLAUDE_PLUGIN_ROOT}/skills/grade-output/scripts/text_mode_grade.py" --doc <doc-name>
 

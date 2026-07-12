@@ -5,7 +5,7 @@
 [x] Input document: pptx
 [x] Input document: docx
 [x] Input document: xlsx
-[ ] Input document: html
+[x] Input document: html
 [ ] Input document: images
 [ ] Output: reqif
 [ ] Output: reqifx

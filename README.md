@@ -22,9 +22,9 @@ context — only compact summaries come back.
 Scriptorium is **one plugin**: the `extractor`/`grader` agents and the
 orchestrator loop are format-agnostic — only the *skills* they call
 (`pdf-triage`, `extract-text`, `ocr-page`, ...) are format-specific. PDF,
-PowerPoint (`.pptx`), Word (`.docx`), and Excel (`.xlsx`) are supported
-today; new formats arrive as sibling skills the same agents call, not new
-plugins.
+PowerPoint (`.pptx`), Word (`.docx`), Excel (`.xlsx`), and HTML (`.html`)
+are supported today; new formats arrive as sibling skills the same agents
+call, not new plugins.
 
 See [`docs/architecture.md`](docs/architecture.md) for the elastic loop and
 [`docs/tooling.md`](docs/tooling.md) for the skills/scripts reference.
@@ -157,8 +157,9 @@ runs/state.json                   per-document queue state (see state.example.js
 
 ## Status
 
-PDF in, Markdown / HTML / OKF bundle out. Extraction and grading run as
-parallel subagents over page batches with isolated context windows. Other
-document formats (pptx, docx, xlsx, html) and a local RAG pipeline over the
-OKF output are deferred — the plugin's skill-based structure leaves room to
-add them as sibling skills later, without new agents or a new plugin.
+PDF, pptx, docx, xlsx, and HTML in, Markdown / HTML / OKF bundle out.
+Extraction and grading run as parallel subagents over page batches with
+isolated context windows. Other input formats (images) and a local RAG
+pipeline over the OKF output are deferred — the plugin's skill-based
+structure leaves room to add them as sibling skills later, without new
+agents or a new plugin.

@@ -1,11 +1,13 @@
 # Text-Mode Grading (no rendered page)
 
-For formats with no natural page image (`docx`, `xlsx`) there's no pixel
-ground truth for a `grader` subagent to judge against, so grading is a
-**deterministic script** (`scripts/text_mode_grade.py`) instead of a
+For formats with no natural page image (`docx`, `xlsx`, `html`) there's no
+pixel ground truth for a `grader` subagent to judge against, so grading is
+a **deterministic script** (`scripts/text_mode_grade.py`) instead of a
 subagent applying `rubric.md` — there is no qualitative judgment call to
 make here that a script can't already make by comparing text. One page in
-this context is a Heading-1 section (docx) or a worksheet (xlsx).
+this context is a Heading-1 section (docx), a worksheet (xlsx), or the
+whole document (html — there is no page concept at all for HTML, not even
+docx's Heading-1 split).
 
 ## What it checks, per page
 
@@ -23,27 +25,33 @@ that page:
    (`max_row - min_row + 1` × `max_column - min_column + 1`) don't match
    the one table element a sheet should produce — this only holds because
    `xlsx-extract` keeps the full rectangular range including blank
-   interior rows, rather than silently dropping them.
-3. **`missing_image`** — the source has more inline images on this page
-   than `elements.json` has `image` elements.
+   interior rows, rather than silently dropping them. html: each
+   `<table>`'s row count / max column count doesn't match its output table
+   element (or the table count itself doesn't match).
+3. **`missing_image`** — the source has more saveable inline images on this
+   page than `elements.json` has `image` elements. For html, "saveable"
+   means a `data:` URI or local file `<img src>` — remote sources are never
+   fetched or counted, so they can't trip this check (see
+   `lib/html_pages.saveable_images`).
 4. **`bad_caption`** — an image element's caption is empty or a generic
    placeholder (`"image"`, `"figure"`, `"picture"`, case-insensitive).
-5. **`wrong_heading_level`** — **docx only**: a source heading paragraph's
-   text is present in the output only as a `paragraph`, or as a `heading`
-   with a different (clamped) level than the source style implies. Not
-   checked for xlsx — a sheet is always exactly one heading (its name)
-   with no sub-heading structure to get wrong.
+5. **`wrong_heading_level`** — **docx and html only**: a source heading
+   paragraph/tag's text is present in the output only as a `paragraph`, or
+   as a `heading` with a different (clamped) level than the source style/
+   tag implies. Not checked for xlsx — a sheet is always exactly one
+   heading (its name) with no sub-heading structure to get wrong.
 
 ## What it does not check
 
 `hallucinated_text`, `duplicated_text`, and `wrong_reading_order` from the
-full visual rubric are **not** evaluated in text mode. Both docx and xlsx
-extraction read structured content directly off the same paragraphs/
-tables/cells this script re-reads — there's no OCR/vision step in between
-that could invent or reorder content, so these failure modes aren't
-realistically reachable for these formats the way they are for pdf/pptx.
-If that assumption ever proves wrong, that's a gap to close here, not a
-reason to add a visual grader for a format with no page image to show it.
+full visual rubric are **not** evaluated in text mode. docx, xlsx, and html
+extraction all read structured content directly off the same paragraphs/
+tables/cells/tags this script re-reads — there's no OCR/vision step in
+between that could invent or reorder content, so these failure modes
+aren't realistically reachable for these formats the way they are for
+pdf/pptx. If that assumption ever proves wrong, that's a gap to close
+here, not a reason to add a visual grader for a format with no page image
+to show it.
 
 ## Scoring
 

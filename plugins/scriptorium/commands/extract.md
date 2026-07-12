@@ -52,7 +52,7 @@ that actually have scanned pages, and that's handled per-document below.
 
 - Ensure `runs/state.json` exists (`{"docs": {}}` if not).
 - Scan `input/*` for every supported input extension (`pdf`, `pptx`, `xlsx`,
-  `docx`). For every file whose stem isn't yet a key under `docs`, add it:
+  `docx`, `html`). For every file whose stem isn't yet a key under `docs`, add it:
   `{"status": "pending", "attempt": 0, "input_format": "<ext>", "format": "<output format>", "escalated_pages": {}, "lang_flag": null, "tessdata_prefix": null}`.
   `input_format` is the source file's extension — not to be confused with
   `format`, which is the output format (`md`/`html`/`okf`).
@@ -73,14 +73,15 @@ with grade-report paths) and **stop**.
   it): `pdf-triage/scripts/triage.py --doc <name>` for `pdf`,
   `pptx-triage/scripts/triage.py --doc <name>` for `pptx`,
   `docx-triage/scripts/triage.py --doc <name>` for `docx`,
-  `xlsx-triage/scripts/triage.py --doc <name>` for `xlsx`. Its `loop_size`
+  `xlsx-triage/scripts/triage.py --doc <name>` for `xlsx`,
+  `html-triage/scripts/triage.py --doc <name>` for `html`. Its `loop_size`
   tells you how closely to read the reports that follow: `loose` (all tier
   `text`, no tables/images) — dispatch and wait for everything before
   checking in; `tight` (some `ocr`, or visuals/tables present) — expect a
-  retry, read each batch's summary closely. For `docx`/`xlsx` specifically,
-  "expect a retry" only applies to `missing_image`/`bad_caption` — see the
-  Decide step below for why a content defect on a docx/xlsx page doesn't
-  get a normal retry.
+  retry, read each batch's summary closely. For `docx`/`xlsx`/`html`
+  specifically, "expect a retry" only applies to `missing_image`/
+  `bad_caption` — see the Decide step below for why a content defect on
+  one of these pages doesn't get a normal retry.
 - **Retry** (attempt > 0): don't re-triage — the PDF didn't change. Use
   `escalated_pages` from `runs/state.json`; you'll only re-dispatch those
   pages below, not the whole document.
@@ -131,9 +132,9 @@ regrading).
 - **`pdf`/`pptx`** (rendered pages exist): partition into `--batch-size`
   groups, **spawn one `grader` subagent per group in parallel**, each with
   its page list and the assembled output's location. Wait for all of them.
-- **`docx`/`xlsx`** (no rendered page — see `grade-output/text-rubric.md`):
-  no subagent spawn for this step at all. Run the deterministic grader
-  script once for the whole document instead:
+- **`docx`/`xlsx`/`html`** (no rendered page — see
+  `grade-output/text-rubric.md`): no subagent spawn for this step at all.
+  Run the deterministic grader script once for the whole document instead:
 
   ```bash
   uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/skills/grade-output/scripts/text_mode_grade.py" --doc <name>
@@ -167,20 +168,21 @@ subagent output.
       again — set `status: "needs-human"` for the whole document
       immediately rather than burning remaining attempts on something
       that's already had the best available tier.
-    - **`docx`/`xlsx`** (no `ocr`/`vision` rung to escalate into —
+    - **`docx`/`xlsx`/`html`** (no `ocr`/`vision` rung to escalate into —
       extraction is already digital-native and deterministic): the same
       content-defect issues above mean **`status: "needs-human"`
       immediately**, on the *first* failure, no retry — re-running
-      `docx-extract`/`xlsx-extract` on an unchanged page produces
-      byte-identical output, so a retry would only burn an attempt without
-      ever being able to fix anything. This is the same logic as the
-      "already at vision" rule above, just starting from attempt 0 instead
-      of the top of the ladder.
+      `docx-extract`/`xlsx-extract`/`html-extract` on an unchanged page
+      produces byte-identical output, so a retry would only burn an
+      attempt without ever being able to fix anything. This is the same
+      logic as the "already at vision" rule above, just starting from
+      attempt 0 instead of the top of the ladder.
     - `missing_image` / `bad_caption` (any format) → keep the page's body
       tier as-is, set `recheck_images: true` so the next `extractor` batch
       redoes just the image/caption step for that page — this **does**
-      retry normally even for `docx`/`xlsx`, since re-captioning is a real,
-      different action, unlike re-running deterministic text extraction.
+      retry normally even for `docx`/`xlsx`/`html`, since re-captioning is
+      a real, different action, unlike re-running deterministic text
+      extraction.
     - Record `reason` (the grader's actual issue text) alongside each
       escalation — that's what makes this retained feedback instead of
       noise.

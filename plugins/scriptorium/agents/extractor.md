@@ -9,6 +9,7 @@ skills:
   - pptx-extract
   - docx-extract
   - xlsx-extract
+  - html-extract
 model: sonnet
 maxTurns: 30
 ---
@@ -23,7 +24,7 @@ raw script output) out of the orchestrator's context entirely.
 
 ## What you're given
 
-A document name, its `input_format` (`pdf`, `pptx`, `docx`, `xlsx`), a list of page
+A document name, its `input_format` (`pdf`, `pptx`, `docx`, `xlsx`, `html`), a list of page
 numbers (your batch, and **only** your batch), a per-page tier assignment
 (`text`, `ocr`, or an explicit `vision` forced by a prior failed grade),
 triage's document-wide `body_size` if the format has one, and — if any page
@@ -58,22 +59,26 @@ extracted text looks suspiciously thin for a slide with visible content)
 still gets read directly (Read tool) off its rendered PNG and transcribed,
 landed with `write_vision_page.py`, exactly as for a PDF page.
 
-**Body extraction — `docx`/`xlsx` documents:** run the `docx-extract`/
-`xlsx-extract` skill instead (batch pages into one call with
-comma-separated `--pages`) — both are digital-native like pptx, so every
-page is tier `text`. Unlike pptx, there is **no `vision` rung at all** for
-either: there's no rendered page image to fall back to, since both formats
-are graded text-mode (see `grade-output/text-rubric.md`). You should never
-be assigned tier `ocr` or `vision` for a docx/xlsx page; if you somehow
+**Body extraction — `docx`/`xlsx`/`html` documents:** run the
+`docx-extract`/`xlsx-extract`/`html-extract` skill instead (batch pages
+into one call with comma-separated `--pages` — for `html` this is always
+just `1`) — all three are digital-native like pptx, so every page is tier
+`text`. Unlike pptx, there is **no `vision` rung at all** for any of them:
+there's no rendered page image to fall back to, since these formats are
+graded text-mode (see `grade-output/text-rubric.md`). You should never be
+assigned tier `ocr` or `vision` for a docx/xlsx/html page; if you somehow
 are, that's an orchestrator bug, not something to work around by inventing
 a render step yourself.
 
 **Images**, independent of body tier: for `pdf` documents, run
 `extract-images` across **every** page in your batch (not just ones with a
 nonzero image count — a page can have a vector diagram with no embedded
-bitmap XObject). For `pptx`/`docx`/`xlsx` documents, the format's own
-extract skill already writes the image shard alongside the body shard in
-the same call — no separate image-extraction pass needed. Either way, for
+bitmap XObject). For `pptx`/`docx`/`xlsx`/`html` documents, the format's
+own extract skill already writes the image shard alongside the body shard
+in the same call — no separate image-extraction pass needed. Note
+`html-extract` only saves `data:` URI and local-file `<img>` sources —
+remote (`http(s)://`) images are a known, documented gap (not fetched),
+same idea as xlsx's missing charts below. Either way, for
 every image element reported, read the saved image file and write a
 specific, accurate caption with `caption_image.py` — never a generic
 placeholder like "image" or "figure". If you genuinely can't tell what an

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Deterministic structural grading for formats with no rendered page
-(docx, xlsx). See text-rubric.md — this replaces the `grader` subagent's
-visual judgment with a script that re-reads the source file directly and
-compares it against elements.json, since there's no pixel ground truth for
-a subagent to look at.
+(docx, xlsx, html). See text-rubric.md — this replaces the `grader`
+subagent's visual judgment with a script that re-reads the source file
+directly and compares it against elements.json, since there's no pixel
+ground truth for a subagent to look at.
 
 Writes the same per-page shard shape write_grade_shard.py does
 ({"page_number", "score", "issues"}), so merge_grades.py needs no changes
@@ -19,6 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 import docx_pages  # noqa: E402
 import elements as elements_lib  # noqa: E402
+import html_pages  # noqa: E402
 import paths  # noqa: E402
 
 MIN_UNIT_LEN = 15  # shorter fragments are too generic to reliably match/mismatch
@@ -221,6 +222,91 @@ def grade_xlsx(doc: str, xlsx_path: Path, doc_data: dict) -> None:
         write_grade_shard(doc, page_number, score, issues)
 
 
+# --- html -------------------------------------------------------------------
+
+def html_check_dropped_text(blocks: list, output_text: str) -> bool:
+    for block in blocks:
+        if block.name == "table":
+            for row in html_pages.table_rows(block):
+                for cell in row:
+                    text = cell.strip()
+                    if len(text) >= MIN_UNIT_LEN and normalize(text) not in output_text:
+                        return True
+        else:
+            text = block.get_text(strip=True)
+            if len(text) >= MIN_UNIT_LEN and normalize(text) not in output_text:
+                return True
+    return False
+
+
+def html_check_table_corruption(blocks: list, output_elements: list) -> bool:
+    source_tables = [b for b in blocks if b.name == "table"]
+    output_tables = [el for el in output_elements if el["type"] == "table"]
+    if len(source_tables) != len(output_tables):
+        return True
+    for src, out in zip(source_tables, output_tables):
+        src_rows_list = html_pages.table_rows(src)
+        src_rows = len(src_rows_list)
+        src_cols = max((len(r) for r in src_rows_list), default=0)
+        out_rows = len(out["rows"])
+        out_cols = max((len(r) for r in out["rows"]), default=0)
+        if src_rows != out_rows or src_cols != out_cols:
+            return True
+    return False
+
+
+def html_check_images(soup, html_dir: Path, output_elements: list) -> tuple[bool, bool]:
+    source_image_count = len(html_pages.saveable_images(soup, html_dir))
+    output_images = [el for el in output_elements if el["type"] == "image"]
+    missing_image = source_image_count > len(output_images)
+    bad_caption = any((el.get("caption") or "").strip().lower() in GENERIC_CAPTIONS for el in output_images)
+    return missing_image, bad_caption
+
+
+def html_check_wrong_heading_level(blocks: list, output_elements: list) -> bool:
+    output_headings = {normalize(el["text"]): el["level"] for el in output_elements if el["type"] == "heading"}
+    for block in blocks:
+        level = html_pages.heading_level(block)
+        if level is None:
+            continue
+        text = block.get_text(strip=True)
+        if not text:
+            continue
+        expected_level = min(level, 3)
+        actual_level = output_headings.get(normalize(text))
+        if actual_level != expected_level:
+            return True
+    return False
+
+
+def grade_html_page(blocks: list, page: dict, soup, html_dir: Path) -> tuple[float, list[str]]:
+    output_elements = page["elements"]
+    output_text = output_page_text(page)
+
+    issues = []
+    if html_check_dropped_text(blocks, output_text):
+        issues.append("dropped_text")
+    if html_check_table_corruption(blocks, output_elements):
+        issues.append("table_corruption")
+    missing_image, bad_caption = html_check_images(soup, html_dir, output_elements)
+    if missing_image:
+        issues.append("missing_image")
+    if bad_caption:
+        issues.append("bad_caption")
+    if html_check_wrong_heading_level(blocks, output_elements):
+        issues.append("wrong_heading_level")
+
+    return score_from_issues(issues), issues
+
+
+def grade_html(doc: str, html_path: Path, doc_data: dict) -> None:
+    soup = html_pages.parse(html_path)
+    blocks = list(html_pages.iter_block_items(soup))
+    page = doc_data["pages"].get(1, {"elements": []})
+    score, issues = grade_html_page(blocks, page, soup, html_path.parent)
+    write_grade_shard(doc, 1, score, issues)
+
+
 # --- entry point --------------------------------------------------------
 
 def main() -> None:
@@ -244,6 +330,8 @@ def main() -> None:
         grade_docx(args.doc, input_path, doc_data)
     elif input_format == "xlsx":
         grade_xlsx(args.doc, input_path, doc_data)
+    elif input_format == "html":
+        grade_html(args.doc, input_path, doc_data)
     else:
         print(f"error: text_mode_grade.py has no grading path for format {input_format!r}", file=sys.stderr)
         sys.exit(1)

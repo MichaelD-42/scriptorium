@@ -15,5 +15,5 @@ subagents in parallel over page batches — cheap deterministic extraction
 first, with local OCR and Claude vision escalated to only where needed, and
 an independent grader deciding pass/retry/escalate. Extraction is
 format-agnostic at the agent level; only the *skills* are format-specific.
-PDF, PowerPoint (`.pptx`), Word (`.docx`), and Excel (`.xlsx`) are
-implemented today.
+PDF, PowerPoint (`.pptx`), Word (`.docx`), Excel (`.xlsx`), and HTML
+(`.html`) are implemented today.

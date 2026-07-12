@@ -2,7 +2,7 @@
 directory (the orchestrator always runs skill scripts from the project root,
 i.e. ${CLAUDE_PROJECT_DIR}).
 
-    input/<doc>.{pdf,pptx,xlsx,docx}                    one supported input extension
+    input/<doc>.{pdf,pptx,xlsx,docx,html}               one supported input extension
     work/<doc>/pages/page{N}.png
     work/<doc>/shards/page{N}.{text|ocr|vision}.json   one body shard per page (highest tier wins)
     work/<doc>/shards/page{N}.image.json               independent of body tier
@@ -18,7 +18,7 @@ i.e. ${CLAUDE_PROJECT_DIR}).
 
 from pathlib import Path
 
-SUPPORTED_INPUT_EXTS = ("pdf", "pptx", "xlsx", "docx")
+SUPPORTED_INPUT_EXTS = ("pdf", "pptx", "xlsx", "docx", "html")
 
 
 def input_pdf(doc: str, root: Path = Path(".")) -> Path:
@@ -54,7 +54,8 @@ def true_page_count(doc: str, input_format: str, root: Path = Path(".")) -> int:
     plugin's own Heading-1 split, decided once by docx-triage. For docx,
     page_count_match therefore checks "did extraction cover every section
     triage declared", not an independent source-file property — see
-    lib/docx_pages.py."""
+    lib/docx_pages.py. html has no page concept at all — the whole file is
+    always one page, a fixed rule rather than something triage decides."""
     if input_format == "pdf":
         import fitz  # PyMuPDF
 
@@ -74,6 +75,8 @@ def true_page_count(doc: str, input_format: str, root: Path = Path(".")) -> int:
         if not triage_path.exists():
             raise FileNotFoundError(f"{triage_path} not found — run docx-triage first")
         return json.loads(triage_path.read_text())["page_count"]
+    if input_format == "html":
+        return 1
     raise NotImplementedError(f"true_page_count: unsupported input format {input_format!r}")
 
 
