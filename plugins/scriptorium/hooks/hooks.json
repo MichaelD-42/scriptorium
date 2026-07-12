@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv sync --project \"${CLAUDE_PLUGIN_ROOT}\" --quiet"
+          }
+        ]
+      }
+    ]
+  }
+}

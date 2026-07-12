@@ -1,0 +1,13 @@
+{
+  "name": "scriptorium",
+  "owner": {
+    "name": "Michael Dold"
+  },
+  "plugins": [
+    {
+      "name": "scriptorium",
+      "source": "./plugins/scriptorium",
+      "description": "Elastic-loop document extraction team: tiered text/OCR/image extraction, independent quality grading, and a queue orchestrator. PDF today; more formats arrive as skills."
+    }
+  ]
+}

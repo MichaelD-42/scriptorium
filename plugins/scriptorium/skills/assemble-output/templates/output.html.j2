@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ doc }}</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; line-height: 1.5; color: #1a1a1a; }
+  table { border-collapse: collapse; margin: 1rem 0; }
+  th, td { border: 1px solid #ccc; padding: 0.4rem 0.6rem; text-align: left; }
+  img { max-width: 100%; }
+  h1, h2, h3 { margin-top: 1.5rem; }
+</style>
+</head>
+<body>
+{% for page in pages %}
+{% for el in page.elements %}
+{% if el.type == "heading" %}
+<h{{ el.level }}>{{ el.text }}</h{{ el.level }}>
+{% elif el.type == "paragraph" %}
+<p>{{ el.text }}</p>
+{% elif el.type == "table" %}
+<table>
+{% for row in el.rows %}
+  <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
+{% endfor %}
+</table>
+{% elif el.type == "image" %}
+<figure>
+  <img src="{{ el.asset }}" alt="{{ el.caption }}">
+  {% if el.caption %}<figcaption>{{ el.caption }}</figcaption>{% endif %}
+</figure>
+{% endif %}
+{% endfor %}
+{% endfor %}
+</body>
+</html>

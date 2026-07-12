@@ -1,0 +1,20 @@
+{
+  "name": "scriptorium",
+  "displayName": "Scriptorium",
+  "version": "0.2.0",
+  "description": "Elastic-loop document extraction team: tiered text/OCR/image extraction agents run in parallel page batches, an independent quality grader, and a queue orchestrator. PDF today (Markdown, HTML, or an OKF multi-file bundle); more formats arrive as sibling skills.",
+  "author": {
+    "name": "Michael Dold"
+  },
+  "license": "MIT",
+  "keywords": ["pdf", "ocr", "extraction", "elastic-loop", "agents", "okf"],
+  "userConfig": {
+    "ocr_languages": {
+      "type": "string",
+      "title": "Extra OCR languages",
+      "description": "Comma-separated tesseract language codes (e.g. \"deu,fra\") to always ensure are installed. OSD script detection alone can't tell German from English — both are Latin script — so list any non-English languages your documents use here.",
+      "required": false,
+      "multiple": true
+    }
+  }
+}
