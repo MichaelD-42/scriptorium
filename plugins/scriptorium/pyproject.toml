@@ -17,5 +17,16 @@ dependencies = [
     "beautifulsoup4>=4.12",
 ]
 
+[dependency-groups]
+dev = ["pytest>=8", "pytest-cov>=5"]
+
 [tool.uv]
 package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "requires_tesseract: needs the tesseract binary",
+    "requires_libreoffice: needs LibreOffice (soffice) -- skipped in default CI",
+]
+addopts = "--cov=lib --cov=skills --cov-report=term-missing"

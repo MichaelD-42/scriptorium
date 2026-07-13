@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # Covers the ocr-page skill's tesseract path. LibreOffice (needed only
+      # for render-pages' pptx->PDF conversion) is intentionally not
+      # installed here -- tests behind that path are marked
+      # `requires_libreoffice` and skip automatically without it.
+      - name: Install tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+
+      - name: Install dependencies
+        run: uv sync --project plugins/scriptorium
+
+      - name: Run tests
+        run: uv run --project plugins/scriptorium --directory plugins/scriptorium pytest
