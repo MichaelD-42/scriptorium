@@ -1,36 +1,125 @@
-# scriptorium
+# Scriptorium
 
-A Claude Code plugin that runs a small team of agents to extract text,
-tables, and images from documents — extraction and grading run as
-**parallel subagents over page batches**, each with an isolated context
-window, with an independent quality grader and an orchestrator loop — built
-around **Elastic Loop Engineering**:
+[![CI](https://github.com/MichaelD-42/scriptorium/actions/workflows/ci.yml/badge.svg)](https://github.com/MichaelD-42/scriptorium/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python 3.11 | 3.12](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](plugins/scriptorium/pyproject.toml)
 
-> Intent opens the loop. Context grounds it. Backpressure keeps it useful.
-> Verification closes it.
+A Claude Code plugin that turns your documents into clean, structured text —
+tables, pictures and all — that you can actually read, search, or hand to
+another tool. Feed it a PDF, a Word doc, a PowerPoint deck, an Excel sheet, an
+HTML page, or even a plain scanned image; it reads the thing so you don't have
+to squint at it.
 
-Concretely: a document is triaged page-by-page, cheap deterministic
-extraction runs first, expensive tiers (local OCR, then Claude vision) only
-run on pages that actually need them, and an independent grader — never the
-agent that did the extracting — decides whether to accept the result or
-escalate specific pages one tier and retry. Claude Code subagents can't
-spawn their own subagents, so the orchestrator is the only spawner: it fans
-out `extractor`/`grader` subagents in parallel, one per page batch, and
-never pulls their bulk output (page images, element lists) into its own
-context — only compact summaries come back.
+Under the hood it's a small team of AI agents checking each other's work
+(more on that later, for the curious). From where you're standing, it's just:
+drop a file in, get a tidy document out.
 
-Scriptorium is **one plugin**: the `extractor`/`grader` agents and the
-orchestrator loop are format-agnostic — only the *skills* they call
-(`pdf-triage`, `extract-text`, `ocr-page`, ...) are format-specific. PDF,
-PowerPoint (`.pptx`), Word (`.docx`), Excel (`.xlsx`), HTML (`.html`), and
-standalone images (`.png`/`.jpg`/`.jpeg`/`.webp`/`.tiff`) are supported
-today; new formats arrive as sibling skills the same agents call, not new
-plugins.
+## What goes in, what comes out
 
-See [`docs/architecture.md`](docs/architecture.md) for the elastic loop and
-[`docs/tooling.md`](docs/tooling.md) for the skills/scripts reference.
+| You give it | It gives you back |
+|---|---|
+| PDF, Word (`.docx`), PowerPoint (`.pptx`), Excel (`.xlsx`), HTML, or an image (`.png`/`.jpg`/`.jpeg`/`.webp`/`.tiff`) | Markdown, HTML, an OKF bundle, or ReqIF — your pick |
 
-## Install
+Not sure which output to pick? A quick cheat sheet:
+
+- **Markdown** (default) — the safe, everyday choice. Readable anywhere, easy
+  to skim, easy to paste into other tools.
+- **HTML** — same content, browser-ready, diagrams render inline.
+- **OKF bundle** — the document split into small linked files instead of one
+  big one. Handy if the doc is huge or you're feeding it into a search/RAG
+  pipeline later.
+- **ReqIF** (`.reqif`/`.reqifz`) — the standard requirements-interchange
+  format. Only reach for this if you're feeding a requirements-management tool
+  (DOORS, Polarion, etc.) — otherwise it's more format than you need.
+
+## How to use it
+
+You don't need to memorize commands. Just talk to Claude:
+
+1. Drop your file(s) into the project's `input/` folder.
+2. Tell Claude something like *"extract the text from spec.pdf"* — it'll run
+   the extraction pipeline for you.
+3. Open `output/<your-file>/` and there's your result.
+
+Nothing to install by hand — the plugin sets up its own environment (Python,
+OCR engine, the works) the first time it runs. If you'd rather drive it
+yourself instead of asking Claude, the direct command is
+`/scriptorium:extract` (see [Command reference](#command-reference) below for
+the flags) — but for day-to-day use, just asking Claude is the easier path.
+
+## Reading your results
+
+Once a document finishes, `output/<your-file>/` contains:
+
+- **`<your-file>.md`** (or `.html` / `.reqif`, depending on the format you
+  picked) — your actual document, extracted and cleaned up.
+- **`assets/`** — every picture and diagram it pulled out, referenced from
+  the document above.
+- **`grade-report.json`** — the pipeline's own quality check. You don't need
+  to read this unless something looks off; it's there so you can trust a
+  passing result without re-checking it by hand.
+
+Run the extraction again later and already-finished documents are simply
+skipped — only new or retrying ones get processed.
+
+## "It said `needs-human` — now what?"
+
+Every document is checked by an independent reviewer step before it's handed
+back to you — it's not just trusting the first attempt. Most documents pass
+on the first or second try. Occasionally one doesn't: the pipeline tried its
+best techniques (including having Claude read the page directly, like a
+person would) and still wasn't confident enough to call it done.
+
+That's what `needs-human` means: not "broken," just "this one's worth a
+five-minute look before you trust it." Go to `output/<your-file>/`, check
+`grade-report.json` for which pages it flagged and why, and take a look at
+those pages yourself. Common culprits: a very messy scan, handwriting, or a
+page that's mostly a complex diagram.
+
+## Quick troubleshooting
+
+- **Nothing happened when I asked Claude** — check your file actually landed
+  in `input/` and has a supported extension (see the table above).
+- **It's taking a while on a scanned document** — that's expected. Scanned
+  pages and photos need OCR (and sometimes Claude reading the image directly),
+  which is slower than a document with real, selectable text.
+- **A picture or diagram looks wrong in the output** — flag it; the grading
+  step usually catches this and retries automatically, but it's not
+  infallible.
+- **First run seems slow** — that's one-time environment setup (installing
+  the OCR engine, etc.). Later runs skip straight to extraction.
+
+## Command reference
+
+If you're driving it directly instead of asking Claude in plain English:
+
+```
+/scriptorium:extract [--doc <name>] [--format md|html|okf|reqif|reqifz] [--zip]
+```
+
+- `--doc <name>` — process just one file from `input/` instead of everything
+  waiting there.
+- `--format` — pick the output format from the table above (default: `md`).
+- `--zip` — also package the result folder into a single `.zip`.
+
+## How it works (for the curious)
+
+Under the friendly exterior, Scriptorium is a small team of AI agents rather
+than one big model doing everything at once. A document gets triaged
+page-by-page, cheap and reliable extraction runs first, and the expensive
+stuff (OCR, then Claude actually looking at the page) only kicks in where
+it's genuinely needed. An independent grader — never the agent that did the
+extracting, because grading your own homework is a bit of a conflict of
+interest — decides whether the result is good enough or needs another pass.
+
+If you want the full architectural tour — the agent tree, the escalation
+ladder, why pages are processed in isolated batches — see
+[`docs/architecture.md`](docs/architecture.md) for the design and
+[`docs/tooling.md`](docs/tooling.md) for the skills/scripts/schemas that
+implement it. If you're a developer looking to modify this repo, see
+[`AGENTS.md`](AGENTS.md).
+
+## Installing this plugin
 
 In a Claude Code session:
 
@@ -39,133 +128,5 @@ In a Claude Code session:
 /plugin install scriptorium@scriptorium
 ```
 
-Then run the pipeline over whatever's in your project's `input/` directory:
-
-```
-/scriptorium:extract [--doc <name>] [--format md|html|okf|reqif|reqifz] [--batch-size 8] [--max-attempts 3] [--zip]
-```
-
-No manual setup needed — the plugin bootstraps its own environment on first
-run (`uv`, the Python env, and the `tesseract` binary + OCR language packs)
-on Linux, macOS, and Windows. See [Setup details](#setup-details) below if
-that bootstrap can't run non-interactively in your environment.
-
-**Paths are relative to your project, not the plugin.** `lib/paths.py`
-resolves `input/`, `work/<doc>/`, `output/<doc>/`, and `runs/state.json`
-against the current working directory (`${CLAUDE_PROJECT_DIR}`) — i.e.
-*your* project directory, not wherever the plugin was installed. Drop PDFs
-in `<your-project>/input/` and find results in `<your-project>/output/<doc>/`.
-
 Pull future updates with `/plugin marketplace update scriptorium`.
 
-## Setup details
-
-Requires [`uv`](https://docs.astral.sh/uv/) and, for local OCR, the
-Tesseract binary — but you shouldn't need to install either by hand: the
-pipeline bootstraps its own environment on first run (`skills/setup-environment`),
-installing `uv` via its official installer if missing, then `tesseract` and
-whatever OCR language pack a document actually needs via your system's
-package manager. Manual install is a fallback for when that can't run
-non-interactively (no cached `sudo`/admin rights, unrecognized package
-manager):
-
-```bash
-# macOS
-brew install tesseract
-# Debian/Ubuntu
-sudo apt install tesseract-ocr
-# Arch
-sudo pacman -S tesseract tesseract-data-eng
-```
-
-```powershell
-# Windows
-scoop install tesseract
-# or: winget install --id UB-Mannheim.TesseractOCR -e   /   choco install tesseract
-```
-
-## From source (local dev)
-
-Clone the repo, then either add it as a local marketplace or point Claude
-Code straight at the plugin directory:
-
-```bash
-git clone https://github.com/MichaelD-42/scriptorium.git
-cd scriptorium
-```
-
-```
-/plugin marketplace add .
-/plugin install scriptorium@scriptorium
-```
-
-or, without installing:
-
-```bash
-claude --plugin-dir plugins/scriptorium
-```
-
-Install the Python dependencies (PyMuPDF, pdfplumber, pytesseract, Pillow,
-Jinja2, ReportLab, PyYAML):
-
-```bash
-cd plugins/scriptorium
-uv sync
-```
-
-This also happens automatically via a `SessionStart` hook whenever you load
-the plugin in a Claude Code session, and again as step 0 of
-`/scriptorium:extract` itself.
-
-### Try it
-
-Generate the synthetic test PDF (exercises every extraction tier: native
-text, a table, an embedded bitmap, a vector diagram, and one image-only
-"scanned" page with no text layer):
-
-```bash
-uv run --project plugins/scriptorium python examples/generate_sample.py
-```
-
-This writes `input/sample.pdf`, plus `examples/golden.md` (the intended
-correct output) and `examples/counterexample.md` (deliberately broken, for
-testing that the grader actually rejects bad output).
-
-Then, inside a session with the plugin loaded:
-
-```
-/scriptorium:extract [--doc <name>] [--format md|html|okf|reqif|reqifz] [--batch-size 8] [--max-attempts 3] [--zip]
-```
-
-This processes every PDF in `input/`, writing results to `output/<doc>/`
-— a single `<doc>.md`/`<doc>.html`/`<doc>.reqif`, or (with `--format okf`)
-a multi-file `index.md` + `NN-slug.md` bundle — plus `assets/` and
-`grade-report.json`, tracking queue state in `runs/state.json`. Add `--zip`
-to also package each passed document's `output/<doc>/` into a single
-`output/<doc>.zip`. Run it again — an empty queue means every document is
-already `passed` or `needs-human`.
-
-## Repository layout
-
-```
-.claude-plugin/marketplace.json   marketplace listing this plugin
-plugins/scriptorium/              the plugin: agents, skills, commands
-examples/generate_sample.py       synthetic test PDF + golden/counterexample generator
-input/                            drop PDFs here to queue them
-work/<doc>/shards/                per-page extraction shards
-work/<doc>/elements.json          merged shards (merge.py's output)
-output/<doc>/                     final results (+ grade-shards/)
-runs/state.json                   per-document queue state (see state.example.json)
-```
-
-## Status
-
-PDF, pptx, docx, xlsx, HTML, and standalone images in, Markdown / HTML /
-OKF bundle / OMG ReqIF (`.reqif`/`.reqifz`) out. Extraction and grading run
-as parallel subagents over page batches with
-isolated context windows. Diagrams the extractor can faithfully
-reconstruct — PDF vector regions, pptx pictures/SmartArt, a whole image
-document that is itself a diagram — additionally get a mermaid
-representation alongside the captioned image. A local RAG pipeline over the
-OKF output is deferred — the plugin's skill-based structure leaves room to
-add it as a sibling skill later, without new agents or a new plugin.
