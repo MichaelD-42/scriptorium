@@ -1,6 +1,6 @@
 ---
 name: extract-images
-description: Extract embedded bitmap images and detect vector-graphic regions (diagrams, charts drawn with PDF drawing operators) on given pages, saving them as PNG assets.
+description: Extract embedded bitmap images and detect vector-graphic regions (diagrams, charts drawn with PDF drawing operators) on given pages, saving them as PNG assets. For a standalone image document, lands the whole file as its one page's bitmap asset instead.
 ---
 
 # Extract Images
@@ -15,12 +15,21 @@ Handles both image kinds a PDF can contain:
   and little text is treated as a diagram and captured by rendering that
   page to PNG (reusing `render-pages`' output if present).
 
+For a standalone **image** document (`input_format` `image`), there's
+nothing to detect — the whole input file *is* the diagram/photo. This skill
+normalizes it to PNG and lands it as page 1's single bitmap element
+(`assets/page1_bitmap1.png`), skipping the bitmap-XObject/vector-region
+logic above entirely. Captioning and mermaid work exactly the same
+afterward, via the calling agent.
+
 ## How
 
 ```bash
 uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
   "${CLAUDE_PLUGIN_ROOT}/skills/extract-images/scripts/extract_images.py" --doc <doc-name> --pages 2,4
 ```
+
+For an image document, `--pages` is always `1` — there's only ever page 1.
 
 ## Output
 
@@ -39,3 +48,17 @@ uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
     "${CLAUDE_PLUGIN_ROOT}/skills/extract-images/scripts/caption_image.py" \
     --doc <doc-name> --page 2 --asset assets/page2_bitmap1.png --caption "..."
   ```
+
+- For a diagram/flowchart the agent can faithfully reconstruct, it can
+  additionally set a `mermaid` field on the same `image` element — optional,
+  in addition to the caption, never a replacement for the saved PNG:
+
+  ```bash
+  echo 'flowchart TD
+    A --> B' | uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
+    "${CLAUDE_PLUGIN_ROOT}/skills/extract-images/scripts/mermaid_image.py" \
+    --doc <doc-name> --page 2 --asset assets/page2_vector1.png
+  ```
+
+  Mermaid source is read from stdin (it's multi-line); the script rejects
+  input that doesn't start with a recognized mermaid diagram keyword.

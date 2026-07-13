@@ -1,6 +1,6 @@
 ---
 name: render-pages
-description: Render pages to PNG images. Required before OCR, vision-based extraction, or grading, since those all need to look at pixels, not just the text layer. PDF pages rasterize directly; pptx slides are converted to PDF via LibreOffice first, then rasterized the same way.
+description: Render pages to PNG images. Required before OCR, vision-based extraction, or grading, since those all need to look at pixels, not just the text layer. PDF pages rasterize directly; pptx slides are converted to PDF via LibreOffice first, then rasterized the same way; a standalone image document is normalized straight to PNG.
 ---
 
 # Render Pages
@@ -20,6 +20,12 @@ if already newer than the source `.pptx`), then rasterizes that PDF with
 the same PyMuPDF code path as a native PDF — 1 slide = 1 PDF page = 1 PNG.
 Requires the `soffice` binary (bootstrapped by `setup-environment` when a
 pptx is queued).
+
+For a standalone **image** document (png/jpg/jpeg/webp/tiff), there's no
+rasterization to do at all — the input *is* the page. This skill just
+normalizes it to `work/<doc>/pages/page1.png` (RGB PNG, native resolution,
+no dpi/zoom step) so every downstream consumer (OCR, vision, grading) sees
+the same PNG shape it sees for every other format.
 
 ## How
 

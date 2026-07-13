@@ -10,6 +10,10 @@
   img { max-width: 100%; }
   h1, h2, h3 { margin-top: 1.5rem; }
 </style>
+{% if has_mermaid %}
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true });</script>
+{% endif %}
 </head>
 <body>
 {% for page in pages %}
@@ -26,6 +30,7 @@
 </table>
 {% elif el.type == "image" %}
 <figure>
+  {% if el.mermaid %}<pre class="mermaid">{{ el.mermaid }}</pre>{% endif %}
   <img src="{{ el.asset }}" alt="{{ el.caption }}">
   {% if el.caption %}<figcaption>{{ el.caption }}</figcaption>{% endif %}
 </figure>

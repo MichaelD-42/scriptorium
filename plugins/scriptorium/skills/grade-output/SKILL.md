@@ -15,7 +15,7 @@ Three steps:
 1. **Gates** (`gates.py`) — deterministic, structural, hard backpressure.
    Runs **once per document** (not per page batch). If gates fail, the
    rubric doesn't matter — fix the structural problem and re-run gates.
-2. **Rubric** — for formats with a rendered page (`pdf`, `pptx`), qualitative
+2. **Rubric** — for formats with a rendered page (`pdf`, `pptx`, `image`), qualitative
    product backpressure applied by one or more `grader` subagents (`rubric.md`),
    each covering a page batch **in parallel**, looking at each rendered PNG
    and judging the assembled output against it — not a script. Each batch
@@ -35,14 +35,15 @@ Three steps:
 ```bash
 # once per document, before dispatching graders
 uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
-  "${CLAUDE_PLUGIN_ROOT}/skills/grade-output/scripts/gates.py" --doc <doc-name> [--format md|html|okf]
+  "${CLAUDE_PLUGIN_ROOT}/skills/grade-output/scripts/gates.py" --doc <doc-name> [--format md|html|okf|reqif|reqifz]
 
 # inside each grader subagent, per page it graded — see rubric.md
 uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
   "${CLAUDE_PLUGIN_ROOT}/skills/grade-output/scripts/write_grade_shard.py" \
   --doc <doc-name> --page <n> --score 0.93 --issues dropped_text
 
-# OR, for a no-rendered-page format (docx/xlsx/html): one script call
+# OR, for a no-rendered-page format (docx/xlsx/html) — note this does NOT
+# apply to image, which is a rendered-page format like pdf/pptx: one script call
 # replaces every grader subagent for this document — see text-rubric.md
 uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
   "${CLAUDE_PLUGIN_ROOT}/skills/grade-output/scripts/text_mode_grade.py" --doc <doc-name>

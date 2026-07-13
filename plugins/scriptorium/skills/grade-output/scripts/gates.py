@@ -8,7 +8,9 @@ belongs in rubric.md instead, applied by the calling agent.
 import argparse
 import json
 import sys
+import zipfile
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 import elements as elements_lib  # noqa: E402
@@ -72,6 +74,30 @@ def check_output_file_exists(doc: str, fmt: str) -> dict:
             return {"name": "output_file_exists", "passed": True, "detail": f"{index} + {len(sections)} section file(s)"}
         return {"name": "output_file_exists", "passed": False, "detail": "okf bundle incomplete: missing index.md or section files"}
 
+    if fmt == "reqif":
+        candidate = paths.output_file(doc, "reqif")
+        if not candidate.exists() or candidate.stat().st_size < MIN_OUTPUT_BYTES:
+            return {"name": "output_file_exists", "passed": False, "detail": "no assembled reqif output found"}
+        try:
+            root_tag = ET.parse(candidate).getroot().tag
+        except ET.ParseError as e:
+            return {"name": "output_file_exists", "passed": False, "detail": f"{candidate} is not well-formed XML: {e}"}
+        if not root_tag.endswith("REQ-IF"):
+            return {"name": "output_file_exists", "passed": False, "detail": f"{candidate} root element is {root_tag!r}, expected REQ-IF"}
+        return {"name": "output_file_exists", "passed": True, "detail": f"{candidate} exists and is well-formed ReqIF XML"}
+
+    if fmt == "reqifz":
+        candidate = paths.output_file(doc, "reqifz")
+        if not candidate.exists() or candidate.stat().st_size < MIN_OUTPUT_BYTES:
+            return {"name": "output_file_exists", "passed": False, "detail": "no assembled reqifz output found"}
+        if not zipfile.is_zipfile(candidate):
+            return {"name": "output_file_exists", "passed": False, "detail": f"{candidate} is not a valid zip archive"}
+        expected = f"{doc}.reqif"
+        with zipfile.ZipFile(candidate) as zf:
+            if expected not in zf.namelist():
+                return {"name": "output_file_exists", "passed": False, "detail": f"{candidate} missing {expected}"}
+        return {"name": "output_file_exists", "passed": True, "detail": f"{candidate} exists and contains {expected}"}
+
     candidate = paths.output_file(doc, fmt)
     if candidate.exists() and candidate.stat().st_size >= MIN_OUTPUT_BYTES:
         return {"name": "output_file_exists", "passed": True, "detail": f"{candidate} exists ({candidate.stat().st_size} bytes)"}
@@ -81,7 +107,7 @@ def check_output_file_exists(doc: str, fmt: str) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--doc", required=True)
-    parser.add_argument("--format", choices=["md", "html", "okf"], default="md")
+    parser.add_argument("--format", choices=["md", "html", "okf", "reqif", "reqifz"], default="md")
     args = parser.parse_args()
 
     input_path = paths.input_file(args.doc)

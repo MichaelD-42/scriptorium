@@ -2,23 +2,26 @@
 directory (the orchestrator always runs skill scripts from the project root,
 i.e. ${CLAUDE_PROJECT_DIR}).
 
-    input/<doc>.{pdf,pptx,xlsx,docx,html}               one supported input extension
+    input/<doc>.{pdf,pptx,xlsx,docx,html,png,jpg,jpeg,webp,tiff}  one supported input extension
     work/<doc>/pages/page{N}.png
     work/<doc>/shards/page{N}.{text|ocr|vision}.json   one body shard per page (highest tier wins)
     work/<doc>/shards/page{N}.image.json               independent of body tier
     work/<doc>/elements.json                           merge.py's output — the merged shards
     work/<doc>/triage.json
     work/<doc>/gates-report.json
-    output/<doc>/<doc>.{md,html}                       single-file formats
+    output/<doc>/<doc>.{md,html,reqif,reqifz}          single-file formats (reqifz is also a zip archive)
     output/<doc>/{index.md,NN-slug.md}                 okf format (multi-file bundle)
     output/<doc>/assets/*.png
     output/<doc>/grade-shards/page{N}.json              one per grader batch page
     output/<doc>/grade-report.json                      merge_grades.py's output
+    output/<doc>.zip                                    zip_output.py's output (sibling to output/<doc>/, not inside it)
 """
 
 from pathlib import Path
 
-SUPPORTED_INPUT_EXTS = ("pdf", "pptx", "xlsx", "docx", "html")
+IMAGE_EXTS = ("png", "jpg", "jpeg", "webp", "tiff")
+
+SUPPORTED_INPUT_EXTS = ("pdf", "pptx", "xlsx", "docx", "html") + IMAGE_EXTS
 
 
 def input_pdf(doc: str, root: Path = Path(".")) -> Path:
@@ -36,10 +39,15 @@ def input_file(doc: str, root: Path = Path(".")) -> Path | None:
 
 
 def detect_input_format(doc: str, root: Path = Path(".")) -> str | None:
-    """The input file's extension (e.g. "pdf", "pptx"), or None if the
-    document has no input file under any supported extension."""
+    """The input file's format (e.g. "pdf", "pptx", "image"), or None if the
+    document has no input file under any supported extension. Every
+    extension in IMAGE_EXTS normalizes to "image" — downstream code branches
+    on one format, not five extensions."""
     path = input_file(doc, root)
-    return path.suffix.lstrip(".") if path else None
+    if not path:
+        return None
+    ext = path.suffix.lstrip(".").lower()
+    return "image" if ext in IMAGE_EXTS else ext
 
 
 def true_page_count(doc: str, input_format: str, root: Path = Path(".")) -> int:
@@ -55,7 +63,8 @@ def true_page_count(doc: str, input_format: str, root: Path = Path(".")) -> int:
     page_count_match therefore checks "did extraction cover every section
     triage declared", not an independent source-file property — see
     lib/docx_pages.py. html has no page concept at all — the whole file is
-    always one page, a fixed rule rather than something triage decides."""
+    always one page, a fixed rule rather than something triage decides.
+    image is the same fixed rule as html: one image file is one page."""
     if input_format == "pdf":
         import fitz  # PyMuPDF
 
@@ -76,6 +85,8 @@ def true_page_count(doc: str, input_format: str, root: Path = Path(".")) -> int:
             raise FileNotFoundError(f"{triage_path} not found — run docx-triage first")
         return json.loads(triage_path.read_text())["page_count"]
     if input_format == "html":
+        return 1
+    if input_format == "image":
         return 1
     raise NotImplementedError(f"true_page_count: unsupported input format {input_format!r}")
 
@@ -119,8 +130,12 @@ def output_dir(doc: str, root: Path = Path(".")) -> Path:
     return root / "output" / doc
 
 
+def output_zip(doc: str, root: Path = Path(".")) -> Path:
+    return root / "output" / f"{doc}.zip"
+
+
 def output_file(doc: str, fmt: str, root: Path = Path(".")) -> Path:
-    ext = "html" if fmt == "html" else "md"
+    ext = {"html": "html", "reqif": "reqif", "reqifz": "reqifz"}.get(fmt, "md")
     return output_dir(doc, root) / f"{doc}.{ext}"
 
 

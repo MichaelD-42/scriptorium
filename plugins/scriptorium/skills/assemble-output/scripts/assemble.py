@@ -12,6 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 import elements as elements_lib  # noqa: E402
 import paths  # noqa: E402
 
+import reqif_builder  # noqa: E402
+
 import yaml
 from jinja2 import Environment, FileSystemLoader
 
@@ -43,6 +45,9 @@ def elements_to_markdown(elements: list[dict]) -> str:
         elif el["type"] == "table":
             lines.append(render_markdown_table(el["rows"]))
         elif el["type"] == "image":
+            if el.get("mermaid"):
+                lines.append(f"```mermaid\n{el['mermaid']}\n```")
+                lines.append("")
             caption = el.get("caption") or ""
             lines.append(f"![{caption}]({el['asset']})")
         lines.append("")
@@ -59,9 +64,15 @@ def to_markdown(doc_data: dict) -> str:
 
 
 def to_html(doc_data: dict) -> str:
+    pages = sorted_pages(doc_data)
+    has_mermaid = any(
+        el["type"] == "image" and el.get("mermaid")
+        for page in pages
+        for el in page["elements"]
+    )
     env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)), autoescape=True)
     template = env.get_template("output.html.j2")
-    return template.render(doc=doc_data["doc"], pages=sorted_pages(doc_data))
+    return template.render(doc=doc_data["doc"], pages=pages, has_mermaid=has_mermaid)
 
 
 # --- OKF (https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) ---
@@ -167,7 +178,7 @@ def write_okf(doc_data: dict, doc: str) -> list[Path]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--doc", required=True)
-    parser.add_argument("--format", choices=["md", "html", "okf"], default="md")
+    parser.add_argument("--format", choices=["md", "html", "okf", "reqif", "reqifz"], default="md")
     args = parser.parse_args()
 
     elements_path = paths.elements_json(args.doc)
@@ -180,6 +191,16 @@ def main() -> None:
     if args.format == "okf":
         for path in write_okf(doc_data, args.doc):
             print(path)
+        return
+
+    if args.format in ("reqif", "reqifz"):
+        reqif_xml = reqif_builder.build_reqif_xml(args.doc, doc_data)
+        reqif_path = paths.output_file(args.doc, "reqif")
+        reqif_path.parent.mkdir(parents=True, exist_ok=True)
+        reqif_path.write_text(reqif_xml)
+        print(str(reqif_path))
+        if args.format == "reqifz":
+            print(str(reqif_builder.write_reqifz(args.doc, doc_data, reqif_xml)))
         return
 
     content = to_markdown(doc_data) if args.format == "md" else to_html(doc_data)

@@ -7,7 +7,7 @@
     {
       "name": "scriptorium",
       "source": "./plugins/scriptorium",
-      "description": "Elastic-loop document extraction team: tiered text/OCR/image extraction, independent quality grading, and a queue orchestrator. PDF today; more formats arrive as skills."
+      "description": "Elastic-loop document extraction team: tiered text/OCR/image extraction, independent quality grading, and a queue orchestrator. PDF, pptx, docx, xlsx, HTML, and standalone images in (Markdown, HTML, OKF, or ReqIF out); more formats arrive as skills."
     }
   ]
 }

@@ -22,9 +22,10 @@ context — only compact summaries come back.
 Scriptorium is **one plugin**: the `extractor`/`grader` agents and the
 orchestrator loop are format-agnostic — only the *skills* they call
 (`pdf-triage`, `extract-text`, `ocr-page`, ...) are format-specific. PDF,
-PowerPoint (`.pptx`), Word (`.docx`), Excel (`.xlsx`), and HTML (`.html`)
-are supported today; new formats arrive as sibling skills the same agents
-call, not new plugins.
+PowerPoint (`.pptx`), Word (`.docx`), Excel (`.xlsx`), HTML (`.html`), and
+standalone images (`.png`/`.jpg`/`.jpeg`/`.webp`/`.tiff`) are supported
+today; new formats arrive as sibling skills the same agents call, not new
+plugins.
 
 See [`docs/architecture.md`](docs/architecture.md) for the elastic loop and
 [`docs/tooling.md`](docs/tooling.md) for the skills/scripts reference.
@@ -41,7 +42,7 @@ In a Claude Code session:
 Then run the pipeline over whatever's in your project's `input/` directory:
 
 ```
-/scriptorium:extract [--doc <name>] [--format md|html|okf] [--batch-size 8] [--max-attempts 3]
+/scriptorium:extract [--doc <name>] [--format md|html|okf|reqif|reqifz] [--batch-size 8] [--max-attempts 3] [--zip]
 ```
 
 No manual setup needed — the plugin bootstraps its own environment on first
@@ -133,14 +134,16 @@ testing that the grader actually rejects bad output).
 Then, inside a session with the plugin loaded:
 
 ```
-/scriptorium:extract [--doc <name>] [--format md|html|okf] [--batch-size 8] [--max-attempts 3]
+/scriptorium:extract [--doc <name>] [--format md|html|okf|reqif|reqifz] [--batch-size 8] [--max-attempts 3] [--zip]
 ```
 
 This processes every PDF in `input/`, writing results to `output/<doc>/`
-— a single `<doc>.md`/`<doc>.html`, or (with `--format okf`) a multi-file
-`index.md` + `NN-slug.md` bundle — plus `assets/` and `grade-report.json`,
-tracking queue state in `runs/state.json`. Run it again — an empty queue
-means every document is already `passed` or `needs-human`.
+— a single `<doc>.md`/`<doc>.html`/`<doc>.reqif`, or (with `--format okf`)
+a multi-file `index.md` + `NN-slug.md` bundle — plus `assets/` and
+`grade-report.json`, tracking queue state in `runs/state.json`. Add `--zip`
+to also package each passed document's `output/<doc>/` into a single
+`output/<doc>.zip`. Run it again — an empty queue means every document is
+already `passed` or `needs-human`.
 
 ## Repository layout
 
@@ -157,9 +160,12 @@ runs/state.json                   per-document queue state (see state.example.js
 
 ## Status
 
-PDF, pptx, docx, xlsx, and HTML in, Markdown / HTML / OKF bundle out.
-Extraction and grading run as parallel subagents over page batches with
-isolated context windows. Other input formats (images) and a local RAG
-pipeline over the OKF output are deferred — the plugin's skill-based
-structure leaves room to add them as sibling skills later, without new
-agents or a new plugin.
+PDF, pptx, docx, xlsx, HTML, and standalone images in, Markdown / HTML /
+OKF bundle / OMG ReqIF (`.reqif`/`.reqifz`) out. Extraction and grading run
+as parallel subagents over page batches with
+isolated context windows. Diagrams the extractor can faithfully
+reconstruct — PDF vector regions, pptx pictures/SmartArt, a whole image
+document that is itself a diagram — additionally get a mermaid
+representation alongside the captioned image. A local RAG pipeline over the
+OKF output is deferred — the plugin's skill-based structure leaves room to
+add it as a sibling skill later, without new agents or a new plugin.

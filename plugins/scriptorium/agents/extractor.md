@@ -24,7 +24,7 @@ raw script output) out of the orchestrator's context entirely.
 
 ## What you're given
 
-A document name, its `input_format` (`pdf`, `pptx`, `docx`, `xlsx`, `html`), a list of page
+A document name, its `input_format` (`pdf`, `pptx`, `docx`, `xlsx`, `html`, `image`), a list of page
 numbers (your batch, and **only** your batch), a per-page tier assignment
 (`text`, `ocr`, or an explicit `vision` forced by a prior failed grade),
 triage's document-wide `body_size` if the format has one, and — if any page
@@ -70,12 +70,28 @@ assigned tier `ocr` or `vision` for a docx/xlsx/html page; if you somehow
 are, that's an orchestrator bug, not something to work around by inventing
 a render step yourself.
 
-**Images**, independent of body tier: for `pdf` documents, run
+**Body extraction — `image` documents:** always starts at tier `ocr` —
+triage never assigns `text` for this format, since there's no text layer to
+check for in the first place (unlike a PDF page, which only lands on `ocr`
+after a text-layer check fails). Make sure the page is rendered
+(`render-pages`; for an image document this just normalizes the file to
+`page1.png`, no PDF rasterization involved), then run `ocr-page` with the
+given `--lang` (and `--tessdata-dir` if given). If confidence < 0.5, or the
+text looks empty/garbled for an image that visibly has text, **escalate to
+vision** exactly as for a scanned PDF page: read the rendered PNG yourself
+(Read tool) and transcribe it faithfully, then land it with
+`write_vision_page.py`. If you're assigned tier `vision` directly (a retry,
+forced by the orchestrator after a previous grade failure), skip straight
+to the vision step. There is no `text` rung for this format, same reason a
+scanned PDF page has none.
+
+**Images**, independent of body tier: for `pdf` and `image` documents, run
 `extract-images` across **every** page in your batch (not just ones with a
 nonzero image count — a page can have a vector diagram with no embedded
-bitmap XObject). For `pptx`/`docx`/`xlsx`/`html` documents, the format's
-own extract skill already writes the image shard alongside the body shard
-in the same call — no separate image-extraction pass needed. Note
+bitmap XObject; an `image` document's one page always counts, since the
+whole file is itself the image). For `pptx`/`docx`/`xlsx`/`html` documents,
+the format's own extract skill already writes the image shard alongside the
+body shard in the same call — no separate image-extraction pass needed. Note
 `html-extract` only saves `data:` URI and local-file `<img>` sources —
 remote (`http(s)://`) images are a known, documented gap (not fetched),
 same idea as xlsx's missing charts below. Either way, for
@@ -87,6 +103,19 @@ confidently. Note `xlsx-extract` doesn't extract charts as images (no
 rendering engine available) — a chart-only sheet may have fewer image
 elements than `xlsx-triage` counted; that's a known, documented gap, not
 something to compensate for by inventing a chart screenshot yourself.
+
+**Diagrams**, in addition to captioning: when an image element is a
+diagram or flowchart whose structure (nodes, edges, labels) you can
+reconstruct faithfully from the PNG — most relevant for `pdf` vector
+regions, `pptx` pictures/SmartArt, and a whole `image` document that is
+itself a diagram — also land a mermaid representation
+with `mermaid_image.py` (mermaid source on stdin, e.g. `echo 'flowchart
+TD\n  A --> B' | uv run ... mermaid_image.py --doc <name> --page <n>
+--asset <asset>`). This is additional to the caption, not a replacement —
+the image stays. Reconstruct only what's actually visible; if the diagram
+is too complex, dense, or ambiguous to represent faithfully as mermaid,
+skip it and rely on the caption alone rather than inventing structure that
+isn't there.
 
 ## What you return
 

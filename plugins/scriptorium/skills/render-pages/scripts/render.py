@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 import paths  # noqa: E402
 
 import fitz  # PyMuPDF
+from PIL import Image
 
 
 def parse_pages(spec: str | None, page_count: int) -> list[int]:
@@ -42,6 +43,20 @@ def convert_pptx_to_pdf(pptx_path: Path, doc: str) -> Path:
     return out_pdf
 
 
+def render_image(input_path: Path, doc: str, force: bool) -> str:
+    """A standalone image document is already raster — there's no dpi/zoom
+    rasterization step, just a normalize-to-PNG copy so downstream tooling
+    (OCR, vision, grading) always sees a PNG at page1.png like every other
+    format, at native resolution."""
+    out_path = paths.page_png(doc, 1)
+    if out_path.exists() and not force:
+        return str(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with Image.open(input_path) as img:
+        img.convert("RGB").save(out_path)
+    return str(out_path)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--doc", required=True)
@@ -56,6 +71,9 @@ def main() -> None:
         sys.exit(1)
 
     input_format = paths.detect_input_format(args.doc)
+    if input_format == "image":
+        print(render_image(input_path, args.doc, args.force))
+        return
     if input_format == "pdf":
         pdf_path = input_path
     elif input_format == "pptx":

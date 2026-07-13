@@ -5,6 +5,17 @@ doesn't exist yet) and compare it against the corresponding section of the
 assembled output. Judge against these criteria — this is qualitative,
 product-side backpressure, not a checklist a script could run.
 
+For an `image` document there is only ever `page1.png` — the whole input
+file — so "the corresponding section of the assembled output" is the whole
+document; criterion 7 (images present and captioned, mermaid fidelity) is
+squarely in scope since the page's one `image` element *is* the page.
+
+For `--format reqif`/`reqifz`, "the assembled output" is
+`output/<doc>/<doc>.reqif`: each extracted element is one `SPEC-OBJECT`,
+its text living in either `ReqIF.ChapterName` (headings) or the `ReqIF.Text`
+XHTML value (paragraphs/tables/images) — read those as you would the
+Markdown/HTML body when applying the criteria below.
+
 ## Criteria
 
 1. **Reading order** — does the text flow in the order a human would read
@@ -21,7 +32,9 @@ product-side backpressure, not a checklist a script could run.
    the visual size/weight hierarchy on the page?
 7. **Images present and captioned** — does every visible figure/diagram on
    the page have a corresponding `image` element with a non-empty,
-   accurate caption?
+   accurate caption? If that `image` element also has a `mermaid` block,
+   does it faithfully represent the diagram's nodes, edges, and labels (not
+   just "some diagram exists")?
 
 ## Scoring
 
@@ -34,7 +47,7 @@ When a page has an issue, tag it with one of:
 
 `dropped_text` · `hallucinated_text` · `wrong_reading_order` ·
 `duplicated_text` · `table_corruption` · `missing_image` · `bad_caption` ·
-`wrong_heading_level`
+`bad_mermaid` · `wrong_heading_level`
 
 ## Output schema — write one shard per page, not a merged report
 
