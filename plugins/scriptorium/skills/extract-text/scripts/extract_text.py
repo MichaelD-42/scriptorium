@@ -213,7 +213,7 @@ def is_fallback_heading_candidate(text: str, is_bold_block: bool, max_size: floa
     return non_glyph_char_count(text) >= FALLBACK_NON_GLYPH_MIN_CHARS
 
 
-def document_heading_size_ranks(fitz_doc, body_size: float) -> dict[float, int]:
+def document_heading_size_ranks(fitz_doc, body_size: float, furniture_masked: set[str]) -> dict[float, int]:
     """Fallback-path (no TOC) heading-level ranking: every DISTINCT font
     size used by a fallback-candidate bold block anywhere in the document
     (not just the pages this invocation's --pages batch covers), ranked
@@ -227,15 +227,30 @@ def document_heading_size_ranks(fitz_doc, body_size: float) -> dict[float, int]:
     batch, as separate subprocesses, and the ranking (and therefore the
     levels a heading of a given size gets) must be identical regardless of
     which batch happens to run -- a per-batch-local ranking would disagree
-    with itself across batches of the same document."""
+    with itself across batches of the same document.
+
+    `furniture_masked` (triage.json's furniture["line_patterns"], masked
+    text -- same set the per-page loop's `furniture_filtered_lines` uses)
+    is applied here too, via the same helper, before a block is even
+    considered as a candidate. Fix round 1: without this, a real no-TOC
+    document's bold running header/title (a plausible convention for this
+    toolkit's actual RFQ-spec target documents) would itself be bold,
+    larger than body size, and long enough to clear the 3-alphanumeric-
+    character gate -- so it would silently consume a rank slot and shift
+    every genuine heading's level down by one (or force an extra collapse
+    into level 6), even though the header itself never becomes a heading
+    (or any) element on its own page."""
     sizes = set()
     for page in fitz_doc:
+        page_height = page.rect.height
         text_blocks, _ = extract_page_text_blocks(page, body_size)
         for block in text_blocks:
-            lines = block["lines"]
-            text = " ".join(line["text"] for line in lines)
-            max_size = max((line["max_size"] for line in lines), default=0.0)
-            is_bold_block = bool(lines) and all(line["bold"] for line in lines)
+            kept_lines = furniture_filtered_lines(block, furniture_masked, page_height)
+            if not kept_lines:
+                continue
+            text = " ".join(line["text"] for line in kept_lines)
+            max_size = max(line["max_size"] for line in kept_lines)
+            is_bold_block = all(line["bold"] for line in kept_lines)
             if is_fallback_heading_candidate(text, is_bold_block, max_size, body_size):
                 sizes.add(max_size)
     ranked = sorted(sizes, reverse=True)
@@ -367,7 +382,7 @@ def main() -> None:
     heading_size_ranks: dict[float, int] = {}
     if not toc_lookup:
         ranking_body_size = args.body_size if args.body_size else resolve_document_body_size(fitz_doc)
-        heading_size_ranks = document_heading_size_ranks(fitz_doc, ranking_body_size)
+        heading_size_ranks = document_heading_size_ranks(fitz_doc, ranking_body_size, furniture_masked)
 
     for page_number in page_numbers:
         if page_roles.get(page_number) == "toc":

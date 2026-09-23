@@ -139,6 +139,31 @@ def _build_pdf(tmp_path: Path, name: str, pages: list[list[tuple[str, float, str
     return out_path
 
 
+def _build_pdf_with_repeated_header(
+    tmp_path: Path, name: str, header_text: str, header_size: float,
+    pages: list[list[tuple[str, float, str]]],
+) -> Path:
+    """Like `_build_pdf`, but every page also gets `header_text` (bold,
+    `header_size`) drawn INSIDE the top-12% furniture edge band, at the
+    same fixed position on every page -- pdf-triage's repeated-line
+    furniture detector (`_find_repeated_lines`) should flag it, the same
+    way a real document's bold running header/title would. Used for Fix
+    round 1's Finding 1 regression test: a no-TOC document's furniture must
+    not consume a rank slot in the fallback heading-size ranking."""
+    out_path = tmp_path / name
+    document = fitz.open()
+    for lines in pages:
+        page = document.new_page()
+        page.insert_text((72, 50.0), header_text, fontsize=header_size, fontname=BOLD)
+        y = 150.0
+        for fontname, fontsize, text in lines:
+            page.insert_text((72, y), text, fontsize=fontsize, fontname=fontname)
+            y += fontsize + 14
+    document.save(out_path)
+    document.close()
+    return out_path
+
+
 BODY = "helv"
 BOLD = "hebo"
 BODY_TEXT = "This is an ordinary body paragraph with enough characters to anchor the document's median body text size reliably."
@@ -238,6 +263,43 @@ class TestFallbackRankingNoToc:
         assert found["2 Smaller Heading"] == 2
 
 
+class TestFallbackRankingExcludesFurniture:
+    """Fix round 1, Finding 1: a bold running header/title present on every
+    page of a no-TOC document is furniture (per pdf-triage's repeated-line
+    detector), not a heading -- it must never consume a rank slot in the
+    document-wide fallback ranking. Before this fix, the header (drawn here
+    at 24pt, larger than either real heading) would have been ranked level
+    1 itself, silently shifting "1 Real Heading" (20pt) to level 2 and
+    "2 Second Heading" (16pt) to level 3."""
+
+    def test_repeated_bold_header_does_not_shift_real_heading_levels(self, tmp_path, tmp_project):
+        header_text = "RFQ Specification Running Title"
+        pdf_path = _build_pdf_with_repeated_header(
+            tmp_path, "furniture_header_no_toc.pdf", header_text, 24,
+            [
+                [(BOLD, 20, "1 Real Heading"), (BODY, 11, BODY_TEXT)],
+                [(BOLD, 16, "2 Second Heading"), (BODY, 11, BODY_TEXT)],
+            ],
+        )
+        doc_name = "furniture_header_no_toc"
+        shutil.copyfile(pdf_path, tmp_project / "input" / f"{doc_name}.pdf")
+
+        triage = _run_triage(doc_name, tmp_project)
+        toc_data = json.loads(paths.toc_json(doc_name).read_text())
+        assert toc_data["entries"] == []  # sanity: fallback path really is in play
+
+        masked_patterns = {p["masked"] for p in triage["furniture"]["line_patterns"]}
+        assert header_text in masked_patterns  # sanity: header really is detected as furniture (no digits to mask)
+
+        pages = [1, 2]
+        _run_extract_text(doc_name, pages, triage["body_size"], tmp_project)
+        found = _headings_by_text(_all_elements(doc_name, pages))
+
+        assert found["1 Real Heading"] == 1
+        assert found["2 Second Heading"] == 2
+        assert header_text not in found
+
+
 class TestFallbackSixLevelCollapse:
     """More than 6 distinct candidate bold sizes: the 6th and every smaller
     one all collapse to level 6 instead of growing unbounded. Exercised
@@ -251,9 +313,25 @@ class TestFallbackSixLevelCollapse:
             [(BOLD, size, f"Heading At Size {size}") for size in sizes] + [(BODY, 11, BODY_TEXT)],
         ])
         with fitz.open(pdf_path) as fitz_doc:
-            ranks = extract_text.document_heading_size_ranks(fitz_doc, body_size=11.0)
+            ranks = extract_text.document_heading_size_ranks(fitz_doc, body_size=11.0, furniture_masked=set())
 
         assert [ranks[float(s)] for s in sizes] == [1, 2, 3, 4, 5, 6, 6, 6]
+
+
+class TestIsBoldSpan:
+    """Fix round 1, Finding 2: `is_bold_span` combines two independent
+    signals (PyMuPDF's bold flag bit, and a "bold" substring in the font
+    name) -- each covered directly with hand-built span dicts, no PDF
+    needed."""
+
+    def test_flag_only_bold_is_bold(self):
+        assert extract_text.is_bold_span({"flags": 16, "font": "Arial"}) is True
+
+    def test_name_only_bold_is_bold(self):
+        assert extract_text.is_bold_span({"flags": 0, "font": "CustomBold"}) is True
+
+    def test_neither_signal_is_not_bold(self):
+        assert extract_text.is_bold_span({"flags": 0, "font": "Arial"}) is False
 
 
 class TestFallbackNonGlyphMinimum:
