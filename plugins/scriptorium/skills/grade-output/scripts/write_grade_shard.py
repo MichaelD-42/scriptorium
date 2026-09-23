@@ -3,7 +3,7 @@
 
 The grader agent's own visual judgment produces the score and issues; this
 script just lands it in the shared shard schema, consistent with how
-write_vision_page.py and caption_image.py work for extraction.
+write_vision_page.py and describe_image.py work for extraction.
 """
 
 import argparse

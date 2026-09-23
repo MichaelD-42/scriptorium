@@ -134,6 +134,19 @@ def figure_region_filtered_lines(lines: list[dict], figure_regions: list[dict]) 
     ]
 
 
+def caption_filtered_lines(lines: list[dict], caption_bboxes: set[tuple]) -> list[dict]:
+    """The subset of `lines` whose bbox does NOT exactly match one of this
+    page's caption lines (Task A6, `lib/figures.py`'s `find_caption_line`,
+    called once per image bbox -- vector region or bitmap -- in `main()`).
+    Same per-line-is-the-unit-of-exclusion shape as
+    `furniture_filtered_lines`/`figure_region_filtered_lines`. `caption`
+    is script-authoritative on the matching image element now, so the
+    caption text must not also survive as a `paragraph`/`heading` element."""
+    if not caption_bboxes:
+        return lines
+    return [line for line in lines if tuple(line["bbox"]) not in caption_bboxes]
+
+
 def build_block_element(
     block: dict,
     kept_lines: list[dict],
@@ -390,6 +403,7 @@ def main() -> None:
     furniture = load_furniture(args.doc)
     frame_tables = furniture.get("frame_tables", [])
     furniture_masked = {p["masked"] for p in furniture.get("line_patterns", [])}
+    furniture_xrefs = set(furniture.get("image_xrefs", []))
     page_roles = load_page_roles(args.doc)
     toc_lookup = build_toc_heading_lookup(load_toc_entries(args.doc))
 
@@ -428,6 +442,20 @@ def main() -> None:
         # lines belong to figure_text, not to a paragraph/heading element.
         figure_regions = figures_lib.detect_figure_regions(page, page_number, pdf_path, frame_tables)
 
+        # Task A6: caption lines -- one find_caption_line() search per
+        # image bbox on the page (every vector region above, plus every
+        # bitmap placement), the exact same universe extract_images.py
+        # turns into `image` elements and searches for a caption against.
+        # A matched line's bbox is excluded from paragraph/heading
+        # extraction below, since its text is now script-authoritative on
+        # the matching image element's `caption` field instead.
+        image_bboxes = [r["bbox"] for r in figure_regions] + figures_lib.bitmap_bboxes(page, furniture_xrefs)
+        caption_bboxes = {
+            tuple(line["bbox"])
+            for line in (figures_lib.find_caption_line(page, bbox) for bbox in image_bboxes)
+            if line
+        }
+
         page_elements = []
         # Drop text blocks that mostly overlap a detected table; the table
         # element replaces them so cell text isn't duplicated as prose.
@@ -436,6 +464,7 @@ def main() -> None:
                 continue
             kept_lines = furniture_filtered_lines(block, furniture_masked, page_height)
             kept_lines = figure_region_filtered_lines(kept_lines, figure_regions)
+            kept_lines = caption_filtered_lines(kept_lines, caption_bboxes)
             element = build_block_element(block, kept_lines, body_size, toc_lookup, heading_size_ranks)
             if element is not None:
                 page_elements.append(element)

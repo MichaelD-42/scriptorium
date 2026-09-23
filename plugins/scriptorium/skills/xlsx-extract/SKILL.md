@@ -39,7 +39,8 @@ can't race on the same shard file. Page numbers are 1-indexed positions in
 - **Embedded images** (`ws._images`) are saved to
   `output/<doc>/assets/page{N}_bitmap{idx}.<ext>` and become `image`
   elements with an empty caption — same contract as every other format's
-  image shard, filled in afterward by the same `caption_image.py`.
+  image shard, filled in afterward by the same `describe_image.py` (its
+  `--caption` alias — xlsx has no script-side caption detection).
 - **Charts** (`ws._charts`) are not extracted as images in this version —
   openpyxl can detect a chart's presence but has no rendering engine to
   turn it into a picture, so there's nothing to save. `xlsx-triage` flags a

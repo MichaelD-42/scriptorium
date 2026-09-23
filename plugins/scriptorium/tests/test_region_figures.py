@@ -169,7 +169,10 @@ class TestSurroundingBodyTextStillExtracted:
         )
         assert "2.1.2 Edge Case Handling" in para_and_heading_text
         assert "vector-drawn flow diagram" in para_and_heading_text
-        assert "Figure 1: Process Diagram" in para_and_heading_text
+        # Task A6: the caption line is now excluded from paragraph
+        # extraction -- it's script-authoritative on the image element's
+        # own `caption` field instead (see test_figure_captions.py).
+        assert "Figure 1: Process Diagram" not in para_and_heading_text
 
     def test_paragraph_and_table_around_the_chart_survive(self, furniture_doc, tmp_project):
         chart_page = _figure_page("chart")
@@ -185,7 +188,9 @@ class TestSurroundingBodyTextStillExtracted:
             e["text"] for e in shard["elements"] if e["type"] in ("paragraph", "heading")
         )
         assert "vector-drawn bar chart" in para_and_heading_text
-        assert "Figure 2: Revenue by Quarter" in para_and_heading_text
+        # Task A6: excluded from paragraph extraction -- script-authoritative
+        # on the image element's own `caption` field instead.
+        assert "Figure 2: Revenue by Quarter" not in para_and_heading_text
 
         tables = [e for e in shard["elements"] if e["type"] == "table"]
         assert len(tables) == 1
@@ -214,13 +219,15 @@ class TestFigureText:
         for label in ("Start", "Process", "Decision", "End"):
             leaked = [e for e in text_shard["elements"] if e.get("text") == label]
             assert not leaked, f"{label!r} leaked as its own text element: {leaked}"
-        # The caption ("Figure 1: Process Diagram") is outside the region's
-        # bbox and legitimately survives as a normal paragraph -- it just
-        # must not be confused with the box label "Process" above.
-        assert any(e.get("text") == "Figure 1: Process Diagram" for e in text_shard["elements"])
+        # Task A6: the caption ("Figure 1: Process Diagram") is outside the
+        # region's bbox but is now excluded from paragraph extraction too --
+        # it's script-authoritative on the image element's `caption` field
+        # (see test_figure_captions.py), not a normal paragraph.
+        assert not any(e.get("text") == "Figure 1: Process Diagram" for e in text_shard["elements"])
 
         vectors = [e for e in image_shard["elements"] if e["kind"] == "vector"]
         assert len(vectors) == 1
+        assert vectors[0]["caption"] == "Figure 1: Process Diagram"
         figure_text = vectors[0].get("figure_text")
         assert figure_text is not None
         for label in ("Start", "Process", "Decision", "End"):

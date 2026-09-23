@@ -55,6 +55,18 @@ For an image document, `--pages` is always `1` — there's only ever page 1.
   vision-fallback step uses to fill it in instead. These lines are excluded
   from `extract-text`'s paragraph/heading output for the same page, so they
   never appear twice.
+- Every `image` element (bitmap or vector-region) also gets a
+  script-authoritative `caption`: `lib/figures.py`'s `find_caption_line`
+  searches the text layer within 60pt directly above or below the
+  element's own bbox for a line matching `Figure n[.:]`/`Fig. n`/`Table n`
+  (case-insensitive) and, if found, sets `caption` to that line's text
+  verbatim; absent/`null` if nothing nearby matches. That same line is
+  excluded from `extract-text`'s paragraph/heading output on the same page
+  — same "shared detection, no ordering dependency" pattern as
+  `figure_text` above, so the two scripts can never disagree about which
+  line is the caption. This only applies to PDF image elements — pptx/docx/
+  xlsx/html images have no text-layer/bbox convention to search and keep
+  `caption` agent-authored via `describe_image.py`'s `--caption` (below).
 - If `work/<doc>/triage.json` has a `furniture` section (`pdf-triage`'s
   furniture detection), a bitmap whose xref is in `image_xrefs` (e.g. a logo
   repeated on every page) is skipped entirely — no `image` element is
@@ -69,19 +81,48 @@ For an image document, `--pages` is always `1` — there's only ever page 1.
   as `{"page_number": n, "elements": [], "skipped": "toc"}` immediately,
   with no bitmap/vector-region extraction attempted. Applies per-page even
   when `--pages` mixes a TOC page in with body pages.
-- Captioning is intentionally **not** done here — a script can't judge what
-  an image shows. The calling agent (the `extractor` role) looks at the
-  saved PNG (with the Read tool) and fills the caption in with:
+- Interpretation is intentionally **not** done here — a script can't judge
+  what an image shows, whether it encodes tabular data, or whether it's a
+  diagram simple enough to redraw. The calling agent (the `extractor` role)
+  looks at the saved PNG (with the Read tool) and fills these in with
+  `describe_image.py` (generalized from the old `caption_image.py` — Task
+  A6, since `caption` is script-authoritative for a PDF element now, per
+  above):
 
   ```bash
   uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
-    "${CLAUDE_PLUGIN_ROOT}/skills/extract-images/scripts/caption_image.py" \
-    --doc <doc-name> --page 2 --asset assets/page2_bitmap1.png --caption "..."
+    "${CLAUDE_PLUGIN_ROOT}/skills/extract-images/scripts/describe_image.py" \
+    --doc <doc-name> --page 2 --asset assets/page2_bitmap1.png \
+    --description "A bar chart showing quarterly revenue." \
+    [--data-table '[["Q1", 10], ["Q2", 14]]'] \
+    [--mermaid 'flowchart TD
+  A --> B']
   ```
 
+  - `--description` is always given, for any figure.
+  - `--data-table` (optional) is a JSON array of rows — only for a
+    chart-like figure; it's parsed and stored as a structure, not kept as a
+    raw string.
+  - `--mermaid` (optional) is only for a diagram/flowchart the agent can
+    faithfully reconstruct — validated the same way `mermaid_image.py`
+    validates its own stdin-read source (must start with a recognized
+    diagram keyword).
+  - `--caption` still exists as a backward-compatible alias — deprecated
+    and warned-about for a PDF element (whose `caption` `extract-images`
+    already set), but still the real way to set `caption` for a pptx/docx/
+    xlsx/html image element, which has no script-side caption detection.
+  - `--figure-text` (optional, PDF vector-region elements only) lands a
+    vision transcription — only used when the region's script-side
+    `figure_text` (above) came back null/absent, i.e. the region had no
+    text layer at all.
+
+  `mermaid_image.py` (below) still exists standalone too, for a
+  stdin-based, `describe_image.py`-independent call.
+
 - For a diagram/flowchart the agent can faithfully reconstruct, it can
-  additionally set a `mermaid` field on the same `image` element — optional,
-  in addition to the caption, never a replacement for the saved PNG:
+  alternatively set `mermaid` on its own via `mermaid_image.py` — same
+  effect as `describe_image.py`'s `--mermaid`, useful when the agent wants
+  to land the diagram separately from the description/data_table call:
 
   ```bash
   echo 'flowchart TD

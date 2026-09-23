@@ -94,28 +94,65 @@ the format's own extract skill already writes the image shard alongside the
 body shard in the same call — no separate image-extraction pass needed. Note
 `html-extract` only saves `data:` URI and local-file `<img>` sources —
 remote (`http(s)://`) images are a known, documented gap (not fetched),
-same idea as xlsx's missing charts below. Either way, for
-every image element reported, read the saved image file and write a
-specific, accurate caption with `caption_image.py` — never a generic
-placeholder like "image" or "figure". If you genuinely can't tell what an
-image shows, say that plainly in the caption rather than guessing
-confidently. Note `xlsx-extract` doesn't extract charts as images (no
-rendering engine available) — a chart-only sheet may have fewer image
-elements than `xlsx-triage` counted; that's a known, documented gap, not
-something to compensate for by inventing a chart screenshot yourself.
+same idea as xlsx's missing charts below.
 
-**Diagrams**, in addition to captioning: when an image element is a
+For a `pdf`/`image`-document image element, `caption` is already filled in
+for you — `extract-images` sets it deterministically (a nearby "Figure n:"/
+"Table n" text-layer line, verbatim, or absent if there's no such line
+nearby). You never write `caption` yourself for these; don't call
+`describe_image.py --caption` on one, it would just get overwritten by the
+next run of `extract-images` anyway. For a `pptx`/`docx`/`xlsx`/`html`
+image element there's no such script-side detection, so `caption` is still
+yours to set — pass `--caption` to `describe_image.py` as before.
+
+Either way, for **every** image element reported, read the saved image
+file and, with `describe_image.py`, always write a `--description` —
+specific and accurate, never a generic placeholder like "image" or
+"figure". If you genuinely can't tell what an image shows, say that
+plainly in the description rather than guessing confidently. Additionally:
+
+- If the image is a chart (bars, lines, a plotted curve, axes), also pass
+  `--data-table` — a JSON array of the rows it plots, read off the chart as
+  faithfully as you can.
+- If the image is a block/state/sequence diagram you can faithfully
+  redraw, also pass `--mermaid` (or use `mermaid_image.py` separately) —
+  see **Diagrams** below for the judgment call.
+- (`pptx`/`docx`/`xlsx`/`html` only) also pass `--caption`, unchanged from
+  before this contract existed.
+
+Note `xlsx-extract` doesn't extract charts as images (no rendering engine
+available) — a chart-only sheet may have fewer image elements than
+`xlsx-triage` counted; that's a known, documented gap, not something to
+compensate for by inventing a chart screenshot yourself.
+
+**Diagrams**, in addition to `--description`: when an image element is a
 diagram or flowchart whose structure (nodes, edges, labels) you can
 reconstruct faithfully from the PNG — most relevant for `pdf` vector
 regions, `pptx` pictures/SmartArt, and a whole `image` document that is
-itself a diagram — also land a mermaid representation
-with `mermaid_image.py` (mermaid source on stdin, e.g. `echo 'flowchart
+itself a diagram — also land a mermaid representation, either as
+`describe_image.py`'s `--mermaid` in the same call, or afterward with
+`mermaid_image.py` (mermaid source on stdin, e.g. `echo 'flowchart
 TD\n  A --> B' | uv run ... mermaid_image.py --doc <name> --page <n>
---asset <asset>`). This is additional to the caption, not a replacement —
-the image stays. Reconstruct only what's actually visible; if the diagram
-is too complex, dense, or ambiguous to represent faithfully as mermaid,
-skip it and rely on the caption alone rather than inventing structure that
-isn't there.
+--asset <asset>`). This is additional to the description (and, for a PDF
+element, the script-set caption), not a replacement — the image stays.
+Reconstruct only what's actually visible; if the diagram is too complex,
+dense, or ambiguous to represent faithfully as mermaid, skip it and rely
+on the description alone rather than inventing structure that isn't there.
+
+**`figure_text`** (`pdf` vector-region elements only): also script-set,
+from the region's own text layer, whenever it has one — box labels, axis
+labels, and the like, newline-joined. You only ever fill `figure_text`
+yourself via vision, and only when it comes back null/absent (no text
+layer at all — e.g. a pure-raster chart with no underlying text): read the
+rendered crop, transcribe the visible text faithfully (this is
+transcription, not interpretation — say so plainly if something's
+illegible rather than inventing a plausible guess, same rule as OCR
+escalation above), and land it with `describe_image.py --figure-text`
+alongside your `--description` for the same element. This is not new
+behavior — it was already the case before this contract existed — just
+restated here now that `caption`'s move to script-authoritative might
+otherwise read as "everything textual on a figure is now the script's
+job," which isn't true for `figure_text` without a text layer.
 
 ## What you return
 

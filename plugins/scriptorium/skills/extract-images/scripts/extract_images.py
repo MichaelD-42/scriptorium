@@ -70,7 +70,10 @@ def extract_image_document(input_path: Path, assets_dir: Path) -> list[dict]:
         img = img.convert("RGB")
         img.save(out_path)
         bbox = [0, 0, img.width, img.height]
-    return [{"type": "image", "kind": "bitmap", "asset": f"assets/{out_name}", "caption": "", "bbox": bbox}]
+    # No fitz text layer for a standalone image document -- nothing to
+    # search for a caption against, so `caption` stays absent (same
+    # convention as a PDF image element with no nearby caption match).
+    return [{"type": "image", "kind": "bitmap", "asset": f"assets/{out_name}", "bbox": bbox}]
 
 
 def extract_bitmaps(fitz_doc, page, page_number: int, assets_dir: Path, furniture_xrefs: set[int]) -> list[dict]:
@@ -95,8 +98,20 @@ def extract_bitmaps(fitz_doc, page, page_number: int, assets_dir: Path, furnitur
             bbox = list(page.get_image_bbox(img))
         except Exception:
             bbox = [0, 0, 0, 0]  # get_image_bbox couldn't resolve a placement (rare); keep the field present anyway
-        found.append({"type": "image", "kind": "bitmap", "asset": f"assets/{out_name}", "caption": "", "bbox": bbox})
+        element = {"type": "image", "kind": "bitmap", "asset": f"assets/{out_name}", "bbox": bbox}
+        _set_caption_if_found(element, page, bbox)
+        found.append(element)
     return found
+
+
+def _set_caption_if_found(element: dict, page, bbox: list[float]) -> None:
+    """Task A6: `caption` is script-authoritative for a PDF image element --
+    a nearby text-layer line matching `lib/figures.py`'s CAPTION_PATTERN
+    (`find_caption_line`), verbatim, or absent entirely when nothing nearby
+    matches (never a guessed/empty placeholder)."""
+    caption_line = figures_lib.find_caption_line(page, bbox)
+    if caption_line:
+        element["caption"] = caption_line["text"]
 
 
 def page_has_table(pdf_path: Path, page_number: int, frame_tables: list[dict] | None = None) -> bool:
@@ -139,7 +154,8 @@ def extract_vector_regions(page, page_number: int, assets_dir: Path, pdf_path: P
         out_path = assets_dir / out_name
         pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), clip=fitz.Rect(*bbox))
         pix.save(out_path)
-        element = {"type": "image", "kind": "vector", "asset": f"assets/{out_name}", "caption": "", "bbox": bbox}
+        element = {"type": "image", "kind": "vector", "asset": f"assets/{out_name}", "bbox": bbox}
+        _set_caption_if_found(element, page, bbox)
         figure_text = figures_lib.figure_text_for_region(page, bbox)
         if figure_text:
             element["figure_text"] = figure_text

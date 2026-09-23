@@ -54,6 +54,23 @@ def first_diagram_line(mermaid: str) -> str | None:
     return None
 
 
+def validate_diagram_source(mermaid: str) -> str | None:
+    """None if `mermaid`'s first real line (per first_diagram_line) starts
+    with a recognized DIAGRAM_KEYWORDS entry, otherwise an error message
+    describing why not. Factored out of main() (Task A6) so
+    describe_image.py's own `--mermaid` handling applies the exact same
+    validation instead of duplicating the keyword-regex check."""
+    first_line = first_diagram_line(mermaid)
+    if not first_line or not re.match(
+        r"^(" + "|".join(re.escape(k) for k in DIAGRAM_KEYWORDS) + r")\b", first_line
+    ):
+        return (
+            f"mermaid source doesn't start with a known diagram keyword "
+            f"({', '.join(DIAGRAM_KEYWORDS)}); first line was {first_line!r}"
+        )
+    return None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--doc", required=True)
@@ -66,15 +83,9 @@ def main() -> None:
         print("error: no mermaid source on stdin", file=sys.stderr)
         sys.exit(1)
 
-    first_line = first_diagram_line(mermaid)
-    if not first_line or not re.match(
-        r"^(" + "|".join(re.escape(k) for k in DIAGRAM_KEYWORDS) + r")\b", first_line
-    ):
-        print(
-            f"error: mermaid source doesn't start with a known diagram keyword "
-            f"({', '.join(DIAGRAM_KEYWORDS)}); first line was {first_line!r}",
-            file=sys.stderr,
-        )
+    error = validate_diagram_source(mermaid)
+    if error:
+        print(f"error: {error}", file=sys.stderr)
         sys.exit(1)
 
     shard_path = paths.shard_path(args.doc, args.page, "image")

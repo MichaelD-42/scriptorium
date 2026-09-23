@@ -35,7 +35,8 @@ uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
 - **Images** (`<img>`) whose `src` is a `data:` URI or a local file
   reference are saved to `output/<doc>/assets/page1_bitmap{idx}.<ext>` and
   become `image` elements with an empty caption — same contract as
-  `extract-images`/`docx-extract`, so the same `caption_image.py` fills
+  `extract-images`/`docx-extract`, so the same `describe_image.py` (its
+  `--caption` alias — html has no script-side caption detection) fills
   them in afterward. Remote (`http(s)://`) sources are skipped — not
   fetched, not counted (see `lib/html_pages.saveable_images`).
 - Reading order follows the document's own tag order.

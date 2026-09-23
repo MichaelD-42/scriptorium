@@ -46,8 +46,18 @@ Detection pipeline, per page:
      `is_frame_table()` filters `frame_tables` out of its own table query;
    - or is "tiny" -- smaller than `MIN_CLUSTER_AREA_FRACTION` of the page
      area, almost certainly a stray rule/line rather than a real figure.
+
+Task A6 adds caption detection on top of the same region bboxes (plus
+bitmap placement bboxes, via `bitmap_bboxes()`): `find_caption_line()`
+searches the text layer just above/below a given image element's own bbox
+for a line matching `CAPTION_PATTERN` ("Figure 1: ...", "Table 2 ..."). Both
+`extract_images.py` (to fill the element's script-authoritative `caption`
+field) and `extract_text.py` (to exclude that same line from paragraph/
+heading extraction) call it, again so the two scripts can never disagree
+about which line is the caption.
 """
 
+import re
 from pathlib import Path
 
 import pdfplumber
@@ -88,6 +98,25 @@ MIN_CLUSTER_AREA_FRACTION = 0.01
 # risked under-excluding a table that should never become a figure.
 TABLE_OVERLAP_THRESHOLD = 0.3
 LINE_OVERLAP_THRESHOLD = 0.5
+
+# Task A6: a caption line's text pattern -- "Figure 1: ...", "Fig. 2 ...",
+# "Table 3: ..." (case-insensitive, optional trailing period/colon after the
+# number). Checked against furniture_sample.pdf's real caption text
+# ("Figure 1: Process Diagram", "Figure 2: Revenue by Quarter") in
+# furniture_golden.json's "figures" entries.
+CAPTION_PATTERN = re.compile(r"^(figure|fig\.?|table)\s+\d+\.?:?\s", re.IGNORECASE)
+
+# How far above/below an image element's own bbox to search for a caption
+# line, in points. A judgment call (documented per the brief), not a
+# derived constant: verified against furniture_sample.pdf's real layout --
+# the diagram's caption sits ~10pt below its region's padded bbox, the
+# chart's caption ~30pt below its region's padded bbox -- both comfortably
+# inside this window with room to spare. A generous window is safe here
+# because CAPTION_PATTERN, not distance, is the real filter: ordinary body
+# text never matches it, so widening the search window risks a slow query,
+# not a false match. a later step's document census is expected to tune this
+# against the real golden document, same as this module's other constants.
+CAPTION_SEARCH_DISTANCE = 60.0
 
 
 def _is_frame_table_bbox(bbox, frame_tables: list[dict]) -> bool:
@@ -206,14 +235,16 @@ def detect_figure_regions(page, page_number: int, pdf_path: Path, frame_tables: 
     return regions
 
 
-def region_text_lines(page, region_bbox, threshold: float = LINE_OVERLAP_THRESHOLD) -> list[dict]:
-    """Text-layer lines on `page` whose own bbox is majority-inside
-    `region_bbox` (per line_in_region) -- top-to-bottom, left-to-right
-    order. Each entry is `{"text": ..., "bbox": [x0, y0, x1, y1]}`. A fresh,
-    independent scan of `page.get_text("dict")` (not shared state with
-    extract_text.py's own block/line extraction), matching this codebase's
-    existing convention of small independent derivations over cross-script
-    imports."""
+def _page_lines(page) -> list[dict]:
+    """Every non-empty text-layer line on `page`, verbatim, as `{"text":
+    ..., "bbox": [x0, y0, x1, y1]}` -- the single raw scan both
+    region_text_lines() (filtered to lines inside a region) and
+    find_caption_line() (filtered to lines near an arbitrary bbox) build
+    on, so the two never derive slightly different line sets from the same
+    page. A fresh, independent scan of `page.get_text("dict")` (not shared
+    state with extract_text.py's own block/line extraction), matching this
+    codebase's existing convention of small independent derivations over
+    cross-script imports."""
     lines = []
     for block in page.get_text("dict").get("blocks", []):
         if block.get("type") != 0:
@@ -223,11 +254,74 @@ def region_text_lines(page, region_bbox, threshold: float = LINE_OVERLAP_THRESHO
             stripped = spans_text.strip()
             if not stripped:
                 continue
-            line_bbox = list(line["bbox"])
-            if line_in_region(line_bbox, region_bbox, threshold):
-                lines.append({"text": stripped, "bbox": line_bbox})
+            lines.append({"text": stripped, "bbox": list(line["bbox"])})
+    return lines
+
+
+def region_text_lines(page, region_bbox, threshold: float = LINE_OVERLAP_THRESHOLD) -> list[dict]:
+    """Text-layer lines on `page` whose own bbox is majority-inside
+    `region_bbox` (per line_in_region) -- top-to-bottom, left-to-right
+    order. Each entry is `{"text": ..., "bbox": [x0, y0, x1, y1]}`."""
+    lines = [l for l in _page_lines(page) if line_in_region(l["bbox"], region_bbox, threshold)]
     lines.sort(key=lambda l: (l["bbox"][1], l["bbox"][0]))
     return lines
+
+
+def _x_overlaps(bbox_a, bbox_b) -> bool:
+    """True if the two bboxes' x-ranges intersect at all -- a caption line
+    must sit in roughly the same horizontal position as the figure it
+    describes, not just anywhere within the vertical search window. This
+    repo's fixtures are all single-column, so it rarely changes the answer
+    in practice, but it's a cheap, correct guard against picking up an
+    unrelated line in a hypothetical multi-column layout."""
+    return bbox_a[0] < bbox_b[2] and bbox_b[0] < bbox_a[2]
+
+
+def find_caption_line(page, bbox: list[float], distance: float = CAPTION_SEARCH_DISTANCE) -> dict | None:
+    """A figure/table caption line near `bbox` (an image element's own
+    bbox -- a vector region's padded cluster bbox, or a bitmap's placement
+    bbox): a text-layer line matching CAPTION_PATTERN within `distance`
+    points directly below or above `bbox`, and horizontally overlapping it
+    at all (per _x_overlaps). Checks below first (the more common
+    convention -- a caption follows the figure it describes), nearest
+    match first, then above the same way. `None` if nothing in range
+    matches -- the caller leaves `caption` absent rather than guessing, so
+    a false match never overwrites a genuinely uncaptioned figure with
+    unrelated nearby text."""
+    x0, y0, x1, y1 = bbox
+    lines = _page_lines(page)
+    below = sorted(
+        (l for l in lines if y1 <= l["bbox"][1] <= y1 + distance and _x_overlaps(bbox, l["bbox"])),
+        key=lambda l: l["bbox"][1],
+    )
+    above = sorted(
+        (l for l in lines if y0 - distance <= l["bbox"][3] <= y0 and _x_overlaps(bbox, l["bbox"])),
+        key=lambda l: -l["bbox"][3],
+    )
+    for line in below + above:
+        if CAPTION_PATTERN.match(line["text"]):
+            return line
+    return None
+
+
+def bitmap_bboxes(page, furniture_xrefs: set[int] | None = None) -> list[list[float]]:
+    """Placement bbox for every bitmap XObject on `page`, skipping any xref
+    in `furniture_xrefs` (a repeated logo, etc.) -- the same universe
+    extract_images.py's own extract_bitmaps() turns into `image` elements,
+    factored out here (bbox only, no image bytes) so extract_text.py can
+    compute the same set independently to find + exclude each bitmap's
+    caption line, without waiting on extract_images.py's shard."""
+    furniture_xrefs = furniture_xrefs or set()
+    bboxes = []
+    for img in page.get_images(full=True):
+        xref = img[0]
+        if xref in furniture_xrefs:
+            continue
+        try:
+            bboxes.append(list(page.get_image_bbox(img)))
+        except Exception:
+            continue
+    return bboxes
 
 
 def figure_text_for_region(page, region_bbox) -> str | None:
