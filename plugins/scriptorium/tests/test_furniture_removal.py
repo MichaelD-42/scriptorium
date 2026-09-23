@@ -237,3 +237,101 @@ class TestMergeFurnitureText:
         elements_data = json.loads(paths.elements_json(furniture_doc).read_text())
         assert elements_data.get("furniture_text")
         assert elements_data["furniture_text"] == triage["furniture_text"]
+
+
+class TestMixedFurnitureAndRealLineBlock:
+    """Fix round 1 (controller review): a single PyMuPDF text block can mix
+    a furniture-matching line with unrelated real content on an adjacent
+    line -- plausible whenever PyMuPDF merges a footer note next to a page
+    number into one block, the same way it merges furniture_sample.pdf's
+    three footer lines into one block. The whole block must NOT be dropped
+    in that case -- only the matching line is excluded; the real line's
+    text and a bbox recomputed from just the surviving line(s) must
+    survive. Exercised directly against `furniture_filtered_lines()`/
+    `build_block_element()` (rather than via a generated PDF) because
+    getting PyMuPDF to reliably merge two *specific* drawString calls into
+    one block is exactly the kind of layout detail this task doesn't
+    control -- a hand-built block dict pins down the mixed-line scenario
+    precisely and deterministically."""
+
+    def test_real_line_survives_furniture_line_is_dropped(self):
+        mod = load_script("extract-text/scripts/extract_text.py", "extract_text_a2_mixed_block")
+
+        page_height = 792.0
+        # Bottom 12% band starts at 792 * 0.88 = 697.44pt from the top --
+        # both lines sit well inside it, as a real merged footer block would.
+        block = {
+            "bbox": [40.0, 760.0, 300.0, 784.0],
+            "lines": [
+                {
+                    "text": "Doc No. SYN-FUR-0001",
+                    "masked": "Doc No. SYN-FUR-#",
+                    "bbox": [40.0, 760.0, 160.0, 772.0],
+                    "max_size": 8.0,
+                },
+                {
+                    "text": "Reviewed by Jane Doe",
+                    "masked": "Reviewed by Jane Doe",
+                    "bbox": [40.0, 772.0, 300.0, 784.0],
+                    "max_size": 8.0,
+                },
+            ],
+        }
+        furniture_masked = {"Doc No. SYN-FUR-#"}
+
+        kept_lines = mod.furniture_filtered_lines(block, furniture_masked, page_height)
+        assert [line["text"] for line in kept_lines] == ["Reviewed by Jane Doe"]
+
+        element = mod.build_block_element(block, kept_lines, body_size=8.0)
+        assert element is not None
+        assert element["type"] == "paragraph"
+        assert element["text"] == "Reviewed by Jane Doe"
+        assert "Doc No." not in element["text"]
+        # bbox recomputed from the surviving line only, not the original
+        # (furniture-including) block bbox.
+        assert element["bbox"] == [40.0, 772.0, 300.0, 784.0]
+
+    def test_all_lines_matching_drops_the_whole_block(self):
+        mod = load_script("extract-text/scripts/extract_text.py", "extract_text_a2_all_furniture_block")
+
+        page_height = 792.0
+        block = {
+            "bbox": [40.0, 760.0, 160.0, 772.0],
+            "lines": [
+                {
+                    "text": "Doc No. SYN-FUR-0001",
+                    "masked": "Doc No. SYN-FUR-#",
+                    "bbox": [40.0, 760.0, 160.0, 772.0],
+                    "max_size": 8.0,
+                },
+            ],
+        }
+        furniture_masked = {"Doc No. SYN-FUR-#"}
+
+        kept_lines = mod.furniture_filtered_lines(block, furniture_masked, page_height)
+        assert kept_lines == []
+        assert mod.build_block_element(block, kept_lines, body_size=8.0) is None
+
+    def test_block_outside_the_edge_band_is_never_filtered(self):
+        """Sanity check on the gate itself: a block with the same
+        furniture-matching text but positioned mid-page (not in the top/
+        bottom 12% band) is left untouched -- matching text alone is never
+        sufficient."""
+        mod = load_script("extract-text/scripts/extract_text.py", "extract_text_a2_mid_page_block")
+
+        page_height = 792.0
+        block = {
+            "bbox": [40.0, 380.0, 300.0, 404.0],
+            "lines": [
+                {
+                    "text": "Doc No. SYN-FUR-0001",
+                    "masked": "Doc No. SYN-FUR-#",
+                    "bbox": [40.0, 380.0, 160.0, 392.0],
+                    "max_size": 8.0,
+                },
+            ],
+        }
+        furniture_masked = {"Doc No. SYN-FUR-#"}
+
+        kept_lines = mod.furniture_filtered_lines(block, furniture_masked, page_height)
+        assert kept_lines == block["lines"]

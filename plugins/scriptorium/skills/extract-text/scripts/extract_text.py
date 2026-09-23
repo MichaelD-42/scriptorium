@@ -59,19 +59,49 @@ def in_furniture_band(bbox, page_height: float) -> bool:
     return bottom_frac <= FURNITURE_EDGE_BAND or top_frac >= 1 - FURNITURE_EDGE_BAND
 
 
-def is_furniture_block(block: dict, furniture_masked: set[str], page_height: float) -> bool:
-    """A text block is furniture if it sits in a top/bottom edge band *and*
-    at least one of its lines' digit-masked text matches a known furniture
-    line pattern. Both conditions must hold -- a real body table or
-    paragraph that happens to sit near the bottom margin, but doesn't match
-    a known furniture pattern, is kept. Matching is per-line (not on the
-    block's combined text) because PyMuPDF groups the fixture's whole
-    multi-line footer into a single block."""
-    if not furniture_masked:
-        return False
-    if not in_furniture_band(block["bbox"], page_height):
-        return False
-    return any(masked in furniture_masked for masked in block["lines_masked"])
+def furniture_filtered_lines(block: dict, furniture_masked: set[str], page_height: float) -> list[dict]:
+    """The subset of `block["lines"]` that survive furniture filtering.
+
+    A line is dropped only if the block sits in a top/bottom edge band
+    *and* that specific line's digit-masked text matches a known furniture
+    line pattern -- matched lines are the unit of exclusion, not the whole
+    block. A block that mixes one furniture-matching line with unrelated
+    real content on an adjacent line (e.g. PyMuPDF merging a footer note
+    next to a page number into one block) keeps its real line(s); the whole
+    block is only dropped if every one of its lines matches (the caller
+    sees an empty list back). A block outside the edge band, or one with no
+    matching lines, is returned unchanged."""
+    if not furniture_masked or not in_furniture_band(block["bbox"], page_height):
+        return block["lines"]
+    return [line for line in block["lines"] if line["masked"] not in furniture_masked]
+
+
+def build_block_element(block: dict, kept_lines: list[dict], body_size: float) -> dict | None:
+    """Reassemble a `heading`/`paragraph` element from `kept_lines` (a
+    possibly-trimmed subset of `block["lines"]`, per `furniture_filtered_lines`).
+    Returns None if nothing survived (the whole block was furniture).
+
+    When lines were dropped, the bbox and heading-classification size are
+    recomputed from just the surviving lines, so a partially-furniture
+    block doesn't keep reporting the discarded line's geometry/size."""
+    if not kept_lines:
+        return None
+    if len(kept_lines) == len(block["lines"]):
+        bbox = list(block["bbox"])  # nothing dropped -- keep PyMuPDF's own block bbox
+    else:
+        bbox = [
+            min(line["bbox"][0] for line in kept_lines),
+            min(line["bbox"][1] for line in kept_lines),
+            max(line["bbox"][2] for line in kept_lines),
+            max(line["bbox"][3] for line in kept_lines),
+        ]
+    text = " ".join(line["text"] for line in kept_lines)
+    max_size = max(line["max_size"] for line in kept_lines)
+
+    level = classify_heading_level(max_size, body_size)
+    if level:
+        return {"type": "heading", "level": level, "text": text, "bbox": bbox}
+    return {"type": "paragraph", "text": text, "bbox": bbox}
 
 
 def bbox_overlap_ratio(a, b) -> float:
@@ -124,21 +154,24 @@ def extract_page_text_blocks(page, body_size: float | None) -> tuple[list[dict],
     for block in raw.get("blocks", []):
         if block.get("type") != 0:
             continue
-        lines_text = []
-        lines_masked = []
-        max_size = 0.0
+        lines = []
         for line in block.get("lines", []):
             spans_text = "".join(span["text"] for span in line.get("spans", []))
-            lines_text.append(spans_text)
             stripped = spans_text.strip()
-            if stripped:
-                lines_masked.append(re.sub(r"\d+", "#", stripped))
+            if not stripped:
+                continue
+            line_max_size = 0.0
             for span in line.get("spans", []):
                 sizes.append(span["size"])
-                max_size = max(max_size, span["size"])
-        text = " ".join(t.strip() for t in lines_text if t.strip())
-        if text:
-            text_blocks.append({"bbox": block["bbox"], "text": text, "max_size": max_size, "lines_masked": lines_masked})
+                line_max_size = max(line_max_size, span["size"])
+            lines.append({
+                "text": stripped,
+                "masked": re.sub(r"\d+", "#", stripped),
+                "bbox": line["bbox"],
+                "max_size": line_max_size,
+            })
+        if lines:
+            text_blocks.append({"bbox": block["bbox"], "lines": lines})
     resolved_body_size = body_size if body_size else (statistics.median(sizes) if sizes else 0.0)
     return text_blocks, resolved_body_size
 
@@ -179,14 +212,10 @@ def main() -> None:
         for block in text_blocks:
             if any(bbox_overlap_ratio(block["bbox"], t["bbox"]) > 0.5 for t in tables):
                 continue
-            if is_furniture_block(block, furniture_masked, page_height):
-                continue
-            level = classify_heading_level(block["max_size"], body_size)
-            bbox = list(block["bbox"])
-            if level:
-                page_elements.append({"type": "heading", "level": level, "text": block["text"], "bbox": bbox})
-            else:
-                page_elements.append({"type": "paragraph", "text": block["text"], "bbox": bbox})
+            kept_lines = furniture_filtered_lines(block, furniture_masked, page_height)
+            element = build_block_element(block, kept_lines, body_size)
+            if element is not None:
+                page_elements.append(element)
 
         for table in tables:
             page_elements.append({"type": "table", "rows": table["rows"], "bbox": list(table["bbox"])})

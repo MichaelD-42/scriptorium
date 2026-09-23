@@ -43,11 +43,15 @@ document.
 - If `work/<doc>/triage.json` has a `furniture` section (`pdf-triage`'s
   furniture detection), it's applied before anything else is written: a
   pdfplumber table whose bbox matches a `frame_tables` entry is dropped
-  (page frames aren't real tables — never emitted as a `table` element),
-  and a text block is dropped only if it both sits in the top/bottom 12%
-  edge band *and* one of its lines' digit-masked text matches a
-  `line_patterns` entry — a real paragraph or table near the margin that
-  doesn't match a known furniture pattern is always kept. No
+  (page frames aren't real tables — never emitted as a `table` element).
+  For text: a block that sits in the top/bottom 12% edge band has each of
+  its **lines** checked individually against `line_patterns` — only the
+  matching line(s) are excluded, not the whole block. A block outside the
+  edge band, or with no matching lines, is untouched; a block where every
+  line matches is dropped entirely; a block that mixes one furniture line
+  with unrelated real content on an adjacent line (PyMuPDF sometimes
+  groups a footer note and a page number into one block) keeps the real
+  line, with its `bbox` recomputed from just the surviving line(s). No
   `triage.json`/`furniture` section => no removal, same output as before.
 
 ## Output
