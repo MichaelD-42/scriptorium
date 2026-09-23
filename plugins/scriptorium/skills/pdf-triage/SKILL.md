@@ -35,7 +35,17 @@ the same JSON to stdout.
     {"page_number": 5, "tier": "ocr",  "text_ratio": 0.0,  "image_count": 1, "reason": "no extractable text, likely scanned"}
   ],
   "loop_size": "tight",
-  "body_size": 11.0
+  "body_size": 11.0,
+  "furniture": {
+    "line_patterns": [
+      {"masked": "Doc No. SYN-FUR-#", "edge": "bottom", "y_min": 0.9159, "y_max": 0.9298, "page_count": 9}
+    ],
+    "frame_tables": [
+      {"bbox": [24.0, 24.0, 588.0, 768.0], "page_count": 9}
+    ],
+    "image_xrefs": [4]
+  },
+  "furniture_text": "Doc No. SYN-FUR-0001\nRev. B\npage 1 (9)"
 }
 ```
 
@@ -51,6 +61,24 @@ the same JSON to stdout.
   `extract-text` call for this document as `--body-size` — a single page's
   own text is often too sparse to reliably tell a heading from body text on
   its own.
+
+- `furniture`: page furniture detected once, document-wide (not yet
+  removed — that is a separate, later step).
+  - `line_patterns`: text lines whose digit-masked form (`re.sub(r"\d+",
+    "#", line)`) repeats in the top or bottom 12% of the page on at least
+    60% of pages — running headers/footers, doc-number/revision/page-number
+    lines, etc. `y_min`/`y_max` are that line's observed y-position range,
+    as a fraction of page height.
+  - `frame_tables`: tables (per pdfplumber's `find_tables()`) covering more
+    than 60% of the page area that repeat at the same bbox (within 2pt) on
+    at least 50% of pages — a ruled page-frame border, if pdfplumber's
+    table heuristics happen to pick it up. A plain unruled rectangle border
+    is legitimately not detected as a table at all, so this is often `[]`.
+  - `image_xrefs`: PyMuPDF image xrefs present on at least 50% of pages —
+    typically a repeated logo.
+- `furniture_text`: the verbatim (unmasked) text of the matched furniture
+  lines on the document's first page, top-to-bottom, newline-joined. `null`
+  if no line furniture was detected.
 
 ## Notes for the calling agent
 
