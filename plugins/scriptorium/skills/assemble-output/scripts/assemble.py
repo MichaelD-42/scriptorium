@@ -35,6 +35,63 @@ def render_markdown_table(rows: list[list[str]]) -> str:
     return "\n".join([header, sep, *body])
 
 
+INTERPRETATION_START = "<!-- scriptorium:interpretation -->"
+INTERPRETATION_END = "<!-- /scriptorium:interpretation -->"
+
+
+def render_image_markdown(el: dict) -> list[str]:
+    """Render one `image` element as a list of Markdown lines/blocks, in
+    order:
+
+    1. The image itself, `![alt](asset)` -- alt prefers `description` (the
+       richest available text), falling back to `caption`, then empty.
+    2. `caption`, if present -- plain text, script-authoritative, verbatim.
+       NOT wrapped in interpretation markers: it's deterministic matched
+       text, not agent interpretation.
+    3. `figure_text`, if present -- rendered as a Markdown blockquote (this
+       codebase has no other precedent for "verbatim quoted content" in
+       Markdown output, so blockquote was chosen for readability over a
+       fenced code block). Also NOT wrapped in markers -- same trust tier
+       as `caption`, verbatim extracted text.
+    4. `description`/`data_table`/`mermaid`, if any are present, wrapped in
+       an `INTERPRETATION_START`/`INTERPRETATION_END` HTML-comment pair --
+       these are the fields an agent judged/authored, not extracted
+       verbatim, so a downstream mechanical validator can grep the markers
+       to exclude this span from a "verbatim" check. No markers at all if
+       none of the three are present (never an empty pair).
+    """
+    lines = []
+
+    alt = el.get("description") or el.get("caption") or ""
+    lines.append(f"![{alt}]({el['asset']})")
+
+    caption = el.get("caption") or ""
+    if caption:
+        lines.append(caption)
+
+    figure_text = el.get("figure_text") or ""
+    if figure_text:
+        lines.append("\n".join(f"> {line}" for line in figure_text.splitlines()))
+
+    interpretation_parts = []
+    description = el.get("description") or ""
+    if description:
+        interpretation_parts.append(description)
+    data_table = el.get("data_table")
+    if data_table:
+        interpretation_parts.append(render_markdown_table(data_table))
+    mermaid = el.get("mermaid") or ""
+    if mermaid:
+        interpretation_parts.append(f"```mermaid\n{mermaid}\n```")
+
+    if interpretation_parts:
+        lines.append(INTERPRETATION_START)
+        lines.append("\n\n".join(interpretation_parts))
+        lines.append(INTERPRETATION_END)
+
+    return lines
+
+
 def elements_to_markdown(elements: list[dict]) -> str:
     lines = []
     for el in elements:
@@ -45,11 +102,7 @@ def elements_to_markdown(elements: list[dict]) -> str:
         elif el["type"] == "table":
             lines.append(render_markdown_table(el["rows"]))
         elif el["type"] == "image":
-            if el.get("mermaid"):
-                lines.append(f"```mermaid\n{el['mermaid']}\n```")
-                lines.append("")
-            caption = el.get("caption") or ""
-            lines.append(f"![{caption}]({el['asset']})")
+            lines.extend(render_image_markdown(el))
         lines.append("")
     return "\n".join(lines).strip() + "\n"
 

@@ -30,9 +30,22 @@
 </table>
 {% elif el.type == "image" %}
 <figure>
-  {% if el.mermaid %}<pre class="mermaid">{{ el.mermaid }}</pre>{% endif %}
-  <img src="{{ el.asset }}" alt="{{ el.caption }}">
+  <img src="{{ el.asset }}" alt="{{ el.description or el.caption or '' }}">
   {% if el.caption %}<figcaption>{{ el.caption }}</figcaption>{% endif %}
+  {% if el.figure_text %}<blockquote>{{ el.figure_text }}</blockquote>{% endif %}
+  {% if el.description or el.data_table or el.mermaid %}
+  <!-- scriptorium:interpretation -->
+  {% if el.description %}<p>{{ el.description }}</p>{% endif %}
+  {% if el.data_table %}
+  <table>
+  {% for row in el.data_table %}
+    <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
+  {% endfor %}
+  </table>
+  {% endif %}
+  {% if el.mermaid %}<pre class="mermaid">{{ el.mermaid }}</pre>{% endif %}
+  <!-- /scriptorium:interpretation -->
+  {% endif %}
 </figure>
 {% endif %}
 {% endfor %}

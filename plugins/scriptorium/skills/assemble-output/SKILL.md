@@ -45,7 +45,18 @@ document instead — see the "ReqIF format" section below.
 | `heading` (level 1-6) | `#` through `######` | `<h1>` through `<h6>` | `SPEC-OBJECT` with a `ReqIF.ChapterName` string value; builds the `SPEC-HIERARCHY` tree |
 | `paragraph` | plain text, blank-line separated | `<p>` | `SPEC-OBJECT` with a `ReqIF.Text` XHTML value (`<xhtml:p>`) |
 | `table` | pipe table | `<table>` | `SPEC-OBJECT` with a `ReqIF.Text` XHTML value (`<xhtml:table>`) |
-| `image` | `![caption](assets/...)` | `<img src="assets/..." alt="caption">` | `SPEC-OBJECT` with a `ReqIF.Text` XHTML value (`<xhtml:object data="assets/...">caption</xhtml:object>`, plus an `<xhtml:pre>` of the mermaid source if the element has one) |
+| `image` | `![alt](assets/...)`, then `caption` verbatim, then `figure_text` as a blockquote, then any of `description`/`data_table`/`mermaid` wrapped in `<!-- scriptorium:interpretation -->` markers | `<img src="assets/..." alt="...">`, `<figcaption>`, a `<blockquote>` for `figure_text`, then the same three fields inside an HTML-comment marker pair | `SPEC-OBJECT` with a `ReqIF.Text` XHTML value (`<xhtml:object data="assets/...">caption</xhtml:object>`, plus an `<xhtml:pre>` of the mermaid source if the element has one) |
+
+For `image`, alt text prefers `description`, falling back to `caption`,
+else empty. `caption` and `figure_text` are script-authoritative/
+verbatim, so they render plainly, outside any marker. `description`,
+`data_table`, and `mermaid` are agent-judged, not extracted verbatim, so
+Markdown and HTML both wrap them (only them, and only if at least one is
+present) in `<!-- scriptorium:interpretation -->` / `<!-- /scriptorium:
+interpretation -->` — a downstream mechanical validator greps for this pair
+to exclude agent interpretation from a "verbatim" check. ReqIF's image
+mapping is unchanged by this (still `caption` + `mermaid` only); the other
+three figure fields aren't yet represented there.
 
 Elements are emitted in page order, then in the order they appear in
 `elements.json` for that page — extraction scripts are responsible for

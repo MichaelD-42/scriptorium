@@ -26,12 +26,16 @@ class TestElementsToMarkdown:
         md = assemble.elements_to_markdown([{"type": "heading", "level": 2, "text": "Title"}])
         assert md.startswith("## Title")
 
-    def test_image_with_mermaid_fence_precedes_image_ref(self):
+    def test_image_with_mermaid_fence_follows_image_ref_inside_markers(self):
+        # Task A7 superseded the old "mermaid fence precedes the image"
+        # ordering: mermaid is agent interpretation now, so it renders
+        # after the image/caption, wrapped in the interpretation markers.
         el = {"type": "image", "asset": "assets/a.png", "caption": "a diagram", "mermaid": "flowchart TD\n  A --> B"}
         md = assemble.elements_to_markdown([el])
-        mermaid_pos = md.index("```mermaid")
         image_pos = md.index("![a diagram](assets/a.png)")
-        assert mermaid_pos < image_pos
+        marker_pos = md.index("<!-- scriptorium:interpretation -->")
+        mermaid_pos = md.index("```mermaid")
+        assert image_pos < marker_pos < mermaid_pos
 
     def test_image_without_mermaid_has_no_fence(self):
         el = {"type": "image", "asset": "assets/a.png", "caption": ""}
