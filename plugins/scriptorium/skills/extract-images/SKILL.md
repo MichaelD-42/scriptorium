@@ -35,10 +35,19 @@ For an image document, `--pages` is always `1` — there's only ever page 1.
 
 - Saves assets to `output/<doc>/assets/page{N}_{bitmap|vector}{idx}.png`.
 - Writes one shard per given page to `work/<doc>/shards/page{N}.image.json`
-  (`image` elements, `kind: "bitmap"|"vector"`, `asset: "assets/..."`) — even
-  when a page has no images, so a retry can tell "checked, found nothing"
-  apart from "never checked". This shard is independent of whatever
-  text/OCR/vision shard the page has; `merge.py` combines them.
+  (`image` elements, `kind: "bitmap"|"vector"`, `asset: "assets/..."`,
+  `bbox: [x0, y0, x1, y1]`) — even when a page has no images, so a retry
+  can tell "checked, found nothing" apart from "never checked". This shard
+  is independent of whatever text/OCR/vision shard the page has; `merge.py`
+  combines them.
+- If `work/<doc>/triage.json` has a `furniture` section (`pdf-triage`'s
+  furniture detection), a bitmap whose xref is in `image_xrefs` (e.g. a logo
+  repeated on every page) is skipped entirely — no `image` element is
+  written for it. `frame_tables` entries are also excluded from
+  `page_has_table()`'s query, so a page whose only pdfplumber-detected
+  table is the page frame doesn't suppress vector-region detection on that
+  page. No `triage.json`/`furniture` section => no filtering, same output
+  as before.
 - Captioning is intentionally **not** done here — a script can't judge what
   an image shows. The calling agent (the `extractor` role) looks at the
   saved PNG (with the Read tool) and fills the caption in with:

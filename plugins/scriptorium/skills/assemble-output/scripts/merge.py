@@ -6,12 +6,25 @@ Deterministic, no judgment involved — this is a script, not an agent step.
 """
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 import elements as elements_lib  # noqa: E402
 import paths  # noqa: E402
+
+
+def load_furniture_text(doc: str) -> str | None:
+    """triage.json["furniture_text"] (pdf-triage's verbatim furniture lines,
+    Task A1), or None if triage hasn't run for this document or its
+    triage.json predates furniture detection (docx/xlsx/html/image triage
+    never write this field at all)."""
+    triage_path = paths.triage_json(doc)
+    if not triage_path.exists():
+        return None
+    triage = json.loads(triage_path.read_text())
+    return triage.get("furniture_text")
 
 
 def main() -> None:
@@ -27,7 +40,13 @@ def main() -> None:
     page_count = paths.true_page_count(args.doc, input_format)
 
     pages = elements_lib.merge_shards(paths.shards_dir(args.doc), page_count)
-    doc_data = {"doc": args.doc, "source_file": str(input_path), "page_count": page_count, "pages": pages}
+    doc_data = {
+        "doc": args.doc,
+        "source_file": str(input_path),
+        "page_count": page_count,
+        "furniture_text": load_furniture_text(args.doc),
+        "pages": pages,
+    }
 
     elements_path = paths.elements_json(args.doc)
     elements_lib.save_doc(elements_path, doc_data)

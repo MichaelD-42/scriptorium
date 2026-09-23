@@ -9,14 +9,23 @@ shard once and never touches another page's or another tier's shard:
     work/<doc>/shards/page{N}.image.json                image shard (independent)
 
 merge_shards() combines them into the same page shape v1 used, so
-assemble.py and gates.py don't need to know sharding exists:
+assemble.py and gates.py don't need to know sharding exists. merge.py (in
+assemble-output) builds the final on-disk elements.json around it, adding
+`furniture_text` (Task A2) -- pdf-triage's verbatim repeated header/footer
+text (see skills/pdf-triage), `None` for non-PDF inputs or when no
+furniture was detected:
 
 {
   "doc": "sample",
   "source_file": "input/sample.pdf",
   "page_count": 5,
+  "furniture_text": "Doc No. SYN-FUR-0001\nRev. B\npage 1 (9)",
   "pages": [ {"page_number": 1, "tier": "text", "elements": [...]}, ... ]
 }
+
+Every element additionally carries a "bbox": [x0, y0, x1, y1] field
+(fitz/pdfplumber-style, top-left origin, y increasing downward) -- written
+by extract_text.py/extract_images.py, passed through unchanged here.
 """
 
 import json

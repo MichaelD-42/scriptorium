@@ -11,7 +11,11 @@ The one place all three extraction tiers converge. Three scripts:
    parallel `extractor` subagents into `work/<doc>/shards/`) into one
    `work/<doc>/elements.json` — the merged, whole-document shape everything
    downstream reads. Deterministic: highest tier present wins the page body
-   (`vision` > `ocr` > `text`), image elements are appended after it.
+   (`vision` > `ocr` > `text`), image elements are appended after it. Also
+   copies `work/<doc>/triage.json`'s `furniture_text` (`pdf-triage`'s
+   verbatim repeated header/footer text, if any) to the top level of
+   `elements.json`, alongside `doc`/`source_file`/`page_count` — `None` if
+   `triage.json` doesn't exist or has no `furniture_text`.
 2. **`assemble.py`** reads that merged file and writes the final deliverable
    (`--format reqif`/`reqifz` delegates the XML build to `reqif_builder.py`,
    an internal helper module, not a script run on its own).

@@ -38,6 +38,17 @@ document.
 - Tables are detected with `pdfplumber` and emitted as `table` elements
   (row-major list of lists).
 - Reading order follows PyMuPDF's block order top-to-bottom, left-to-right.
+- Every `heading`/`paragraph`/`table` element carries a `"bbox": [x0, y0,
+  x1, y1]` field (fitz/pdfplumber-style, top-left origin, y down).
+- If `work/<doc>/triage.json` has a `furniture` section (`pdf-triage`'s
+  furniture detection), it's applied before anything else is written: a
+  pdfplumber table whose bbox matches a `frame_tables` entry is dropped
+  (page frames aren't real tables — never emitted as a `table` element),
+  and a text block is dropped only if it both sits in the top/bottom 12%
+  edge band *and* one of its lines' digit-masked text matches a
+  `line_patterns` entry — a real paragraph or table near the margin that
+  doesn't match a known furniture pattern is always kept. No
+  `triage.json`/`furniture` section => no removal, same output as before.
 
 ## Output
 

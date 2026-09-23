@@ -173,6 +173,20 @@ def make_logo_bytes() -> bytes:
     return buf.getvalue()
 
 
+def make_unique_icon_bytes() -> bytes:
+    """A second, visually distinct bitmap placed on exactly one page (Task
+    A2) -- unlike the logo (repeated on every page), this one is not
+    furniture: it should survive extract-images.py's furniture-xref skip
+    since it never clears REPEATED_IMAGE_MIN_PAGE_FRACTION."""
+    img = Image.new("RGB", (64, 64), "white")
+    draw = ImageDraw.Draw(img)
+    draw.rectangle((4, 4, 60, 60), fill=(200, 200, 60), outline="black", width=2)
+    draw.polygon([(32, 10), (54, 54), (10, 54)], fill=(80, 80, 200))
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
 def rect_bbox(x: float, y: float, w: float, h: float) -> list[float]:
     """Convert a reportlab-coordinate rect (bottom-left x,y + width/height,
     y increasing upward) to a fitz/pdfplumber-style bbox [x0, top, x1,
@@ -242,6 +256,7 @@ def draw_bar_chart(c: canvas.Canvas, x: float, y: float, bars: list[tuple[str, f
 def generate(output_pdf: Path = OUTPUT_PDF, output_json: Path = GOLDEN_JSON) -> dict:
     output_pdf.parent.mkdir(parents=True, exist_ok=True)
     logo_reader = ImageReader(Image.open(BytesIO(make_logo_bytes())))
+    unique_icon_reader = ImageReader(Image.open(BytesIO(make_unique_icon_bytes())))
 
     c = canvas.Canvas(str(output_pdf), pagesize=letter)
 
@@ -304,6 +319,11 @@ def generate(output_pdf: Path = OUTPUT_PDF, output_json: Path = GOLDEN_JSON) -> 
     headings_golden.append({**entry(1), "font_size": HEADING_SIZES[entry(1)["level"]]})
     y -= 6
     generate_sample.draw_wrapped_text(c, CUT_PART_A, LEFT_MARGIN, y, 90, 11, 15)
+    # A second, unique (non-repeated) bitmap -- top-right corner, clear of
+    # the heading/body text and the frame border -- Task A2's negative case
+    # for extract-images.py's furniture-xref skip (this one must NOT be
+    # skipped, unlike the logo).
+    c.drawImage(unique_icon_reader, PAGE_WIDTH - 40 - 26, PAGE_HEIGHT - 60, 26, 26)
     draw_furniture(c, logo_reader, 4, PAGE_COUNT)
     c.showPage()
 
