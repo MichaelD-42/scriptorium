@@ -22,6 +22,12 @@ estimating body size from just the pages it was given, which is unreliable
 on a sparse page (e.g. a page with only a heading and one caption line has
 no real "body text" sample of its own to measure).
 
+This script also reads `work/<doc>/toc.json` (written by `pdf-triage`) if
+it exists, to drive heading-level classification — see "What it does"
+below. No `--toc` flag: unlike `--body-size`, there's no reasonable
+standalone override for it, so it's read straight from disk when present
+and treated as "no TOC" (the fallback path) when absent.
+
 `--pages` is required and explicit on purpose: this skill must never process
 a page it wasn't assigned, so a Tier-1 pass can't silently overwrite what a
 higher tier already produced for a page that failed grading and got escalated.
@@ -32,9 +38,28 @@ document.
 
 ## What it does
 
-- Text blocks, grouped by font size relative to the document's body size
-  (`--body-size`, from `pdf-triage`), are classified as `heading` (level
-  1-3, ratio ≥1.9/≥1.45/≥1.15) or `paragraph`.
+- Text blocks are classified as `heading` (level 1-6) or `paragraph` in one
+  of two ways (Task A4), read from `work/<doc>/toc.json` (`pdf-triage`'s
+  TOC detection, Task A3) in addition to `triage.json`:
+  - **TOC-driven (primary)**, whenever `toc.json` has any entries for this
+    document: a block's text is normalized (case-folded, whitespace
+    collapsed, trailing punctuation stripped -- `lib/toc.py`'s
+    `normalize_toc_text`) and compared against every TOC entry's
+    normalized "number + title" text (`toc_entry_heading_text`). An exact
+    match makes the block a `heading` at that entry's level; no match
+    means `paragraph`, no matter the block's font size or boldness. This
+    is what stops a lone bullet glyph, or any other large/bold text that
+    isn't an actual TOC-listed heading, from being misclassified as a
+    heading.
+  - **Fallback**, only when `toc.json` has zero entries at all (no printed
+    TOC, no outline): every DISTINCT font size used by a bold,
+    larger-than-body-size, >=3-alphanumeric-character block anywhere in
+    the document is ranked largest-first into levels 1-6, with the 6th and
+    every smaller distinct size collapsing to level 6 instead of growing
+    unbounded. This ranking is computed once over the WHOLE document (not
+    just the pages a given `--pages` batch covers), so it stays consistent
+    across separate invocations of this script for different page batches
+    of the same document.
 - Tables are detected with `pdfplumber` and emitted as `table` elements
   (row-major list of lists).
 - Reading order follows PyMuPDF's block order top-to-bottom, left-to-right.

@@ -42,7 +42,7 @@ document instead — see the "ReqIF format" section below.
 
 | element type | Markdown | HTML | ReqIF |
 |---|---|---|---|
-| `heading` (level 1-3) | `#`/`##`/`###` | `<h1>`/`<h2>`/`<h3>` | `SPEC-OBJECT` with a `ReqIF.ChapterName` string value; builds the `SPEC-HIERARCHY` tree |
+| `heading` (level 1-6) | `#` through `######` | `<h1>` through `<h6>` | `SPEC-OBJECT` with a `ReqIF.ChapterName` string value; builds the `SPEC-HIERARCHY` tree |
 | `paragraph` | plain text, blank-line separated | `<p>` | `SPEC-OBJECT` with a `ReqIF.Text` XHTML value (`<xhtml:p>`) |
 | `table` | pipe table | `<table>` | `SPEC-OBJECT` with a `ReqIF.Text` XHTML value (`<xhtml:table>`) |
 | `image` | `![caption](assets/...)` | `<img src="assets/..." alt="caption">` | `SPEC-OBJECT` with a `ReqIF.Text` XHTML value (`<xhtml:object data="assets/...">caption</xhtml:object>`, plus an `<xhtml:pre>` of the mermaid source if the element has one) |
@@ -102,7 +102,7 @@ dependency.
   nearest preceding heading at a level `< L` (or the document root if
   none); non-heading elements nest under whichever heading currently
   applies. This is richer than md/html (a flat element stream) or okf
-  (H1-only split) — the full H1/H2/H3 tree survives.
+  (H1-only split) — the full H1-H6 tree survives.
 - `--format reqif` writes only `output/<doc>/<doc>.reqif` (loose XML;
   `image` elements' `THE-VALUE` reference `assets/...` relative to
   `output/<doc>/`, same as md/html).

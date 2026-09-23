@@ -268,12 +268,14 @@ class TestMixedFurnitureAndRealLineBlock:
                     "masked": "Doc No. SYN-FUR-#",
                     "bbox": [40.0, 760.0, 160.0, 772.0],
                     "max_size": 8.0,
+                    "bold": False,
                 },
                 {
                     "text": "Reviewed by Jane Doe",
                     "masked": "Reviewed by Jane Doe",
                     "bbox": [40.0, 772.0, 300.0, 784.0],
                     "max_size": 8.0,
+                    "bold": False,
                 },
             ],
         }
@@ -282,7 +284,7 @@ class TestMixedFurnitureAndRealLineBlock:
         kept_lines = mod.furniture_filtered_lines(block, furniture_masked, page_height)
         assert [line["text"] for line in kept_lines] == ["Reviewed by Jane Doe"]
 
-        element = mod.build_block_element(block, kept_lines, body_size=8.0)
+        element = mod.build_block_element(block, kept_lines, body_size=8.0, toc_lookup={}, heading_size_ranks={})
         assert element is not None
         assert element["type"] == "paragraph"
         assert element["text"] == "Reviewed by Jane Doe"
@@ -310,7 +312,7 @@ class TestMixedFurnitureAndRealLineBlock:
 
         kept_lines = mod.furniture_filtered_lines(block, furniture_masked, page_height)
         assert kept_lines == []
-        assert mod.build_block_element(block, kept_lines, body_size=8.0) is None
+        assert mod.build_block_element(block, kept_lines, body_size=8.0, toc_lookup={}, heading_size_ranks={}) is None
 
     def test_block_outside_the_edge_band_is_never_filtered(self):
         """Sanity check on the gate itself: a block with the same

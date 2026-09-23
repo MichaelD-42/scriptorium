@@ -28,6 +28,13 @@ numbers identified as printed TOC pages (always `[]` when the outline path
 was used, since outline entries don't correspond to any particular rendered
 page). `get_toc(document)` is a thin convenience wrapper for callers that
 only want the entries list.
+
+`normalize_toc_text(text)` and `toc_entry_heading_text(entry)` (Task A4) are
+the shared normalization this module's "does this printed text match this
+TOC entry" comparisons use — currently just `extract_text.py`'s TOC-driven
+heading classification, but kept here rather than duplicated in that script
+so any future caller with the same need reuses it instead of inventing its
+own.
 """
 
 import re
@@ -185,3 +192,31 @@ def get_toc(document) -> list[dict]:
     """Convenience wrapper for callers that only need the entries list."""
     entries, _toc_pages = detect_toc(document)
     return entries
+
+
+# A run of whitespace and/or these punctuation marks at the end of a string
+# -- ".", ":", ";", "," and both dash variants (hyphen, en dash, em dash),
+# the marks a printed heading/TOC line is likely to trail with.
+_TRAILING_PUNCT_RE = re.compile(r"[\s.:;,\-–—]+$")
+
+
+def normalize_toc_text(text: str) -> str:
+    """Case-fold, collapse internal whitespace to a single space, and strip
+    trailing punctuation -- the one normalization every "does this printed
+    text match this TOC entry" comparison in this codebase uses (Task A4's
+    heading-classification match against toc.json). Picked once, here, so
+    nothing duplicates it: a candidate heading block's own text and a TOC
+    entry's "number + title" text (see `toc_entry_heading_text`) both go
+    through this same function before being compared for equality."""
+    collapsed = re.sub(r"\s+", " ", text.strip())
+    return _TRAILING_PUNCT_RE.sub("", collapsed).casefold()
+
+
+def toc_entry_heading_text(entry: dict) -> str:
+    """The "number + title" text a TOC entry's matching body heading is
+    expected to be printed as (see generate_furniture_fixture.py's
+    `draw_heading`: `f"{number} {title}"`) -- `title` alone when the entry
+    has no number (e.g. an outline entry with no leading number)."""
+    number = entry.get("number")
+    title = entry["title"]
+    return f"{number} {title}" if number else title

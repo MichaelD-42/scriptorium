@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 import elements as elements_lib  # noqa: E402
 import paths  # noqa: E402
+import toc as toc_lib  # noqa: E402
 
 import fitz  # PyMuPDF
 import pdfplumber
@@ -47,6 +48,32 @@ def load_page_roles(doc: str) -> dict[int, str]:
         return {}
     triage = json.loads(triage_path.read_text())
     return {p["page_number"]: p["role"] for p in triage.get("pages", []) if p.get("role")}
+
+
+def load_toc_entries(doc: str) -> list[dict]:
+    """toc.json's `entries` list (Task A3's `lib/toc.py`/`pdf-triage`
+    output) -- empty list if `toc.json` doesn't exist (triage hasn't run) or
+    this document has none (no printed TOC, no outline). Drives Task A4's
+    TOC-driven heading classification; extract_text.py must still work
+    standalone without it, same convention as `load_furniture`/
+    `load_page_roles` above."""
+    toc_path = paths.toc_json(doc)
+    if not toc_path.exists():
+        return []
+    return json.loads(toc_path.read_text()).get("entries", [])
+
+
+def build_toc_heading_lookup(toc_entries: list[dict]) -> dict[str, int]:
+    """{normalize_toc_text(entry's "number + title" text): entry["level"]}
+    -- the primary (TOC-driven) heading-classification table. Empty exactly
+    when this document has no TOC entries at all, which is what signals
+    `classify_heading_level` to use the fallback (rank-by-size) path
+    instead."""
+    lookup = {}
+    for entry in toc_entries:
+        key = toc_lib.normalize_toc_text(toc_lib.toc_entry_heading_text(entry))
+        lookup[key] = entry["level"]
+    return lookup
 
 
 def is_frame_table(bbox, frame_tables: list[dict]) -> bool:
@@ -87,7 +114,13 @@ def furniture_filtered_lines(block: dict, furniture_masked: set[str], page_heigh
     return [line for line in block["lines"] if line["masked"] not in furniture_masked]
 
 
-def build_block_element(block: dict, kept_lines: list[dict], body_size: float) -> dict | None:
+def build_block_element(
+    block: dict,
+    kept_lines: list[dict],
+    body_size: float,
+    toc_lookup: dict[str, int],
+    heading_size_ranks: dict[float, int],
+) -> dict | None:
     """Reassemble a `heading`/`paragraph` element from `kept_lines` (a
     possibly-trimmed subset of `block["lines"]`, per `furniture_filtered_lines`).
     Returns None if nothing survived (the whole block was furniture).
@@ -108,8 +141,9 @@ def build_block_element(block: dict, kept_lines: list[dict], body_size: float) -
         ]
     text = " ".join(line["text"] for line in kept_lines)
     max_size = max(line["max_size"] for line in kept_lines)
+    is_bold_block = all(line["bold"] for line in kept_lines)
 
-    level = classify_heading_level(max_size, body_size)
+    level = classify_heading_level(text, is_bold_block, max_size, body_size, toc_lookup, heading_size_ranks)
     if level:
         return {"type": "heading", "level": level, "text": text, "bbox": bbox}
     return {"type": "paragraph", "text": text, "bbox": bbox}
@@ -128,17 +162,110 @@ def bbox_overlap_ratio(a, b) -> float:
     return inter / area_a
 
 
-def classify_heading_level(block_max_size: float, body_size: float) -> int | None:
-    if body_size <= 0:
+# Task A4: heading-level classification is TOC-driven when this document
+# has TOC entries at all, with a rank-by-distinct-bold-size fallback when it
+# doesn't. The old fixed-ratio thresholds (1.9/1.45/1.15) are gone --
+# ranking replaces ratio comparison entirely, even in the fallback path.
+
+# The fallback path's "does this block carry real heading text, not just a
+# bullet glyph or stray mark" gate: a candidate block needs at least this
+# many alphanumeric characters. "Non-glyph" is defined here as simply
+# `str.isalnum()` (unicode-aware) -- a lone bullet glyph ("-", "•", or a
+# private-use-area dingbat) has zero alphanumeric characters and never
+# qualifies, regardless of its font size or boldness. This is the simple
+# heuristic the brief calls out as an acceptable choice, over building a
+# printable-character-range table.
+FALLBACK_NON_GLYPH_MIN_CHARS = 3
+
+# The fallback path ranks at most this many distinct bold-heading sizes;
+# the 6th-largest and every smaller distinct size all collapse to level 6
+# rather than growing unbounded.
+FALLBACK_MAX_LEVELS = 6
+
+# PyMuPDF span flag bit for bold (TEXT_FONT_BOLD). Some fonts don't set it
+# reliably (e.g. non-embedded/substituted fonts), so this is combined with a
+# "bold" substring check on the font name as a second, independent signal --
+# both this fixture's and typical real documents' bold fonts are literally
+# named e.g. "Helvetica-Bold".
+_BOLD_FLAG_BIT = 16
+
+
+def is_bold_span(span: dict) -> bool:
+    flags = span.get("flags", 0) or 0
+    font = span.get("font", "") or ""
+    return bool(flags & _BOLD_FLAG_BIT) or "bold" in font.lower()
+
+
+def non_glyph_char_count(text: str) -> int:
+    """See FALLBACK_NON_GLYPH_MIN_CHARS -- count of alphanumeric characters
+    in `text`."""
+    return sum(1 for ch in text if ch.isalnum())
+
+
+def is_fallback_heading_candidate(text: str, is_bold_block: bool, max_size: float, body_size: float) -> bool:
+    """Fallback-path (no TOC) candidacy gate: bold, strictly larger than the
+    document's body size, and carrying at least FALLBACK_NON_GLYPH_MIN_CHARS
+    of real (non-glyph) text. Used both to build the document-wide size
+    ranking (`document_heading_size_ranks`) and to classify each block
+    against it, so the two stay consistent with each other."""
+    if body_size <= 0 or not is_bold_block or max_size <= body_size:
+        return False
+    return non_glyph_char_count(text) >= FALLBACK_NON_GLYPH_MIN_CHARS
+
+
+def document_heading_size_ranks(fitz_doc, body_size: float) -> dict[float, int]:
+    """Fallback-path (no TOC) heading-level ranking: every DISTINCT font
+    size used by a fallback-candidate bold block anywhere in the document
+    (not just the pages this invocation's --pages batch covers), ranked
+    largest-first -- the largest distinct size is level 1, the next is
+    level 2, and so on, with the 6th and any smaller distinct size all
+    collapsing to level 6 (FALLBACK_MAX_LEVELS) instead of growing
+    unbounded.
+
+    Scans the WHOLE document rather than just the current batch's pages on
+    purpose: the elastic-loop pipeline can invoke this script once per page
+    batch, as separate subprocesses, and the ranking (and therefore the
+    levels a heading of a given size gets) must be identical regardless of
+    which batch happens to run -- a per-batch-local ranking would disagree
+    with itself across batches of the same document."""
+    sizes = set()
+    for page in fitz_doc:
+        text_blocks, _ = extract_page_text_blocks(page, body_size)
+        for block in text_blocks:
+            lines = block["lines"]
+            text = " ".join(line["text"] for line in lines)
+            max_size = max((line["max_size"] for line in lines), default=0.0)
+            is_bold_block = bool(lines) and all(line["bold"] for line in lines)
+            if is_fallback_heading_candidate(text, is_bold_block, max_size, body_size):
+                sizes.add(max_size)
+    ranked = sorted(sizes, reverse=True)
+    return {size: min(i + 1, FALLBACK_MAX_LEVELS) for i, size in enumerate(ranked)}
+
+
+def classify_heading_level(
+    text: str,
+    is_bold_block: bool,
+    max_size: float,
+    body_size: float,
+    toc_lookup: dict[str, int],
+    heading_size_ranks: dict[float, int],
+) -> int | None:
+    """Primary: TOC-driven, whenever this document has any TOC entries at
+    all (`toc_lookup` non-empty). A block becomes a heading at its matching
+    TOC entry's level only if its normalized text matches a TOC entry's
+    normalized "number + title" text exactly -- no match means `paragraph`,
+    no matter the block's size or boldness. This is what stops a lone
+    bullet glyph, or any other large/bold text that isn't an actual
+    TOC-listed heading, from being misclassified as a heading.
+
+    Fallback: only reached when this document has zero TOC entries (no
+    printed TOC, no outline) -- rank-by-distinct-bold-size instead, gated by
+    `is_fallback_heading_candidate`."""
+    if toc_lookup:
+        return toc_lookup.get(toc_lib.normalize_toc_text(text))
+    if not is_fallback_heading_candidate(text, is_bold_block, max_size, body_size):
         return None
-    ratio = block_max_size / body_size
-    if ratio >= 1.9:
-        return 1
-    if ratio >= 1.45:
-        return 2
-    if ratio >= 1.15:
-        return 3
-    return None
+    return heading_size_ranks.get(max_size)
 
 
 def extract_page_tables(pdf_path: Path, page_number: int) -> list[dict]:
@@ -172,7 +299,8 @@ def extract_page_text_blocks(page, body_size: float | None) -> tuple[list[dict],
             if not stripped:
                 continue
             line_max_size = 0.0
-            for span in line.get("spans", []):
+            line_spans = line.get("spans", [])
+            for span in line_spans:
                 sizes.append(span["size"])
                 line_max_size = max(line_max_size, span["size"])
             lines.append({
@@ -180,11 +308,35 @@ def extract_page_text_blocks(page, body_size: float | None) -> tuple[list[dict],
                 "masked": re.sub(r"\d+", "#", stripped),
                 "bbox": line["bbox"],
                 "max_size": line_max_size,
+                "bold": bool(line_spans) and all(is_bold_span(s) for s in line_spans),
             })
         if lines:
             text_blocks.append({"bbox": block["bbox"], "lines": lines})
     resolved_body_size = body_size if body_size else (statistics.median(sizes) if sizes else 0.0)
     return text_blocks, resolved_body_size
+
+
+def resolve_document_body_size(fitz_doc) -> float:
+    """Document-wide, character-weighted median body text size -- the same
+    computation as `pdf-triage`'s `document_body_size()`, duplicated here
+    (rather than imported cross-skill) so this script stays runnable
+    standalone without triage having run, same convention as
+    `load_furniture`/`load_page_roles`/`load_toc_entries` above. Only used
+    to size the fallback (no-TOC) heading ranking document-wide when
+    `--body-size` wasn't passed in; per-page extraction keeps its own
+    existing sparser per-page fallback in `extract_page_text_blocks`,
+    unchanged."""
+    weighted_sizes = []
+    for page in fitz_doc:
+        for block in page.get_text("dict").get("blocks", []):
+            if block.get("type") != 0:
+                continue
+            for line in block.get("lines", []):
+                for span in line.get("spans", []):
+                    text_len = len(span["text"].strip())
+                    if text_len:
+                        weighted_sizes.extend([span["size"]] * text_len)
+    return statistics.median(weighted_sizes) if weighted_sizes else 0.0
 
 
 def main() -> None:
@@ -204,8 +356,18 @@ def main() -> None:
     frame_tables = furniture.get("frame_tables", [])
     furniture_masked = {p["masked"] for p in furniture.get("line_patterns", [])}
     page_roles = load_page_roles(args.doc)
+    toc_lookup = build_toc_heading_lookup(load_toc_entries(args.doc))
 
     fitz_doc = fitz.open(pdf_path)
+
+    # Fallback-path (no TOC) heading ranking is document-wide (see
+    # document_heading_size_ranks's docstring) and only ever needed when
+    # there's no TOC to drive classification instead -- skip the extra
+    # whole-document scan otherwise.
+    heading_size_ranks: dict[float, int] = {}
+    if not toc_lookup:
+        ranking_body_size = args.body_size if args.body_size else resolve_document_body_size(fitz_doc)
+        heading_size_ranks = document_heading_size_ranks(fitz_doc, ranking_body_size)
 
     for page_number in page_numbers:
         if page_roles.get(page_number) == "toc":
@@ -233,7 +395,7 @@ def main() -> None:
             if any(bbox_overlap_ratio(block["bbox"], t["bbox"]) > 0.5 for t in tables):
                 continue
             kept_lines = furniture_filtered_lines(block, furniture_masked, page_height)
-            element = build_block_element(block, kept_lines, body_size)
+            element = build_block_element(block, kept_lines, body_size, toc_lookup, heading_size_ranks)
             if element is not None:
                 page_elements.append(element)
 
