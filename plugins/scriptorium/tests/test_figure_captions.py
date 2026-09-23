@@ -267,6 +267,37 @@ class TestDescribeImageCli:
         shard = json.loads(shard_path.read_text())
         assert shard["elements"][0]["figure_text"] == "Start\nProcess\nEnd"
 
+    def test_figure_text_alias_refuses_to_overwrite_script_side_value(self, tmp_project, monkeypatch, capsys):
+        """Fix round 1: A5's contract is that the agent only fills
+        figure_text via vision when the script-side value came back
+        null/absent -- never overwrite real, deterministically-extracted
+        text. Unlike --caption/--data-table/--mermaid, this precondition is
+        code-checkable, so it's a hard refusal (exit 1), not documentation
+        only."""
+        shard_path = paths.shard_path("doc", 1, "image")
+        elements_lib.write_shard(shard_path, 1, [
+            {"type": "image", "asset": "assets/a.png", "bbox": [0, 0, 1, 1], "figure_text": "Start\nEnd"},
+        ])
+
+        monkeypatch.setattr(
+            "sys.argv",
+            [
+                "describe_image.py", "--doc", "doc", "--page", "1", "--asset", "assets/a.png",
+                "--description", "a flow diagram", "--figure-text", "a vision guess",
+            ],
+        )
+        with pytest.raises(SystemExit) as exc_info:
+            describe_image.main()
+        assert exc_info.value.code == 1
+        assert "figure_text" in capsys.readouterr().err
+
+        # The guard fires before the shard is ever rewritten -- the
+        # original script-side figure_text (and every other field) is
+        # untouched, not just figure_text specifically.
+        shard = json.loads(shard_path.read_text())
+        assert shard["elements"][0]["figure_text"] == "Start\nEnd"
+        assert "description" not in shard["elements"][0]
+
     def test_locates_correct_element_among_several_on_same_page(self, tmp_project, monkeypatch):
         shard_path = paths.shard_path("doc", 1, "image")
         elements_lib.write_shard(shard_path, 1, [

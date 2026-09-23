@@ -114,7 +114,10 @@ For an image document, `--pages` is always `1` — there's only ever page 1.
   - `--figure-text` (optional, PDF vector-region elements only) lands a
     vision transcription — only used when the region's script-side
     `figure_text` (above) came back null/absent, i.e. the region had no
-    text layer at all.
+    text layer at all. Enforced, not just documented: `describe_image.py`
+    refuses (exits 1) to overwrite an element that already has a non-empty
+    `figure_text`, since that precondition is deterministic and
+    code-checkable, unlike the other agent-judgment fields.
 
   `mermaid_image.py` (below) still exists standalone too, for a
   stdin-based, `describe_image.py`-independent call.

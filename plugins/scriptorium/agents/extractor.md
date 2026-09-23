@@ -148,9 +148,12 @@ rendered crop, transcribe the visible text faithfully (this is
 transcription, not interpretation — say so plainly if something's
 illegible rather than inventing a plausible guess, same rule as OCR
 escalation above), and land it with `describe_image.py --figure-text`
-alongside your `--description` for the same element. This is not new
-behavior — it was already the case before this contract existed — just
-restated here now that `caption`'s move to script-authoritative might
+alongside your `--description` for the same element. `describe_image.py`
+enforces this precondition itself — it refuses (exits 1) if the element
+already has a non-empty `figure_text`, so calling `--figure-text` on an
+element that didn't need it is a hard error, not a silent overwrite. This
+is not new behavior — it was already the case before this contract existed
+— just restated here now that `caption`'s move to script-authoritative might
 otherwise read as "everything textual on a figure is now the script's
 job," which isn't true for `figure_text` without a text layer.
 

@@ -49,6 +49,14 @@ at the crop, script lands the result" shape as `--description`, it's
 mechanically the same kind of write, so it lives here rather than as a
 fourth standalone script. Judgment call, not explicitly in the brief's CLI
 signature -- documented in task-A6-report.md.
+
+Unlike `--caption`/`--data-table`/`--mermaid`, "was `figure_text` already
+set" is a deterministic, code-checkable precondition, not a judgment call
+the script has to trust the agent on -- so `--figure-text` is refused
+(exit 1, matching this script's other validation-failure paths, e.g.
+invalid `--data-table` JSON or `--mermaid`) when the target element
+already carries a non-empty `figure_text`, rather than silently
+overwriting real, deterministically-extracted text with a vision guess.
 """
 
 import argparse
@@ -110,6 +118,23 @@ def main() -> None:
     found = False
     for el in shard["elements"]:
         if el["type"] == "image" and el["asset"] == args.asset:
+            if args.figure_text is not None and el.get("figure_text"):
+                # A5's contract: the agent may only fill figure_text via
+                # vision when the script-side value came back null/absent
+                # -- never overwrite real, deterministically-extracted text.
+                # Unlike --caption/--data-table/--mermaid (judgment calls a
+                # script can't verify), "was figure_text already set" is a
+                # deterministic, code-checkable precondition, so it's
+                # enforced here rather than left as documentation only.
+                print(
+                    f"error: {args.asset} already has a script-side figure_text -- "
+                    "refusing to overwrite it with --figure-text. --figure-text is "
+                    "only for an element whose figure_text came back null/absent "
+                    "(no text layer at all); if it's already set, the vision step "
+                    "isn't needed for this element.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
             el["description"] = args.description
             if parsed_table is not None:
                 el["data_table"] = parsed_table
