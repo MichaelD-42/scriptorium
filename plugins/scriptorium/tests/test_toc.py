@@ -154,6 +154,79 @@ class TestOutlineTocTakesPriority:
         assert toc_pages == []
 
 
+def _build_inline_pdf(tmp_path: Path, name: str, pages_lines: list[list[str]]) -> Path:
+    """A tiny inline-built PDF (via PyMuPDF's own text-insertion API, same
+    "safer choice" pattern as TestOutlineTocTakesPriority's outline-only PDF)
+    with one page per entry in `pages_lines`, each page's lines drawn
+    top-to-bottom -- used to probe near-miss/deep-in-document cases without
+    touching either already-reviewed fixture (furniture_sample.pdf /
+    sample.pdf)."""
+    out_path = tmp_path / name
+    document = fitz.open()
+    for lines in pages_lines:
+        page = document.new_page()
+        y = 72
+        for line in lines:
+            page.insert_text((72, y), line, fontsize=11)
+            y += 14
+    document.save(out_path)
+    document.close()
+    return out_path
+
+
+class TestPrintedTocFalsePositiveGuards:
+    """Task A3 fix round: a false positive here is silent, gate-passing data
+    loss (a role="toc" page's extraction is skipped and no_empty_pages
+    exempts it), so both the line-count threshold and the front-of-document
+    scan bound need their own coverage -- not just the "some real TOC gets
+    detected" positive cases above."""
+
+    def test_dot_leader_pricing_table_below_threshold_is_not_detected_as_toc(self, tmp_path):
+        """A pricing/spec table using dot-leader alignment for its price
+        column -- exactly the shape a real RFQ document contains -- with 8
+        dot-leader lines: comfortably more than the old (unsafe)
+        MIN_QUALIFYING_LINES of 3, comfortably below the current 15. Must
+        NOT be detected as a TOC page."""
+        pricing_lines = [f"Part No. PN-{1000 + i} .......... {10 + i}" for i in range(8)]
+        pdf_path = _build_inline_pdf(tmp_path, "pricing_table_near_miss.pdf", [pricing_lines])
+
+        with fitz.open(pdf_path) as document:
+            entries, toc_pages = toc.detect_toc(document)
+
+        assert toc_pages == []
+        assert entries == []
+
+    def test_dot_leader_table_past_the_front_of_document_bound_is_not_detected(self, tmp_path):
+        """A page with 20 dot-leader lines -- comfortably clearing
+        MIN_QUALIFYING_LINES on pattern alone -- placed just past
+        toc.TOC_SEARCH_MAX_PAGES. Must NOT be detected: a TOC is always near
+        the front, so a coincidental pattern match deep in the document must
+        never be accepted regardless of how many lines it has."""
+        filler_pages = [[f"Body paragraph text on filler page {i}."] for i in range(1, toc.TOC_SEARCH_MAX_PAGES + 1)]
+        dense_lines = [f"{i + 1} Item {i:03d} .......... {100 + i}" for i in range(20)]
+        pdf_path = _build_inline_pdf(tmp_path, "dense_table_past_bound.pdf", filler_pages + [dense_lines])
+
+        with fitz.open(pdf_path) as document:
+            entries, toc_pages = toc.detect_toc(document)
+
+        assert toc_pages == []
+        assert entries == []
+
+    def test_same_dense_table_near_the_front_is_still_detected(self, tmp_path):
+        """Control for the previous test: the same pattern-qualifying page,
+        placed within the bound instead of past it, IS detected -- proving
+        the bound (not something else about the content) is what blocks the
+        deep-in-document case."""
+        dense_lines = [f"{i + 1} Item {i:03d} .......... {100 + i}" for i in range(20)]
+        pdf_path = _build_inline_pdf(tmp_path, "dense_table_within_bound.pdf", [dense_lines])
+
+        with fitz.open(pdf_path) as document:
+            entries, toc_pages = toc.detect_toc(document)
+
+        assert toc_pages == [1]
+        assert len(entries) == 20
+
+
 class TestTriageWritesTocJsonAndMarksRole:
     def test_toc_json_written_matching_parsed_entries(self, furniture_doc, tmp_project):
         triage = _run_triage(furniture_doc, tmp_project)

@@ -10,13 +10,17 @@ Two strategies, tried in order, against a `fitz.Document`:
      key present gives every entry the same shape regardless of which
      strategy produced it).
   2. **Printed TOC page detection** (fallback, when there is no outline):
-     scan pages from the front of the document for a contiguous run of
-     pages whose lines mostly look like dot-leader TOC entries
-     ("Title .......... 4"), then parse entries off of just those pages.
-     Handles both "number and title on one line" and "number alone on one
-     line, title+leader+page on the next" (PyMuPDF's line-grouping
-     sometimes puts a printed TOC's number on its own line when it's
-     right-aligned or otherwise laid out apart from the title).
+     scan the first TOC_SEARCH_MAX_PAGES pages of the document for a
+     contiguous run of pages with at least MIN_QUALIFYING_LINES lines that
+     look like dot-leader TOC entries ("Title .......... 4"), then parse
+     entries off of just those pages. Handles both "number and title on one
+     line" and "number alone on one line, title+leader+page on the next"
+     (PyMuPDF's line-grouping sometimes puts a printed TOC's number on its
+     own line when it's right-aligned or otherwise laid out apart from the
+     title). Both the line-count threshold and the front-of-document bound
+     exist to keep a false positive here from being silent, gate-passing
+     data loss -- see MIN_QUALIFYING_LINES's and TOC_SEARCH_MAX_PAGES's
+     comments below.
 
 `detect_toc(document)` is the main entry point: returns
 `(entries, toc_pages)`, where `toc_pages` is the list of 1-indexed page
@@ -29,14 +33,21 @@ only want the entries list.
 import re
 
 # A page qualifies as a printed TOC page once it has at least this many
-# lines matching DOT_LEADER_RE. The brief's suggested default (15) is sized
-# for a dense, real-world TOC; this repo's synthetic fixture
-# (furniture_sample.pdf) deliberately keeps its two TOC pages small (5
-# dot-leader-bearing lines each) to stay a quick, hand-checkable fixture, so
-# 15 would never fire here. Calibrated down to comfortably clear the
-# fixture's 5-per-page while still requiring more than one or two stray
-# matches elsewhere in a document (see task-A3-report.md).
-MIN_QUALIFYING_LINES = 3
+# lines matching DOT_LEADER_RE. This is the brief's original spec'd value.
+#
+# An earlier revision of this module calibrated this down to 3 to fit
+# furniture_sample.pdf's then-5-line-per-page TOC. That was unsafe for
+# production: a `role: "toc"` page's extraction is silently skipped
+# (`skipped: "toc"`, zero elements) and `no_empty_pages` exempts it -- so a
+# false positive here is silent, gate-passing data loss. A threshold of 3 is
+# easily tripped by an ordinary dot-leader-aligned pricing/spec table (real
+# RFQ documents contain exactly that shape), which would then vanish from
+# the extracted output without any error. Fixed by extending the fixture's
+# TOC pages to a more realistic >=15 dot-leader lines each (see
+# examples/generate_furniture_fixture.py and task-A3-report.md's fix note)
+# and raising this constant back to match, rather than lowering the
+# production threshold to fit a small fixture.
+MIN_QUALIFYING_LINES = 15
 
 # "........ 4" -- three or more dots, optional whitespace, a trailing page
 # number, optional trailing whitespace, end of line.
@@ -52,6 +63,20 @@ NUMBER_ONLY_RE = re.compile(r"^(\d+(?:\.\d+)*)$")
 # A leading section number followed by the rest of the text, e.g.
 # "1.2 Document Overview" -> ("1.2", "Document Overview").
 NUMBER_PREFIX_RE = re.compile(r"^(\d+(?:\.\d+)*)\s+(.+)$")
+
+# A TOC is always near the front of a document -- find_printed_toc_pages
+# only scans this many pages from the start. Without a bound, a page deep in
+# a long document whose lines coincidentally match DOT_LEADER_RE often
+# enough (e.g. a dense pricing/spec table) could be accepted as a TOC page
+# purely on pattern-matching the line count, regardless of MIN_QUALIFYING_LINES
+# -- a real risk given `role: "toc"` pages are silently skipped by the
+# extractors (see MIN_QUALIFYING_LINES's comment above). A fixed page count,
+# rather than a fraction of the document's length, is used deliberately so
+# the scan doesn't become more permissive just because the rest of the
+# document happens to be long. 20 pages comfortably covers realistic front
+# matter (a cover page, a short revision history, a multi-page TOC itself)
+# for the RFQ-sized specification documents this toolkit targets.
+TOC_SEARCH_MAX_PAGES = 20
 
 
 def _level_from_number(number: str) -> int:
@@ -85,14 +110,18 @@ def _qualifying_line_count(lines: list[str]) -> int:
 
 
 def find_printed_toc_pages(document) -> list[int]:
-    """The contiguous run of pages, scanning from the start of the document,
-    whose dot-leader line count meets MIN_QUALIFYING_LINES. Pages before the
-    first qualifying page are skipped (a title/cover page); the run stops at
-    the first page after that point that doesn't qualify -- a TOC is always
-    near the front and contiguous, never resuming after a gap."""
+    """The contiguous run of pages, scanning from the start of the document
+    and bounded to the first TOC_SEARCH_MAX_PAGES pages, whose dot-leader
+    line count meets MIN_QUALIFYING_LINES. Pages before the first qualifying
+    page are skipped (a title/cover page); the run stops at the first page
+    after that point that doesn't qualify -- a TOC is always near the front
+    and contiguous, never resuming after a gap, and a qualifying-looking page
+    outside the front-of-document bound is never treated as one."""
     toc_pages = []
     started = False
-    for page_number, page in enumerate(document, start=1):
+    search_limit = min(document.page_count, TOC_SEARCH_MAX_PAGES)
+    for page_number in range(1, search_limit + 1):
+        page = document[page_number - 1]
         qualifies = _qualifying_line_count(_page_lines(page)) >= MIN_QUALIFYING_LINES
         if qualifies:
             started = True

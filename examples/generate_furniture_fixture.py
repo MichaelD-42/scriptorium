@@ -67,9 +67,11 @@ REVISION_TEXT = "Rev. B"
 
 HEADING_SIZES = {1: 18, 2: 16, 3: 14, 4: 12}
 
-# --- TOC / heading source of truth (single list drives TOC text, body
-# headings, and the golden headings section, so all three can't drift apart)
-TOC_ENTRIES = [
+# --- TOC / heading source of truth for the entries that also print as body
+# headings (pages 4-8) -- referenced by name below so adding TOC-only
+# padding entries (see PADDING_TOC_ENTRIES_PAGE2/3) never shifts these
+# positionally.
+ORIGINAL_TOC_ENTRIES = [
     {"number": "1", "title": "Introduction", "page": 4, "level": 1, "split_line": False},
     {"number": "1.1", "title": "Purpose and Scope", "page": 4, "level": 2, "split_line": False},
     {"number": "1.2", "title": "Document Overview", "page": 5, "level": 2, "split_line": False},
@@ -81,6 +83,48 @@ TOC_ENTRIES = [
     {"number": "3", "title": "Process Diagrams", "page": 8, "level": 1, "split_line": False},
     {"number": "3.1", "title": "Workflow Overview", "page": 8, "level": 2, "split_line": True},
 ]
+
+# TOC-only padding entries (no corresponding body heading) -- extends each
+# TOC page to >=15 dot-leader lines, matching lib/toc.py's MIN_QUALIFYING_LINES
+# (raised from the fixture-fitting 3 back to the brief's spec'd 15; see
+# task-A3-report.md's fix note). Longer, appendix-style back matter is also
+# more realistic for a real document's TOC than the original 5-entry pages.
+# All point at page 9 (a real page in the document) -- the target page
+# doesn't matter for TOC-detection/parsing, only that a trailing integer is
+# present for the dot-leader regex to match.
+PADDING_TOC_ENTRIES_PAGE2 = [
+    {"number": "4", "title": "Appendix A: Glossary", "page": 9, "level": 1, "split_line": False},
+    {"number": "4.1", "title": "Terms and Definitions", "page": 9, "level": 2, "split_line": False},
+    {"number": "4.2", "title": "Abbreviations", "page": 9, "level": 2, "split_line": False},
+    {"number": "5", "title": "Appendix B: References", "page": 9, "level": 1, "split_line": False},
+    {"number": "5.1", "title": "Normative References", "page": 9, "level": 2, "split_line": False},
+    {"number": "5.2", "title": "Informative References", "page": 9, "level": 2, "split_line": False},
+    {"number": "6", "title": "Appendix C: Revision History", "page": 9, "level": 1, "split_line": False},
+    {"number": "6.1", "title": "Change Log", "page": 9, "level": 2, "split_line": False},
+    {"number": "6.2", "title": "Approval Record", "page": 9, "level": 2, "split_line": False},
+    {"number": "7", "title": "Appendix D: Index", "page": 9, "level": 1, "split_line": False},
+]
+PADDING_TOC_ENTRIES_PAGE3 = [
+    {"number": "8", "title": "Appendix E: Contact Information", "page": 9, "level": 1, "split_line": False},
+    {"number": "8.1", "title": "Program Office", "page": 9, "level": 2, "split_line": False},
+    {"number": "8.2", "title": "Technical Support", "page": 9, "level": 2, "split_line": False},
+    {"number": "9", "title": "Appendix F: Safety Notes", "page": 9, "level": 1, "split_line": False},
+    {"number": "9.1", "title": "Handling Precautions", "page": 9, "level": 2, "split_line": False},
+    {"number": "9.2", "title": "Compliance Statement", "page": 9, "level": 2, "split_line": False},
+    {"number": "10", "title": "Appendix G: Standards Referenced", "page": 9, "level": 1, "split_line": False},
+    {"number": "10.1", "title": "Industry Standards", "page": 9, "level": 2, "split_line": False},
+    {"number": "10.2", "title": "Internal Standards", "page": 9, "level": 2, "split_line": False},
+    {"number": "11", "title": "Closing Notes", "page": 9, "level": 1, "split_line": False},
+]
+
+# Render order for the two TOC pages -- page 2 first, then page 3, each
+# original entry followed by its page's padding. TOC_ENTRIES (the flat list
+# used for golden["toc"]["entries"]) must stay in this exact top-to-bottom,
+# page-by-page order since lib/toc.py's parser produces entries in that same
+# order and tests compare the two lists directly.
+TOC_PAGE2_ENTRIES = ORIGINAL_TOC_ENTRIES[0:5] + PADDING_TOC_ENTRIES_PAGE2
+TOC_PAGE3_ENTRIES = ORIGINAL_TOC_ENTRIES[5:10] + PADDING_TOC_ENTRIES_PAGE3
+TOC_ENTRIES = TOC_PAGE2_ENTRIES + TOC_PAGE3_ENTRIES
 
 COVER_PARA = (
     "This synthetic document combines a bordered page frame, running header and footer "
@@ -265,7 +309,10 @@ def generate(output_pdf: Path = OUTPUT_PDF, output_json: Path = GOLDEN_JSON) -> 
     bullet_golden = []
 
     def entry(i):
-        return TOC_ENTRIES[i]
+        # Body headings (pages 4-8) reference the original 10 entries by
+        # position -- unaffected by the TOC-only padding entries, which live
+        # only in TOC_PAGE2_ENTRIES/TOC_PAGE3_ENTRIES.
+        return ORIGINAL_TOC_ENTRIES[i]
 
     # Page 1: cover
     y = PAGE_HEIGHT - 220
@@ -279,22 +326,31 @@ def generate(output_pdf: Path = OUTPUT_PDF, output_json: Path = GOLDEN_JSON) -> 
     draw_furniture(c, logo_reader, 1, PAGE_COUNT)
     c.showPage()
 
-    # Pages 2-3: two-page printed TOC, with dot leaders. Entries 5, 6, 9
-    # (2.1.1 / 2.1.2 / 3.1) print number-alone-then-title -- the case where
-    # the number and title are on separate lines.
+    # Pages 2-3: two-page printed TOC, with dot leaders, extended to >=15
+    # entries (and so >=15 dot-leader lines) per page -- matching
+    # lib/toc.py's MIN_QUALIFYING_LINES (see task-A3-report.md's fix note).
+    # Entries 2.1.1 / 2.1.2 / 3.1 print number-alone-then-title -- the case
+    # where the number and title are on separate lines.
     c.setFont("Helvetica-Bold", 18)
     c.drawString(LEFT_MARGIN, PAGE_HEIGHT - 110, "Table of Contents")
     y = PAGE_HEIGHT - 150
     c.setFont("Helvetica", 11)
-    for e in TOC_ENTRIES[0:5]:
-        c.drawString(LEFT_MARGIN, y, toc_line(e))
-        y -= 24
+    for e in TOC_PAGE2_ENTRIES:
+        if e["split_line"]:
+            line1, line2 = toc_split_lines(e)
+            c.drawString(LEFT_MARGIN, y, line1)
+            y -= 16
+            c.drawString(LEFT_MARGIN, y, line2)
+            y -= 24
+        else:
+            c.drawString(LEFT_MARGIN, y, toc_line(e))
+            y -= 24
     draw_furniture(c, logo_reader, 2, PAGE_COUNT)
     c.showPage()
 
     y = PAGE_HEIGHT - 110
     c.setFont("Helvetica", 11)
-    for e in TOC_ENTRIES[5:10]:
+    for e in TOC_PAGE3_ENTRIES:
         if e["split_line"]:
             line1, line2 = toc_split_lines(e)
             c.drawString(LEFT_MARGIN, y, line1)
