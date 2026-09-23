@@ -11,6 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 import elements as elements_lib  # noqa: E402
+import figures as figures_lib  # noqa: E402
 import paths  # noqa: E402
 import toc as toc_lib  # noqa: E402
 
@@ -112,6 +113,25 @@ def furniture_filtered_lines(block: dict, furniture_masked: set[str], page_heigh
     if not furniture_masked or not in_furniture_band(block["bbox"], page_height):
         return block["lines"]
     return [line for line in block["lines"] if line["masked"] not in furniture_masked]
+
+
+def figure_region_filtered_lines(lines: list[dict], figure_regions: list[dict]) -> list[dict]:
+    """The subset of `lines` that do NOT fall inside any of this page's
+    figure regions (Task A5, `lib/figures.py`'s `detect_figure_regions`).
+    Same per-line-is-the-unit-of-exclusion shape as `furniture_filtered_lines`
+    -- a block that mixes a figure-region line (e.g. a diagram box's "Start"
+    label) with unrelated surrounding paragraph text on an adjacent line
+    keeps its real line(s). Excluded lines are exactly the ones
+    `extract_images.py`'s `figure_text_for_region` collects for the
+    matching image element, via the same `figures_lib.line_in_region` test,
+    so a line is never dropped here without also appearing there, and never
+    duplicated as both a `paragraph` and part of `figure_text`."""
+    if not figure_regions:
+        return lines
+    return [
+        line for line in lines
+        if not any(figures_lib.line_in_region(line["bbox"], region["bbox"]) for region in figure_regions)
+    ]
 
 
 def build_block_element(
@@ -402,6 +422,11 @@ def main() -> None:
         # overlap-drop below, or a frame "table" would swallow real text
         # blocks that merely sit underneath it.
         tables = [t for t in tables if not is_frame_table(t["bbox"], frame_tables)]
+        # Task A5: figure regions detected the same way extract_images.py
+        # detects them (same shared helper, so the two scripts can never
+        # disagree about where a page's figures are) -- their text-layer
+        # lines belong to figure_text, not to a paragraph/heading element.
+        figure_regions = figures_lib.detect_figure_regions(page, page_number, pdf_path, frame_tables)
 
         page_elements = []
         # Drop text blocks that mostly overlap a detected table; the table
@@ -410,6 +435,7 @@ def main() -> None:
             if any(bbox_overlap_ratio(block["bbox"], t["bbox"]) > 0.5 for t in tables):
                 continue
             kept_lines = furniture_filtered_lines(block, furniture_masked, page_height)
+            kept_lines = figure_region_filtered_lines(kept_lines, figure_regions)
             element = build_block_element(block, kept_lines, body_size, toc_lookup, heading_size_ranks)
             if element is not None:
                 page_elements.append(element)

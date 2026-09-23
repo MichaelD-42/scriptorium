@@ -26,6 +26,10 @@ furniture was detected:
 Every element additionally carries a "bbox": [x0, y0, x1, y1] field
 (fitz/pdfplumber-style, top-left origin, y increasing downward) -- written
 by extract_text.py/extract_images.py, passed through unchanged here.
+merge_shards() sorts a page's combined body+image elements by bbox y0
+(Task A5), so an image element lands in true document reading position --
+interleaved with the surrounding text -- rather than always trailing after
+every text element regardless of where it actually sits on the page.
 
 A shard may also carry extra top-level keys via write_shard()'s **extra
 (e.g. "skipped": "toc", written by extract_text.py/extract_images.py for a
@@ -71,10 +75,18 @@ def merge_shards(shards_dir: Path, page_count: int) -> dict[int, dict]:
 
         if body_shard:
             extra = {k: v for k, v in body_shard.items() if k not in {"page_number", "elements"}}
+            # Task A5: sort by bbox y0 so an image element interleaves with
+            # surrounding text in true document reading order instead of
+            # always trailing after every text element. Stable sort, and
+            # bbox-less elements default to y0=0 -- so elements that predate
+            # the additive bbox field (or a hand-built test fixture without
+            # one) keep their original append order relative to each other.
+            combined = body_shard["elements"] + image_elements
+            combined.sort(key=lambda e: e.get("bbox", [0, 0, 0, 0])[1])
             pages[n] = {
                 "page_number": n,
                 "tier": body_tier,
-                "elements": body_shard["elements"] + image_elements,
+                "elements": combined,
                 **extra,
             }
         else:

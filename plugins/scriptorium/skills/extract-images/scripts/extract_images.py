@@ -10,14 +10,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 import elements as elements_lib  # noqa: E402
+import figures as figures_lib  # noqa: E402
 import paths  # noqa: E402
 
 import fitz  # PyMuPDF
 import pdfplumber
 from PIL import Image
 
-VECTOR_DRAWING_THRESHOLD = 8  # >= this many vector paths on a page => treat as a diagram
-VECTOR_TEXT_CHAR_CEILING = 200  # only treat as a standalone diagram if the page isn't mostly text
+VECTOR_REGION_DPI = 200  # Task A5: region crops render sharper than the old whole-page 150dpi default
 
 # Furniture removal (Task A2) -- reads triage.json["furniture"]. See
 # extract-text/scripts/extract_text.py for the matching constant/helper
@@ -100,9 +100,13 @@ def extract_bitmaps(fitz_doc, page, page_number: int, assets_dir: Path, furnitur
 
 
 def page_has_table(pdf_path: Path, page_number: int, frame_tables: list[dict] | None = None) -> bool:
-    """A ruled table's grid lines are vector paths too, and can easily clear
-    VECTOR_DRAWING_THRESHOLD on their own — without this check a table gets
-    misdetected as a diagram. Tables are extract-text's job, not ours.
+    """A ruled table's grid lines are vector paths too, so a page's table(s)
+    must never be misdetected as a figure. Tables are extract-text's job,
+    not ours. Kept as a small standalone utility (still directly unit
+    tested); `extract_vector_regions` below uses `lib/figures.py`'s
+    per-region `real_table_bboxes` instead, since region-level detection
+    needs each table's own bbox to exclude just the overlapping cluster,
+    not a whole-page yes/no.
 
     `frame_tables` (triage.json["furniture"]["frame_tables"]) is excluded
     from the query: a page whose only pdfplumber "table" is the page frame
@@ -113,21 +117,34 @@ def page_has_table(pdf_path: Path, page_number: int, frame_tables: list[dict] | 
         return any(not is_frame_table(t.bbox, frame_tables) for t in tables)
 
 
-def extract_vector_region(page, page_number: int, assets_dir: Path, pdf_path: Path, frame_tables: list[dict] | None = None, dpi: int = 150) -> list[dict]:
-    drawings = page.get_drawings()
-    text_len = len(page.get_text("text").strip())
-    if len(drawings) < VECTOR_DRAWING_THRESHOLD or text_len > VECTOR_TEXT_CHAR_CEILING:
-        return []
-    if page_has_table(pdf_path, page_number, frame_tables):
-        return []
+def extract_vector_regions(page, page_number: int, assets_dir: Path, pdf_path: Path, frame_tables: list[dict] | None = None, dpi: int = VECTOR_REGION_DPI) -> list[dict]:
+    """Task A5: one image element per surviving figure region (see
+    `lib/figures.py`'s `detect_figure_regions` for the full detection
+    pipeline — clustering, furniture/table/tiny-cluster exclusion, and the
+    small padding applied to each region's bbox). Each region is
+    crop-rendered — not the whole page — at `dpi`, named
+    `page{N}_vector{k}.png` (k = 1-indexed per page, matching
+    `extract_bitmaps`' `page{N}_bitmap{idx}.{ext}` naming convention).
 
-    out_name = f"page{page_number}_vector1.png"
-    out_path = assets_dir / out_name
+    `figure_text` is set from the region's own text-layer lines (if any) —
+    script-authoritative per this task's brief; a region with no text layer
+    leaves `figure_text` absent, so Task A6 (vision fallback, not this
+    task) knows to fill it in."""
+    regions = figures_lib.detect_figure_regions(page, page_number, pdf_path, frame_tables)
     zoom = dpi / 72
-    pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom))
-    pix.save(out_path)
-    bbox = [0, 0, page.rect.width, page.rect.height]
-    return [{"type": "image", "kind": "vector", "asset": f"assets/{out_name}", "caption": "", "bbox": bbox}]
+    found = []
+    for k, region in enumerate(regions, start=1):
+        bbox = region["bbox"]
+        out_name = f"page{page_number}_vector{k}.png"
+        out_path = assets_dir / out_name
+        pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), clip=fitz.Rect(*bbox))
+        pix.save(out_path)
+        element = {"type": "image", "kind": "vector", "asset": f"assets/{out_name}", "caption": "", "bbox": bbox}
+        figure_text = figures_lib.figure_text_for_region(page, bbox)
+        if figure_text:
+            element["figure_text"] = figure_text
+        found.append(element)
+    return found
 
 
 def main() -> None:
@@ -172,7 +189,7 @@ def main() -> None:
 
         page = fitz_doc[page_number - 1]
         image_elements = extract_bitmaps(fitz_doc, page, page_number, assets_dir, furniture_xrefs)
-        image_elements += extract_vector_region(page, page_number, assets_dir, pdf_path, frame_tables)
+        image_elements += extract_vector_regions(page, page_number, assets_dir, pdf_path, frame_tables)
 
         # Image shards are independent of the page's text/OCR/vision tier —
         # write one even when empty, so a retry can tell "checked, found

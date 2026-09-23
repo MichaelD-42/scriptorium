@@ -78,6 +78,17 @@ document.
   groups a footer note and a page number into one block) keeps the real
   line, with its `bbox` recomputed from just the surviving line(s). No
   `triage.json`/`furniture` section => no removal, same output as before.
+- **Figure regions (Task A5)**: this script detects the same
+  vector-graphic figure regions `extract-images` crop-renders
+  (`lib/figures.py`'s `detect_figure_regions`, a shared helper so the two
+  skills — which may run as parallel subagent batches over the same
+  document — always agree on where a page's figures are without either
+  waiting on the other's shard). A text line that falls inside a figure
+  region's bbox is excluded from paragraph/heading extraction the same
+  per-line way furniture lines are (a block that mixes a figure-region line
+  with unrelated real content keeps the real line); those lines become the
+  matching `image` element's `figure_text` instead — see `extract-images`'
+  SKILL.md.
 - If `work/<doc>/triage.json` marks a given page `"role": "toc"`
   (`pdf-triage`'s printed-TOC-page detection), that page's shard is written
   as `{"page_number": n, "elements": [], "skipped": "toc"}` immediately,

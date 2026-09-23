@@ -11,9 +11,15 @@ Handles both image kinds a PDF can contain:
   figures, logos) — extracted directly from the PDF at native resolution.
 - **Vector graphics**: diagrams/charts drawn with PDF path operators
   (lines, curves, fills) rather than embedded as an image. These have no
-  extractable "image" to pull out, so a page with a lot of vector drawing
-  and little text is treated as a diagram and captured by rendering that
-  page to PNG (reusing `render-pages`' output if present).
+  extractable "image" to pull out, so this skill clusters a page's vector
+  drawings into candidate regions (`lib/figures.py`'s
+  `detect_figure_regions`, shared with `extract-text` — see below) and
+  crop-renders each surviving region, not the whole page, at 200dpi to
+  `page{N}_vector{k}.png`. A candidate region is dropped if it overlaps the
+  furniture edge band, overlaps a real (non-frame) table's bbox, or is too
+  small to be more than a stray line. This is what catches a diagram or
+  chart sitting on an otherwise text-heavy page — the old whole-page rule
+  (gated on the page having little text overall) missed this case entirely.
 
 For a standalone **image** document (`input_format` `image`), there's
 nothing to detect — the whole input file *is* the diagram/photo. This skill
@@ -33,21 +39,31 @@ For an image document, `--pages` is always `1` — there's only ever page 1.
 
 ## Output
 
-- Saves assets to `output/<doc>/assets/page{N}_{bitmap|vector}{idx}.png`.
+- Saves assets to `output/<doc>/assets/page{N}_{bitmap|vector}{idx}.png`
+  (`vector{idx}` is 1-indexed per page, in top-to-bottom region order).
 - Writes one shard per given page to `work/<doc>/shards/page{N}.image.json`
   (`image` elements, `kind: "bitmap"|"vector"`, `asset: "assets/..."`,
   `bbox: [x0, y0, x1, y1]`) — even when a page has no images, so a retry
   can tell "checked, found nothing" apart from "never checked". This shard
   is independent of whatever text/OCR/vision shard the page has; `merge.py`
-  combines them.
+  combines them, interleaving image elements with text elements by `bbox`
+  y-position (Task A5) rather than always trailing them after.
+- A vector-region `image` element also carries `figure_text` — the
+  region's own text-layer lines (if any), newline-joined — whenever the
+  region has a text layer at all; absent/`null` when it doesn't (e.g. a
+  pure-raster chart with no underlying text), which is the signal a later
+  vision-fallback step uses to fill it in instead. These lines are excluded
+  from `extract-text`'s paragraph/heading output for the same page, so they
+  never appear twice.
 - If `work/<doc>/triage.json` has a `furniture` section (`pdf-triage`'s
   furniture detection), a bitmap whose xref is in `image_xrefs` (e.g. a logo
   repeated on every page) is skipped entirely — no `image` element is
-  written for it. `frame_tables` entries are also excluded from
-  `page_has_table()`'s query, so a page whose only pdfplumber-detected
-  table is the page frame doesn't suppress vector-region detection on that
-  page. No `triage.json`/`furniture` section => no filtering, same output
-  as before.
+  written for it. `frame_tables` entries are also excluded from both
+  `page_has_table()`'s query and `lib/figures.py`'s real-table lookup, so a
+  page whose only pdfplumber-detected table is the page frame doesn't
+  suppress vector-region detection on that page, and a real ruled table
+  never itself becomes a vector-region `image` element. No
+  `triage.json`/`furniture` section => no filtering, same output as before.
 - If `work/<doc>/triage.json` marks a given page `"role": "toc"`
   (`pdf-triage`'s printed-TOC-page detection), that page's shard is written
   as `{"page_number": n, "elements": [], "skipped": "toc"}` immediately,
