@@ -49,6 +49,44 @@ the same JSON to stdout.
 }
 ```
 
+A page that was identified as a printed table-of-contents page (see
+`toc.json` below) additionally carries `"role": "toc"` in its `pages[]`
+entry. Every other page's entry has no `role` key at all — the default is
+"body", never written out explicitly.
+
+## `toc.json`
+
+Also writes `work/<doc-name>/toc.json`:
+
+```json
+{
+  "doc": "furniture_sample",
+  "entries": [
+    {"number": "1", "title": "Introduction", "page": 4, "level": 1},
+    {"number": "2.1.1", "title": "Data Processing Pipeline", "page": 6, "level": 3}
+  ]
+}
+```
+
+`entries` comes from `lib/toc.py`'s `detect_toc()`, tried in this order:
+
+1. **PDF outline** (`document.get_toc()`) — used directly if the document
+   has one. A leading `"<number> "` in the outline title is split into
+   `number`; otherwise `number` is `null`. `level` is the outline's own
+   level. No page in `pages[]` is marked `role: "toc"` for this path —
+   outline entries don't correspond to a rendered TOC page.
+2. **Printed TOC page detection** (fallback) — pages near the front of the
+   document with enough dot-leader lines ("Title .......... 4") are treated
+   as a printed TOC and parsed, handling both "number and title on one
+   line" and "number alone on one line, title+leader+page on the next".
+   `level` is the entry number's dot-depth (`"1"` → 1, `"1.2"` → 2, ...) —
+   a later heading-classification step may assign a different level from
+   actual font size; this one only reads the printed number. Every page in
+   the detected contiguous run is marked `role: "toc"` in `triage.json`.
+
+Empty `entries: []` and no `role` keys anywhere when there's no outline and
+no printed TOC found.
+
 - `tier`: `text` (Tier 1, native extraction), `ocr` (Tier 2, needs OCR/vision).
   Triage never assigns `vision` directly — that only happens when Tier 2
   (`ocr-extractor`) itself reports low confidence and escalates.

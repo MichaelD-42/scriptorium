@@ -8,6 +8,7 @@ i.e. ${CLAUDE_PROJECT_DIR}).
     work/<doc>/shards/page{N}.image.json               independent of body tier
     work/<doc>/elements.json                           merge.py's output — the merged shards
     work/<doc>/triage.json
+    work/<doc>/toc.json
     work/<doc>/gates-report.json
     output/<doc>/<doc>.{md,html,reqif,reqifz}          single-file formats (reqifz is also a zip archive)
     output/<doc>/{index.md,NN-slug.md}                 okf format (multi-file bundle)
@@ -120,6 +121,10 @@ def elements_json(doc: str, root: Path = Path(".")) -> Path:
 
 def triage_json(doc: str, root: Path = Path(".")) -> Path:
     return work_dir(doc, root) / "triage.json"
+
+
+def toc_json(doc: str, root: Path = Path(".")) -> Path:
+    return work_dir(doc, root) / "toc.json"
 
 
 def gates_report_json(doc: str, root: Path = Path(".")) -> Path:

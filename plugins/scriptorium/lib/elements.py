@@ -26,6 +26,12 @@ furniture was detected:
 Every element additionally carries a "bbox": [x0, y0, x1, y1] field
 (fitz/pdfplumber-style, top-left origin, y increasing downward) -- written
 by extract_text.py/extract_images.py, passed through unchanged here.
+
+A shard may also carry extra top-level keys via write_shard()'s **extra
+(e.g. "skipped": "toc", written by extract_text.py/extract_images.py for a
+page pdf-triage marked role: "toc" -- Task A3). merge_shards() folds any
+such extra key from the winning body shard into the merged page dict
+alongside "elements", so a downstream consumer like gates.py can see it.
 """
 
 import json

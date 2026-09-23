@@ -38,6 +38,17 @@ def load_furniture(doc: str) -> dict:
     return triage.get("furniture", dict(EMPTY_FURNITURE))
 
 
+def load_page_roles(doc: str) -> dict[int, str]:
+    """{page_number: role} for every page triage.py marked with a non-default
+    role (currently only "toc") -- empty dict if triage hasn't run for this
+    document (extract_text.py must still work standalone)."""
+    triage_path = paths.triage_json(doc)
+    if not triage_path.exists():
+        return {}
+    triage = json.loads(triage_path.read_text())
+    return {p["page_number"]: p["role"] for p in triage.get("pages", []) if p.get("role")}
+
+
 def is_frame_table(bbox, frame_tables: list[dict]) -> bool:
     """True if `bbox` (a pdfplumber table bbox) matches one of
     triage.json["furniture"]["frame_tables"] within FRAME_TABLE_BBOX_TOLERANCE
@@ -192,10 +203,19 @@ def main() -> None:
     furniture = load_furniture(args.doc)
     frame_tables = furniture.get("frame_tables", [])
     furniture_masked = {p["masked"] for p in furniture.get("line_patterns", [])}
+    page_roles = load_page_roles(args.doc)
 
     fitz_doc = fitz.open(pdf_path)
 
     for page_number in page_numbers:
+        if page_roles.get(page_number) == "toc":
+            # A printed TOC page carries no real content of its own -- skip
+            # straight to an empty, explicitly-marked shard instead of
+            # running text/table extraction on it.
+            shard_path = paths.shard_path(args.doc, page_number, "text")
+            elements_lib.write_shard(shard_path, page_number, [], skipped="toc")
+            continue
+
         page = fitz_doc[page_number - 1]
         page_height = page.rect.height
         text_blocks, body_size = extract_page_text_blocks(page, args.body_size)

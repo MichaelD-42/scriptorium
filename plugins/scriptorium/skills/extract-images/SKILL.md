@@ -48,6 +48,11 @@ For an image document, `--pages` is always `1` — there's only ever page 1.
   table is the page frame doesn't suppress vector-region detection on that
   page. No `triage.json`/`furniture` section => no filtering, same output
   as before.
+- If `work/<doc>/triage.json` marks a given page `"role": "toc"`
+  (`pdf-triage`'s printed-TOC-page detection), that page's shard is written
+  as `{"page_number": n, "elements": [], "skipped": "toc"}` immediately,
+  with no bitmap/vector-region extraction attempted. Applies per-page even
+  when `--pages` mixes a TOC page in with body pages.
 - Captioning is intentionally **not** done here — a script can't judge what
   an image shows. The calling agent (the `extractor` role) looks at the
   saved PNG (with the Read tool) and fills the caption in with:

@@ -11,6 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 import paths  # noqa: E402
+import toc as toc_lib  # noqa: E402
 
 import fitz  # PyMuPDF
 import pdfplumber
@@ -246,7 +247,12 @@ def main() -> None:
         pages.append({"page_number": i, **classification})
     body_size = document_body_size(document)
     furniture, furniture_text = detect_furniture(document, pdf_path)
+    toc_entries, toc_pages = toc_lib.detect_toc(document)
     document.close()
+
+    for page in pages:
+        if page["page_number"] in toc_pages:
+            page["role"] = "toc"
 
     loop_size = "tight" if any(p["tier"] != "text" for p in pages) else "loose"
     result = {
@@ -263,6 +269,10 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(result, indent=2))
     print(json.dumps(result, indent=2))
+
+    toc_out_path = paths.toc_json(args.doc)
+    toc_out_path.parent.mkdir(parents=True, exist_ok=True)
+    toc_out_path.write_text(json.dumps({"doc": args.doc, "entries": toc_entries}, indent=2))
 
 
 if __name__ == "__main__":

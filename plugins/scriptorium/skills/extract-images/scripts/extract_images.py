@@ -47,6 +47,18 @@ def is_frame_table(bbox, frame_tables: list[dict]) -> bool:
     )
 
 
+def load_page_roles(doc: str) -> dict[int, str]:
+    """{page_number: role} for every page triage.py marked with a non-default
+    role (currently only "toc") -- empty dict if triage hasn't run for this
+    document (independent copy of extract_text.py's helper, matching the
+    existing convention that these two scripts don't share code)."""
+    triage_path = paths.triage_json(doc)
+    if not triage_path.exists():
+        return {}
+    triage = json.loads(triage_path.read_text())
+    return {p["page_number"]: p["role"] for p in triage.get("pages", []) if p.get("role")}
+
+
 def extract_image_document(input_path: Path, assets_dir: Path) -> list[dict]:
     """A standalone image document has no embedded XObjects or vector
     regions to hunt for — the whole file *is* the one image. Normalize it
@@ -145,10 +157,19 @@ def main() -> None:
     furniture = load_furniture(args.doc)
     frame_tables = furniture.get("frame_tables", [])
     furniture_xrefs = set(furniture.get("image_xrefs", []))
+    page_roles = load_page_roles(args.doc)
 
     pdf_path = input_path
     fitz_doc = fitz.open(pdf_path)
     for page_number in page_numbers:
+        if page_roles.get(page_number) == "toc":
+            # A printed TOC page has no real images of its own -- skip
+            # straight to an empty, explicitly-marked shard.
+            shard_path = paths.shard_path(args.doc, page_number, "image")
+            elements_lib.write_shard(shard_path, page_number, [], skipped="toc")
+            print(f"page {page_number}: skipped (toc)")
+            continue
+
         page = fitz_doc[page_number - 1]
         image_elements = extract_bitmaps(fitz_doc, page, page_number, assets_dir, furniture_xrefs)
         image_elements += extract_vector_region(page, page_number, assets_dir, pdf_path, frame_tables)

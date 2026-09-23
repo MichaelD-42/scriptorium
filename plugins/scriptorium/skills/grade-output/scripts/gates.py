@@ -31,7 +31,11 @@ def check_page_count_match(doc_data: dict, true_page_count: int) -> dict:
 
 
 def check_no_empty_pages(doc_data: dict) -> dict:
-    empty = [p["page_number"] for p in doc_data["pages"].values() if not p["elements"]]
+    empty = [
+        p["page_number"]
+        for p in doc_data["pages"].values()
+        if not p["elements"] and p.get("skipped") != "toc"
+    ]
     return {
         "name": "no_empty_pages",
         "passed": not empty,

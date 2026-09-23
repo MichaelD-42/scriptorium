@@ -53,6 +53,12 @@ document.
   groups a footer note and a page number into one block) keeps the real
   line, with its `bbox` recomputed from just the surviving line(s). No
   `triage.json`/`furniture` section => no removal, same output as before.
+- If `work/<doc>/triage.json` marks a given page `"role": "toc"`
+  (`pdf-triage`'s printed-TOC-page detection), that page's shard is written
+  as `{"page_number": n, "elements": [], "skipped": "toc"}` immediately,
+  with no text/table extraction attempted — a printed TOC page's own text
+  is redundant with `toc.json` and isn't useful body content. This applies
+  per-page even when `--pages` mixes a TOC page in with body pages.
 
 ## Output
 
