@@ -24,7 +24,7 @@ VECTOR_REGION_DPI = 200  # Task A5: region crops render sharper than the old who
 # (independent copy -- these two scripts don't share code today).
 FRAME_TABLE_BBOX_TOLERANCE = 3.0  # pt
 
-EMPTY_FURNITURE = {"line_patterns": [], "frame_tables": [], "image_xrefs": []}
+EMPTY_FURNITURE = {"line_patterns": [], "frame_tables": [], "frame_drawings": [], "image_xrefs": []}
 
 
 def load_furniture(doc: str) -> dict:
@@ -132,20 +132,32 @@ def page_has_table(pdf_path: Path, page_number: int, frame_tables: list[dict] | 
         return any(not is_frame_table(t.bbox, frame_tables) for t in tables)
 
 
-def extract_vector_regions(page, page_number: int, assets_dir: Path, pdf_path: Path, frame_tables: list[dict] | None = None, dpi: int = VECTOR_REGION_DPI) -> list[dict]:
+def extract_vector_regions(
+    page, page_number: int, assets_dir: Path, pdf_path: Path,
+    frame_tables: list[dict] | None = None,
+    frame_drawings: list[dict] | None = None,
+    dpi: int = VECTOR_REGION_DPI,
+) -> tuple[list[dict], list[dict]]:
     """Task A5: one image element per surviving figure region (see
-    `lib/figures.py`'s `detect_figure_regions` for the full detection
-    pipeline — clustering, furniture/table/tiny-cluster exclusion, and the
-    small padding applied to each region's bbox). Each region is
-    crop-rendered — not the whole page — at `dpi`, named
+    `lib/figures.py`'s `detect_figure_regions_with_exclusions` for the full
+    detection pipeline — clustering, frame/table/tiny-cluster/furniture-band
+    exclusion, and the small padding applied to each region's bbox). Each
+    region is crop-rendered — not the whole page — at `dpi`, named
     `page{N}_vector{k}.png` (k = 1-indexed per page, matching
     `extract_bitmaps`' `page{N}_bitmap{idx}.{ext}` naming convention).
 
     `figure_text` is set from the region's own text-layer lines (if any) —
     script-authoritative per this task's brief; a region with no text layer
     leaves `figure_text` absent, so Task A6 (vision fallback, not this
-    task) knows to fill it in."""
-    regions = figures_lib.detect_figure_regions(page, page_number, pdf_path, frame_tables)
+    task) knows to fill it in.
+
+    Returns `(image_elements, excluded_regions)` — Task A5b: `excluded_regions`
+    is every candidate this page's pipeline dropped (a pre-filtered frame
+    drawing, or an excluded cluster), written verbatim into the page's image
+    shard by `main()` below so nothing a filter removes vanishes silently."""
+    regions, excluded_regions = figures_lib.detect_figure_regions_with_exclusions(
+        page, page_number, pdf_path, frame_tables=frame_tables, frame_drawings=frame_drawings,
+    )
     zoom = dpi / 72
     found = []
     for k, region in enumerate(regions, start=1):
@@ -160,7 +172,7 @@ def extract_vector_regions(page, page_number: int, assets_dir: Path, pdf_path: P
         if figure_text:
             element["figure_text"] = figure_text
         found.append(element)
-    return found
+    return found, excluded_regions
 
 
 def main() -> None:
@@ -189,6 +201,7 @@ def main() -> None:
 
     furniture = load_furniture(args.doc)
     frame_tables = furniture.get("frame_tables", [])
+    frame_drawings = furniture.get("frame_drawings", [])
     furniture_xrefs = set(furniture.get("image_xrefs", []))
     page_roles = load_page_roles(args.doc)
 
@@ -205,14 +218,20 @@ def main() -> None:
 
         page = fitz_doc[page_number - 1]
         image_elements = extract_bitmaps(fitz_doc, page, page_number, assets_dir, furniture_xrefs)
-        image_elements += extract_vector_regions(page, page_number, assets_dir, pdf_path, frame_tables)
+        vector_elements, excluded_regions = extract_vector_regions(
+            page, page_number, assets_dir, pdf_path, frame_tables, frame_drawings,
+        )
+        image_elements += vector_elements
 
         # Image shards are independent of the page's text/OCR/vision tier —
         # write one even when empty, so a retry can tell "checked, found
-        # nothing" apart from "never checked".
+        # nothing" apart from "never checked". excluded_regions (Task A5b)
+        # is always present, even when empty, so a page with nothing dropped
+        # is distinguishable from a page merge.py hasn't seen an image shard
+        # for at all.
         shard_path = paths.shard_path(args.doc, page_number, "image")
-        elements_lib.write_shard(shard_path, page_number, image_elements)
-        print(f"page {page_number}: {len(image_elements)} image element(s)")
+        elements_lib.write_shard(shard_path, page_number, image_elements, excluded_regions=excluded_regions)
+        print(f"page {page_number}: {len(image_elements)} image element(s), {len(excluded_regions)} excluded region(s)")
 
     fitz_doc.close()
 

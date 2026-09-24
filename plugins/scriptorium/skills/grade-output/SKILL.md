@@ -67,10 +67,37 @@ pass/fail decision.
 | `ocr_confidence_floor` | a tier-`ocr` page's `ocr_confidence` < 0.5 |
 | `output_file_exists` | the assembled output is missing or near-empty (format-aware: single file for `md`/`html`, `index.md` + section files for `okf`) |
 
+`gates-report.json` also carries a top-level `warnings` list (Task A5b),
+separate from `checks` — see below.
+
+## `large_region_excluded` (warning, not a gate)
+
+For a PDF, `gates.py` also checks every page's `excluded_regions` (written
+by `extract-images`, see its SKILL.md) and, for any entry whose `reason` is
+`furniture_band` or `table_overlap` (never `frame_drawing`/`tiny` — those
+two are expected/benign) AND whose bbox covers more than 20% of its page,
+appends a `{"name": "large_region_excluded", "page": ..., "bbox": ...,
+"reason": ..., "area_fraction": ..., "detail": ...}` entry to
+`gates-report.json`'s top-level `warnings` list.
+
+This is deliberately a **warning**, not one of the `checks` above, so it
+never flips `passed` to `false` on its own: a large excluded region is very
+often a *correct* exclusion (an oversized real table, say), and a hard
+gate would force an escalation every time one legitimately occurs. The
+point is visibility, not blocking — a human reviewer (or the `grader`
+subagent, reading `gates-report.json` before applying the rubric) must be
+able to see that a large region was dropped and judge for themselves
+whether it should have been a figure, the same way A5's original size-based
+pre-filter silently removed a real figure with no trace at all before this
+task.
+
 ## Notes for the calling agent
 
 - A rubric verdict of "pass" cannot rescue a failed gate — gates are the
   floor, not one more opinion.
+- Read `gates-report.json`'s `warnings` list alongside `checks` — a passing
+  `checks` result with a non-empty `warnings` list still deserves a look
+  before calling the extraction done.
 - Don't grade your own extraction output in the same turn you produced it;
   that's exactly the self-congratulation failure mode this design avoids.
 - Each `grader` batch only ever writes shards for **its own** pages — never

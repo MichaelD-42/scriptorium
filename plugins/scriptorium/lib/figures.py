@@ -13,10 +13,13 @@ same functions from both scripts is what keeps their answers consistent.
 Detection pipeline, per page:
 
 1. `page.get_drawings()` lists every vector-graphic item on the page. A
-   single item covering more than `LARGE_DRAWING_AREA_FRACTION` of the page
-   (the same "this is basically the whole page" threshold `pdf-triage` uses
-   for its own `FRAME_TABLE_MIN_AREA_FRACTION`) is dropped *before*
-   clustering. This matters more than it looks: left in, a full-page-frame
+   single item is dropped *before* clustering only if its own bbox matches
+   (within `FRAME_TABLE_BBOX_TOLERANCE`) one of `frame_drawings` --
+   `triage.json["furniture"]["frame_drawings"]`, `pdf-triage`'s
+   repetition-based page-frame detection (Task A5b, `triage.py`'s
+   `_find_frame_drawings`): a single vector drawing covering more than 60%
+   of the page that repeats at the same bbox on at least half the document's
+   pages. This matters more than it looks: left unfiltered, a full-page-frame
    border (a single stroked rectangle drawn near the page edges, which this
    plugin's own `furniture_sample.pdf` fixture has on every page) makes
    `page.cluster_drawings()` merge *every other drawing on the page* into
@@ -26,6 +29,14 @@ Detection pipeline, per page:
    fixture: with the border left in, every page collapses to a single
    cluster exactly matching the border's own bbox; filtering it out first,
    the real diagram/chart/table clusters resolve correctly and separately.
+   Task A5b replaced this step's *original* rule -- drop any single drawing
+   over 60% of the page area, regardless of repetition -- because that
+   older rule silently dropped a genuinely large, one-off real figure (e.g.
+   a full-width block diagram on its own page) with no trace at all. Only a
+   drawing that *repeats* (i.e. is actually furniture, not content) is
+   removed now; everything a filter still removes shows up in
+   `excluded_regions` instead of vanishing (see `detect_figure_regions`'s
+   own docstring).
 2. `page.cluster_drawings()` on what is left groups the remaining vector
    items into candidate regions, then each candidate bbox is padded by
    `REGION_PADDING` points on every side (clamped to the page). Padding
@@ -35,17 +46,27 @@ Detection pipeline, per page:
    excluded from both the crop-render (a chart image with its labels cut
    off) and `figure_text` (missing the labels entirely).
 3. Each padded candidate is dropped if it:
-   - overlaps the top/bottom furniture edge band (reuses the same
-     `FURNITURE_EDGE_BAND` convention `extract_text.py`'s
-     `in_furniture_band`/`furniture_filtered_lines` use, but as an
-     *overlap* test rather than a containment test -- see
-     `_overlaps_furniture_edge_band`'s docstring for why that distinction
-     matters here);
-   - overlaps a real (non-frame) table's bbox, queried fresh via
+   - is "tiny" -- smaller than `MIN_CLUSTER_AREA_FRACTION` of the page
+     area, almost certainly a stray rule/line rather than a real figure;
+   - has *more than half its own area* inside the top/bottom furniture edge
+     band (reuses the same `FURNITURE_EDGE_BAND` convention
+     `extract_text.py`'s `in_furniture_band`/`furniture_filtered_lines`
+     use, but as a majority-area test rather than either a containment or a
+     bare-overlap test -- see `_furniture_band_overlap_fraction`'s
+     docstring for why Task A5b tightened this from "any overlap at all");
+   - or overlaps a real (non-frame) table's bbox, queried fresh via
      `pdfplumber` and filtered the same way `extract_text.py`'s
-     `is_frame_table()` filters `frame_tables` out of its own table query;
-   - or is "tiny" -- smaller than `MIN_CLUSTER_AREA_FRACTION` of the page
-     area, almost certainly a stray rule/line rather than a real figure.
+     `is_frame_table()` filters `frame_tables` out of its own table query.
+
+Task A5b: every candidate this pipeline drops -- a pre-filtered frame
+drawing, or an excluded cluster -- is also returned as an "excluded region"
+(`{"bbox": [...], "reason": "frame_drawing"|"tiny"|"furniture_band"|
+"table_overlap"}`) via `detect_figure_regions_with_exclusions`, so a large
+region that a filter removes is never silently dropped -- it's visible to
+`extract-images` (which writes it into the page's image shard as
+`excluded_regions`) and to `grade-output`'s `large_region_excluded` gate.
+`detect_figure_regions` itself keeps its original signature/return shape
+(regions only) for existing callers that only need the survivors.
 
 Task A6 adds caption detection on top of the same region bboxes (plus
 bitmap placement bboxes, via `bitmap_bboxes()`): `find_caption_line()`
@@ -68,7 +89,13 @@ import pdfplumber
 # docstring) of small per-file constant duplication over cross-script imports.
 FURNITURE_EDGE_BAND = 0.12
 FRAME_TABLE_BBOX_TOLERANCE = 3.0  # pt
-LARGE_DRAWING_AREA_FRACTION = 0.6  # matches triage.py's FRAME_TABLE_MIN_AREA_FRACTION
+
+# Task A5b: a cluster is dropped for the furniture band only if MORE THAN
+# HALF its own area lies inside the top/bottom edge band -- tightened from
+# the original "any overlap at all" rule, which excluded a genuinely tall
+# real figure just for reaching into the band (see
+# _furniture_band_overlap_fraction's docstring).
+FURNITURE_BAND_AREA_THRESHOLD = 0.5
 
 # A single candidate region's raw vector-drawings bbox, padded this many
 # points on every side before it's used for either the crop-render or the
@@ -141,22 +168,47 @@ def real_table_bboxes(pdf_path: Path, page_number: int, frame_tables: list[dict]
         return [list(t.bbox) for t in tables if not _is_frame_table_bbox(t.bbox, frame_tables)]
 
 
-def _overlaps_furniture_edge_band(bbox, page_height: float) -> bool:
-    """True if any part of `bbox` falls within the top or bottom
-    FURNITURE_EDGE_BAND of the page.
+def _is_frame_drawing_bbox(bbox, frame_drawings: list[dict]) -> bool:
+    """True if `bbox` (a single page.get_drawings() item's own bbox) matches
+    one of triage.json["furniture"]["frame_drawings"] within
+    FRAME_TABLE_BBOX_TOLERANCE -- the repetition-based page-frame
+    identification `triage.py`'s `_find_frame_drawings` computes
+    document-wide (Task A5b). Same shape as `_is_frame_table_bbox` above,
+    over a different furniture list."""
+    return any(
+        all(abs(a - b) <= FRAME_TABLE_BBOX_TOLERANCE for a, b in zip(bbox, fd["bbox"]))
+        for fd in frame_drawings
+    )
 
-    Deliberately a broader *overlap* test than extract_text.py's
-    in_furniture_band(), which requires a whole (small) text block to sit
-    fully inside one band -- correct for a single line of running-header
-    text, but a region-sized cluster (most notably a page-frame border,
-    before step 1 above filters it out of the *drawings* pool it would
-    otherwise dominate) can span from one edge band to the other without
-    ever being fully inside either one. Requiring only overlap is what
-    actually excludes anything region-sized that starts or ends in
-    furniture territory."""
+
+def _furniture_band_overlap_fraction(bbox, page_height: float) -> float:
+    """Fraction of `bbox`'s own area that lies within the top or bottom
+    FURNITURE_EDGE_BAND of the page (0.0-1.0).
+
+    Task A5b tightened this from a bare *overlap* test (any part of bbox in
+    the band at all excluded the whole cluster) to this majority-area test,
+    because the bare-overlap version excluded a genuinely tall real figure
+    just for reaching into the band -- the brief's example is a tall
+    diagram that mostly sits outside the band but grazes it at one edge.
+    Requiring MORE than half the cluster's own area to be inside the band
+    (see FURNITURE_BAND_AREA_THRESHOLD) still catches a region-sized
+    page-frame border reliably (its bbox spans nearly the whole page, so
+    even just its two band-height strips are a large fraction of a
+    genuinely small candidate, and a real frame is caught primarily by
+    frame_drawings now, not this rule) while keeping a real figure that
+    only grazes the band."""
     if page_height <= 0:
-        return False
-    return bbox[1] / page_height < FURNITURE_EDGE_BAND or bbox[3] / page_height > 1 - FURNITURE_EDGE_BAND
+        return 0.0
+    x0, y0, x1, y1 = bbox
+    width = max(0.0, x1 - x0)
+    total_height = max(0.0, y1 - y0)
+    area = width * total_height
+    if area <= 0:
+        return 0.0
+    band_height = FURNITURE_EDGE_BAND * page_height
+    top_overlap = max(0.0, min(y1, band_height) - max(y0, 0.0))
+    bottom_overlap = max(0.0, min(y1, page_height) - max(y0, page_height - band_height))
+    return (width * (top_overlap + bottom_overlap)) / area
 
 
 def _overlap_ratio(a, b) -> float:
@@ -192,24 +244,45 @@ def line_in_region(line_bbox, region_bbox, threshold: float = LINE_OVERLAP_THRES
     return _overlap_ratio(line_bbox, region_bbox) > threshold
 
 
-def detect_figure_regions(page, page_number: int, pdf_path: Path, frame_tables: list[dict] | None = None) -> list[dict]:
-    """Candidate figure regions for one page: `[{"bbox": [x0, y0, x1, y1]},
-    ...]`, sorted top-to-bottom by bbox y0. Empty if the page has no
-    qualifying vector-graphic region. See the module docstring for the full
-    pipeline."""
+def detect_figure_regions_with_exclusions(
+    page, page_number: int, pdf_path: Path,
+    frame_tables: list[dict] | None = None,
+    frame_drawings: list[dict] | None = None,
+) -> tuple[list[dict], list[dict]]:
+    """The full detection pipeline (see module docstring): returns
+    `(regions, excluded_regions)`.
+
+    `regions`: candidate figure regions that survived every exclusion rule,
+    `[{"bbox": [x0, y0, x1, y1]}, ...]`, sorted top-to-bottom by bbox y0.
+
+    `excluded_regions`: Task A5b -- every drawing/cluster a filter removed,
+    `[{"bbox": [...], "reason": "frame_drawing"|"tiny"|"furniture_band"|
+    "table_overlap"}]`, sorted the same way. This is the "no silent drops"
+    record: `extract_images.py` writes it into the page's image shard so a
+    large dropped region is visible to `grade-output`'s
+    `large_region_excluded` gate and to a human reviewer, instead of simply
+    vanishing the way the pre-A5b size-based filter did."""
     frame_tables = frame_tables or []
+    frame_drawings = frame_drawings or []
     page_width, page_height = page.rect.width, page.rect.height
     page_area = page_width * page_height
     if page_area <= 0:
-        return []
+        return [], []
 
     drawings = page.get_drawings()
-    significant = [
-        d for d in drawings
-        if (d["rect"].width * d["rect"].height) / page_area <= LARGE_DRAWING_AREA_FRACTION
-    ]
+    significant = []
+    excluded_regions = []
+    for d in drawings:
+        rect = d["rect"]
+        bbox = [rect.x0, rect.y0, rect.x1, rect.y1]
+        if _is_frame_drawing_bbox(bbox, frame_drawings):
+            excluded_regions.append({"bbox": bbox, "reason": "frame_drawing"})
+            continue
+        significant.append(d)
+
     if not significant:
-        return []
+        excluded_regions.sort(key=lambda r: r["bbox"][1])
+        return [], excluded_regions
 
     clusters = page.cluster_drawings(drawings=significant)
     table_bboxes = real_table_bboxes(pdf_path, page_number, frame_tables)
@@ -224,14 +297,33 @@ def detect_figure_regions(page, page_number: int, pdf_path: Path, frame_tables: 
         ]
         area = max(0.0, bbox[2] - bbox[0]) * max(0.0, bbox[3] - bbox[1])
         if area / page_area < MIN_CLUSTER_AREA_FRACTION:
+            excluded_regions.append({"bbox": bbox, "reason": "tiny"})
             continue
-        if _overlaps_furniture_edge_band(bbox, page_height):
+        if _furniture_band_overlap_fraction(bbox, page_height) > FURNITURE_BAND_AREA_THRESHOLD:
+            excluded_regions.append({"bbox": bbox, "reason": "furniture_band"})
             continue
         if _overlaps_any_table(bbox, table_bboxes):
+            excluded_regions.append({"bbox": bbox, "reason": "table_overlap"})
             continue
         regions.append({"bbox": bbox})
 
     regions.sort(key=lambda r: r["bbox"][1])
+    excluded_regions.sort(key=lambda r: r["bbox"][1])
+    return regions, excluded_regions
+
+
+def detect_figure_regions(
+    page, page_number: int, pdf_path: Path,
+    frame_tables: list[dict] | None = None,
+    frame_drawings: list[dict] | None = None,
+) -> list[dict]:
+    """Candidate figure regions for one page -- the `regions` half of
+    `detect_figure_regions_with_exclusions`, for the (majority of) callers
+    that only need the survivors, not the exclusion record. See that
+    function's docstring, and the module docstring, for the full pipeline."""
+    regions, _excluded = detect_figure_regions_with_exclusions(
+        page, page_number, pdf_path, frame_tables=frame_tables, frame_drawings=frame_drawings,
+    )
     return regions
 
 

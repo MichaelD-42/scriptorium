@@ -13,13 +13,23 @@ Handles both image kinds a PDF can contain:
   (lines, curves, fills) rather than embedded as an image. These have no
   extractable "image" to pull out, so this skill clusters a page's vector
   drawings into candidate regions (`lib/figures.py`'s
-  `detect_figure_regions`, shared with `extract-text` — see below) and
-  crop-renders each surviving region, not the whole page, at 200dpi to
-  `page{N}_vector{k}.png`. A candidate region is dropped if it overlaps the
-  furniture edge band, overlaps a real (non-frame) table's bbox, or is too
-  small to be more than a stray line. This is what catches a diagram or
-  chart sitting on an otherwise text-heavy page — the old whole-page rule
-  (gated on the page having little text overall) missed this case entirely.
+  `detect_figure_regions_with_exclusions`, shared with `extract-text` — see
+  below) and crop-renders each surviving region, not the whole page, at
+  200dpi to `page{N}_vector{k}.png`. A candidate region is dropped if:
+  - it's a single drawing matching `triage.json["furniture"]
+    ["frame_drawings"]` (Task A5b — a page-frame border identified by
+    *repetition* across the document, not by size, so a large one-off real
+    figure is never mistaken for furniture and dropped before clustering
+    even sees it);
+  - *more than half* its own area lies inside the furniture edge band
+    (Task A5b tightened this from "any overlap at all", so a tall real
+    figure that only grazes the band survives);
+  - it overlaps a real (non-frame) table's bbox; or
+  - it's too small to be more than a stray line.
+
+  This is what catches a diagram or chart sitting on an otherwise
+  text-heavy page — the old whole-page rule (gated on the page having
+  little text overall) missed this case entirely.
 
 For a standalone **image** document (`input_format` `image`), there's
 nothing to detect — the whole input file *is* the diagram/photo. This skill
@@ -76,6 +86,16 @@ For an image document, `--pages` is always `1` — there's only ever page 1.
   suppress vector-region detection on that page, and a real ruled table
   never itself becomes a vector-region `image` element. No
   `triage.json`/`furniture` section => no filtering, same output as before.
+- **`excluded_regions` (Task A5b, "no silent drops")**: the page's image
+  shard also carries `excluded_regions: [{"bbox": [...], "reason":
+  "frame_drawing"|"tiny"|"furniture_band"|"table_overlap"}]` — every
+  candidate a filter dropped on this page, always present (an empty list
+  when nothing was dropped), so a large region that a filter removes is
+  never simply invisible. `merge.py` passes it through to the merged page
+  dict the same way `skipped` already does. `grade-output`'s
+  `large_region_excluded` gate flags (as a warning, not a hard failure) any
+  entry here whose reason isn't `frame_drawing`/`tiny` and whose area is
+  more than 20% of the page — see `grade-output`'s SKILL.md.
 - If `work/<doc>/triage.json` marks a given page `"role": "toc"`
   (`pdf-triage`'s printed-TOC-page detection), that page's shard is written
   as `{"page_number": n, "elements": [], "skipped": "toc"}` immediately,

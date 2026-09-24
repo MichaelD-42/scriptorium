@@ -33,9 +33,12 @@ every text element regardless of where it actually sits on the page.
 
 A shard may also carry extra top-level keys via write_shard()'s **extra
 (e.g. "skipped": "toc", written by extract_text.py/extract_images.py for a
-page pdf-triage marked role: "toc" -- Task A3). merge_shards() folds any
-such extra key from the winning body shard into the merged page dict
-alongside "elements", so a downstream consumer like gates.py can see it.
+page pdf-triage marked role: "toc" -- Task A3; "excluded_regions", written
+by extract_images.py -- Task A5b, see lib/figures.py's
+detect_figure_regions_with_exclusions). merge_shards() folds any such extra
+key from BOTH the winning body shard and the image shard into the merged
+page dict alongside "elements" (body-shard keys win on a name collision,
+though none exist today), so a downstream consumer like gates.py can see it.
 """
 
 import json
@@ -72,9 +75,17 @@ def merge_shards(shards_dir: Path, page_count: int) -> dict[int, dict]:
 
         image_shard = read_shard(shards_dir / f"page{n}.image.json")
         image_elements = image_shard["elements"] if image_shard else []
+        # Task A5b: an image shard's own extra keys (e.g. "excluded_regions")
+        # must reach the merged page dict too, not just a body shard's -- see
+        # module docstring.
+        image_extra = (
+            {k: v for k, v in image_shard.items() if k not in {"page_number", "elements"}}
+            if image_shard else {}
+        )
 
         if body_shard:
-            extra = {k: v for k, v in body_shard.items() if k not in {"page_number", "elements"}}
+            body_extra = {k: v for k, v in body_shard.items() if k not in {"page_number", "elements"}}
+            extra = {**image_extra, **body_extra}  # body shard wins on a name collision
             # Task A5: sort by bbox y0 so an image element interleaves with
             # surrounding text in true document reading order instead of
             # always trailing after every text element. Stable sort, and
@@ -90,7 +101,7 @@ def merge_shards(shards_dir: Path, page_count: int) -> dict[int, dict]:
                 **extra,
             }
         else:
-            pages[n] = {"page_number": n, "tier": "text", "elements": image_elements}
+            pages[n] = {"page_number": n, "tier": "text", "elements": image_elements, **image_extra}
     return pages
 
 

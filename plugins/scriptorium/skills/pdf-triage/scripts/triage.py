@@ -26,6 +26,19 @@ FRAME_TABLE_MIN_PAGE_FRACTION = 0.50
 FRAME_TABLE_BBOX_TOLERANCE = 2.0  # pt
 REPEATED_IMAGE_MIN_PAGE_FRACTION = 0.50
 
+# Task A5b: a single vector drawing (page.get_drawings()) whose own bbox
+# covers more than FRAME_TABLE_MIN_AREA_FRACTION of the page, repeating at
+# (approximately) the same bbox on at least FRAME_TABLE_MIN_PAGE_FRACTION of
+# pages -- the same two thresholds _find_frame_tables uses, reused rather
+# than duplicated under a new name since the brief specifies the identical
+# 60%/50% values. This is what lets lib/figures.py identify a page-frame
+# border BY REPETITION instead of by size alone: a plain unruled c.rect()
+# border (this plugin's furniture_sample.pdf fixture, and presumably many
+# real documents) is invisible to pdfplumber's table heuristics
+# (_find_frame_tables), so frame_tables alone was never enough -- but a
+# genuinely large, one-off real diagram that happens to be large is NOT a
+# frame_drawing, because it doesn't repeat.
+
 
 def document_body_size(document) -> float:
     """The document's dominant running-text font size, character-weighted
@@ -179,6 +192,53 @@ def _find_frame_tables(pdf_path: Path, page_count: int) -> list[dict]:
     return frame_tables
 
 
+def _find_frame_drawings(document) -> list[dict]:
+    """Single vector drawings (`page.get_drawings()`) whose bbox covers more
+    than FRAME_TABLE_MIN_AREA_FRACTION of the page area, repeating at
+    (approximately, within FRAME_TABLE_BBOX_TOLERANCE) the same bbox on at
+    least FRAME_TABLE_MIN_PAGE_FRACTION of pages. Mirrors
+    `_find_frame_tables`'s grouping shape exactly, over a different item
+    source (fitz drawings, not pdfplumber tables) -- see the constants'
+    docstring above for why this exists alongside frame_tables rather than
+    replacing it."""
+    page_count = document.page_count
+    groups: list[dict] = []  # [{"bboxes": [...], "pages": set()}]
+
+    for page_number, page in enumerate(document, start=1):
+        page_area = page.rect.width * page.rect.height
+        if page_area <= 0:
+            continue
+        for d in page.get_drawings():
+            rect = d["rect"]
+            area = rect.width * rect.height
+            if area / page_area <= FRAME_TABLE_MIN_AREA_FRACTION:
+                continue
+            bbox = [rect.x0, rect.y0, rect.x1, rect.y1]
+
+            group = next(
+                (
+                    g
+                    for g in groups
+                    if all(abs(a - b) <= FRAME_TABLE_BBOX_TOLERANCE for a, b in zip(g["bboxes"][0], bbox))
+                ),
+                None,
+            )
+            if group is None:
+                group = {"bboxes": [], "pages": set()}
+                groups.append(group)
+            group["bboxes"].append(bbox)
+            group["pages"].add(page_number)
+
+    frame_drawings = []
+    for group in groups:
+        matched_page_count = len(group["pages"])
+        if page_count and matched_page_count / page_count >= FRAME_TABLE_MIN_PAGE_FRACTION:
+            n = len(group["bboxes"])
+            avg_bbox = [round(sum(b[i] for b in group["bboxes"]) / n, 2) for i in range(4)]
+            frame_drawings.append({"bbox": avg_bbox, "page_count": matched_page_count})
+    return frame_drawings
+
+
 def _find_repeated_images(document) -> list[int]:
     """Image xrefs (PyMuPDF's `page.get_images(full=True)`) present on at
     least REPEATED_IMAGE_MIN_PAGE_FRACTION of pages."""
@@ -219,11 +279,13 @@ def detect_furniture(document, pdf_path: Path) -> tuple[dict, str | None]:
     `(furniture, furniture_text)` for folding into triage.json."""
     line_patterns, line_occurrences = _find_repeated_lines(document)
     frame_tables = _find_frame_tables(pdf_path, document.page_count)
+    frame_drawings = _find_frame_drawings(document)
     image_xrefs = _find_repeated_images(document)
 
     furniture = {
         "line_patterns": line_patterns,
         "frame_tables": frame_tables,
+        "frame_drawings": frame_drawings,
         "image_xrefs": image_xrefs,
     }
     furniture_text = _furniture_text_for_first_page(line_occurrences)

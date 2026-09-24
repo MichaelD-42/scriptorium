@@ -43,6 +43,9 @@ the same JSON to stdout.
     "frame_tables": [
       {"bbox": [24.0, 24.0, 588.0, 768.0], "page_count": 9}
     ],
+    "frame_drawings": [
+      {"bbox": [24.0, 24.0, 588.0, 768.0], "page_count": 9}
+    ],
     "image_xrefs": [4]
   },
   "furniture_text": "Doc No. SYN-FUR-0001\nRev. B\npage 1 (9)"
@@ -112,6 +115,15 @@ no printed TOC found.
     at least 50% of pages — a ruled page-frame border, if pdfplumber's
     table heuristics happen to pick it up. A plain unruled rectangle border
     is legitimately not detected as a table at all, so this is often `[]`.
+  - `frame_drawings` (Task A5b): single vector drawings (per PyMuPDF's
+    `page.get_drawings()`) covering more than 60% of the page area that
+    repeat at the same bbox (within 2pt) on at least 50% of pages — the
+    repetition-based counterpart to `frame_tables`, for exactly the case
+    `frame_tables` misses: a plain unruled `c.rect()` border, invisible to
+    pdfplumber's table heuristics. `extract-images`/`extract-text` use this
+    (not size alone) to tell a real page-frame border apart from a
+    genuinely large one-off figure before clustering a page's vector
+    drawings into figure regions — see `extract-images`'s SKILL.md.
   - `image_xrefs`: PyMuPDF image xrefs present on at least 50% of pages —
     typically a repeated logo.
 - `furniture_text`: the verbatim (unmasked) text of the matched furniture

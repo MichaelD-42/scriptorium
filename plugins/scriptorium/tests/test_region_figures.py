@@ -92,7 +92,13 @@ class TestFurnitureSampleFigureRegions:
         page = doc[diagram_page - 1]
         page_area = page.rect.width * page.rect.height
 
-        regions = figures_lib.detect_figure_regions(page, diagram_page, pdf_path, frame_tables=[])
+        # Task A5b: the page-frame border is now identified by repetition
+        # (frame_drawings), not by size alone -- pass the golden fixture's
+        # known frame bbox so this direct (no-triage) call still excludes it
+        # the same way the production pipeline (which reads it from
+        # triage.json) does.
+        frame_drawings = [{"bbox": _golden()["furniture"]["frame_bbox"]}]
+        regions = figures_lib.detect_figure_regions(page, diagram_page, pdf_path, frame_tables=[], frame_drawings=frame_drawings)
         assert len(regions) == 1
         bbox = regions[0]["bbox"]
         area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
@@ -109,7 +115,8 @@ class TestFurnitureSampleFigureRegions:
         page = doc[chart_page - 1]
         page_area = page.rect.width * page.rect.height
 
-        regions = figures_lib.detect_figure_regions(page, chart_page, pdf_path, frame_tables=[])
+        frame_drawings = [{"bbox": _golden()["furniture"]["frame_bbox"]}]
+        regions = figures_lib.detect_figure_regions(page, chart_page, pdf_path, frame_tables=[], frame_drawings=frame_drawings)
         assert len(regions) == 1
         bbox = regions[0]["bbox"]
         area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
@@ -121,11 +128,12 @@ class TestFurnitureSampleFigureRegions:
         page frame border -- it must never itself surface as a figure
         region, on figure pages or otherwise-plain body pages alike."""
         pdf_path = EXAMPLES_ROOT / "furniture_sample.pdf"
+        frame_drawings = [{"bbox": _golden()["furniture"]["frame_bbox"]}]
         doc = fitz.open(pdf_path)
         page_area = doc[0].rect.width * doc[0].rect.height
         for page_number in range(1, doc.page_count + 1):
             page = doc[page_number - 1]
-            for region in figures_lib.detect_figure_regions(page, page_number, pdf_path, frame_tables=[]):
+            for region in figures_lib.detect_figure_regions(page, page_number, pdf_path, frame_tables=[], frame_drawings=frame_drawings):
                 bbox = region["bbox"]
                 area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
                 assert area / page_area < 0.5, f"page {page_number}: a near-full-page region leaked through ({bbox})"
@@ -316,15 +324,25 @@ class TestRegionExclusionRules:
     def test_page_frame_border_alone_produces_no_region(self, tmp_path):
         """The furniture_sample.pdf case in isolation: a single near-full-
         page rectangle border and nothing else must never itself become a
-        figure region."""
+        figure region.
+
+        Task A5b: the frame is now identified by repetition
+        (frame_drawings), not size alone -- this single-page fixture can't
+        demonstrate repetition itself, so frame_drawings is passed in
+        directly, simulating what triage.py's document-wide
+        _find_frame_drawings would have found for a border repeated at this
+        exact bbox across the document."""
         path = tmp_path / "frame_only.pdf"
+        frame_bbox = [24.0, 24.0, 588.0, 768.0]
 
         def draw(page):
-            page.draw_rect(fitz.Rect(24, 24, 588, 768), width=1)
+            page.draw_rect(fitz.Rect(*frame_bbox), width=1)
 
         doc, page = _make_region_pdf(path, draw)
         try:
-            regions = figures_lib.detect_figure_regions(page, 1, path, frame_tables=[])
+            regions = figures_lib.detect_figure_regions(
+                page, 1, path, frame_tables=[], frame_drawings=[{"bbox": frame_bbox, "page_count": 2}],
+            )
             assert regions == []
         finally:
             doc.close()
