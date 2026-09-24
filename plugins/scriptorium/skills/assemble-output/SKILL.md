@@ -69,10 +69,10 @@ the "ReqIF format" section below.
 A `list_item` element (`{"type": "list_item", "marker": <verbatim marker>,
 "level": <1-based int>, "text": <text without the marker>, "bbox": [...]}`,
 written by `extract-text` — see its own SKILL.md's "List items" section)
-renders as, in Markdown (`elements_to_markdown`/
-`elements_to_markdown_with_anchors` — the exact same function, so md-tree's
-per-file output matches single-file `md` byte for byte for the same
-elements):
+renders as, in Markdown (`elements_to_markdown` and md-tree's own
+`elements_to_markdown_with_anchors` share the identical list-rendering
+logic via `render_list_item_markdown`, so md-tree's per-file output
+matches single-file `md` byte for byte for the same elements):
 
 ```
 "  " * (level - 1) + <rendered marker> + " " + text
