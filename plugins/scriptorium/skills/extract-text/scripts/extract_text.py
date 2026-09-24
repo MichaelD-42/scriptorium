@@ -363,6 +363,91 @@ def level_for_x(x: float, cluster_reps: list[float]) -> int:
     return best_i + 1
 
 
+def _block_marker_start(kept_lines: list[dict], i: int) -> tuple[str, str, dict, int] | None:
+    """Task A4b fix round 1 (reviewer Finding 1): does `kept_lines[i]`
+    start a new list item WITHIN a single block? Two shapes, both reusing
+    `parse_list_marker` (no second copy of the marker-recognition rule):
+
+    - `lines_consumed == 2`: `kept_lines[i]` is a lone bullet-glyph
+      character and nothing else, and `kept_lines[i + 1]` sits on the same
+      visual line (`LIST_MARKER_Y_TOLERANCE`) at a larger x -- the real
+      document's actual shape, confirmed empirically: a glyph drawn at a
+      larger font size than its text lands as TWO separate `lines` of ONE
+      PyMuPDF block, not two spans of one line (which the single-line
+      `parse_list_marker` check alone could read) and not two top-level
+      blocks (which `merge_list_and_paragraph_blocks`'s own cross-BLOCK
+      case already handled, one level up from this cross-LINE case).
+    - `lines_consumed == 1`: `kept_lines[i]`'s own text is itself
+      "marker + text" (`parse_list_marker` matches directly) -- the
+      original inline-marker shape (e.g. `furniture_sample.pdf`'s
+      `"- Ingestion"`, one span, one line).
+
+    Returns `(marker, item_text_so_far, x_line, lines_consumed)` --
+    `x_line` is whichever line's bbox determines the marker's level (the
+    glyph line for the pair shape, the marker line itself for the inline
+    shape) -- or `None` if `kept_lines[i]` doesn't start an item either
+    way."""
+    line = kept_lines[i]
+    stripped = line["text"].strip()
+    if len(stripped) == 1 and stripped in LIST_BULLET_GLYPHS and i + 1 < len(kept_lines):
+        next_line = kept_lines[i + 1]
+        same_line = abs(next_line["bbox"][1] - line["bbox"][1]) <= LIST_MARKER_Y_TOLERANCE
+        further_right = next_line["bbox"][0] > line["bbox"][0]
+        if same_line and further_right and parse_list_marker(next_line["text"]) is None:
+            return stripped, next_line["text"], line, 2
+        return None
+    marker_info = parse_list_marker(line["text"])
+    if marker_info:
+        marker, rest = marker_info
+        return marker, rest, line, 1
+    return None
+
+
+def parse_block_list_items(kept_lines: list[dict], list_level_lookup: list[float]) -> list[dict] | None:
+    """Task A4b fix round 1: a single block can hold ONE OR SEVERAL list
+    items end to end (glyph, text, glyph, text, ... -- the reviewer's own
+    repro shape), each recognized via `_block_marker_start`. Every line
+    between one item's start and the next (or the end of the block)
+    belongs to that item's `text`, unconditionally -- the same "a block's
+    remaining lines default to the open item" latitude the pre-existing
+    single-item inline case already had (reviewed and accepted as Minor
+    Finding 2), now bounded at the NEXT marker-start instead of always the
+    whole block, since one block can hold more than one item. This is also
+    how a wrapped continuation line (no marker, following either shape)
+    stays in its item -- no x-position check needed here, unlike the
+    CROSS-block continuation case, because these lines are already
+    guaranteed to be part of the one PyMuPDF block PyMuPDF itself grouped
+    together.
+
+    Returns `None` (not a list) when `kept_lines[0]` isn't itself a marker
+    start -- the block isn't list content at all, so the caller falls back
+    to ordinary heading/paragraph handling exactly as before this fix
+    (this function changes nothing for a block that doesn't start with a
+    marker)."""
+    if not kept_lines or _block_marker_start(kept_lines, 0) is None:
+        return None
+
+    items: list[dict] = []
+    i, n = 0, len(kept_lines)
+    while i < n:
+        start = _block_marker_start(kept_lines, i)
+        if start is not None:
+            marker, first_text, x_line, consumed = start
+            level = level_for_x(x_line["bbox"][0], list_level_lookup)
+            if consumed == 2:
+                bbox = _union_bbox(kept_lines[i]["bbox"], kept_lines[i + 1]["bbox"])
+            else:
+                bbox = list(kept_lines[i]["bbox"])
+            items.append({"type": "list_item", "marker": marker, "level": level, "text": first_text, "bbox": bbox})
+            i += consumed
+            continue
+        items[-1]["text"] = items[-1]["text"] + " " + kept_lines[i]["text"]
+        items[-1]["bbox"] = _union_bbox(items[-1]["bbox"], kept_lines[i]["bbox"])
+        i += 1
+
+    return items
+
+
 def document_list_marker_levels(
     fitz_doc,
     body_size: float,
@@ -395,7 +480,13 @@ def document_list_marker_levels(
     would need every page's figure regions computed twice (once here, once
     in `main()`'s own per-page loop); same documented, accepted gap shape
     as `document_heading_size_ranks`'s own carried-forward figure/table-
-    overlap gap (see task-A5-report.md's "Concerns" section)."""
+    overlap gap (see task-A5-report.md's "Concerns" section).
+
+    Fix round 1 (reviewer Finding 1): a block's marker candidates are now
+    collected via `_block_marker_start`, walked across every line in the
+    block (not just the first) -- the same function `parse_block_list_items`
+    uses for the real per-page extraction, so this ranking table can never
+    disagree with what the real pass actually detects as a marker."""
     xs: list[float] = []
     for page in fitz_doc:
         page_number = page.number + 1
@@ -413,15 +504,22 @@ def document_list_marker_levels(
             is_bold_block = all(line["bold"] for line in kept_lines)
             if classify_heading_level(text, is_bold_block, max_size, body_size, toc_lookup, heading_size_ranks):
                 continue  # a TOC-matched/fallback heading never seeds a marker x-position
-            if parse_list_marker(first_line["text"]) is not None:
-                xs.append(first_line["bbox"][0])
+            if _block_marker_start(kept_lines, 0) is not None:
+                j = 0
+                while j < len(kept_lines):
+                    start = _block_marker_start(kept_lines, j)
+                    if start is not None:
+                        xs.append(start[2]["bbox"][0])  # x_line's own x0
+                        j += start[3]
+                    else:
+                        j += 1
             elif len(kept_lines) == 1 and first_line["text"].strip() in LIST_BULLET_GLYPHS \
                     and len(first_line["text"].strip()) == 1:
-                # Separate-glyph-block candidate (Task A4b item 1's other
-                # case): a block that is nothing but one bullet-glyph
-                # character also seeds a cluster/level at its own x, same
-                # as the merged case `merge_list_and_paragraph_blocks`
-                # builds in the real per-page loop.
+                # Separate-glyph-block candidate: a whole block that is
+                # nothing but one bullet-glyph character, paired with the
+                # NEXT top-level block (merge_list_and_paragraph_blocks's
+                # cross-BLOCK case) -- distinct from the within-block pair
+                # above (cross-LINE, one block).
                 xs.append(first_line["bbox"][0])
     return cluster_x_positions(xs)
 
@@ -508,6 +606,33 @@ def merge_list_and_paragraph_blocks(
                 elements.append(item)
                 open_item, open_item_text_x = item, next_block["bbox"][0]
                 i += 2
+                continue
+
+        # Fix round 1 (reviewer Finding 1): the real document's actual
+        # marker shape -- a glyph drawn larger than its text -- lands as
+        # two LINES of ONE block, not the cross-block case above and not
+        # the single-line inline case build_block_element's own marker
+        # check reads. A block can hold several such items end to end
+        # (glyph, text, glyph, text, ...) -- parse_block_list_items walks
+        # every line and returns all of them at once. The heading check
+        # runs FIRST (same as build_block_element's own ordering, reused
+        # here rather than duplicated) so a TOC-matched/fallback heading
+        # still always wins over marker-shaped text.
+        block_text = " ".join(line["text"] for line in kept_lines)
+        block_max_size = max(line["max_size"] for line in kept_lines)
+        block_is_bold = all(line["bold"] for line in kept_lines)
+        if classify_heading_level(block_text, block_is_bold, block_max_size, body_size, toc_lookup, heading_size_ranks) is None:
+            block_items = parse_block_list_items(kept_lines, list_level_lookup)
+            if block_items is not None:
+                elements.extend(block_items)
+                # Same restriction as the cross-block case's own
+                # open_item_text_x handling below: only a real, distinct
+                # text x (not available here -- see parse_block_list_items'
+                # docstring) would make cross-BLOCK continuation-absorption
+                # safe, so the next block is never auto-absorbed into the
+                # last item found here.
+                open_item, open_item_text_x = block_items[-1], None
+                i += 1
                 continue
 
         element = build_block_element(block, kept_lines, body_size, toc_lookup, heading_size_ranks, list_level_lookup)

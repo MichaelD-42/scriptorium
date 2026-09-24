@@ -28,9 +28,23 @@ Three pieces, each with its own test classes below:
    the run so its output is byte-identical to `elements_to_markdown`'s).
    HTML: one shared `<ul>` per run of consecutive `list_item`s, each `<li
    class="level-N">`. ReqIF: the rendered marker+text as a plain paragraph.
+
+Fix round 1 (reviewer Finding 1, Blocking): the real document's actual
+marker shape -- a bullet glyph drawn at a LARGER font size than its text,
+"on the same line" -- lands as TWO separate `lines` of ONE PyMuPDF
+`block`, not one span of one line (the original inline-marker check's
+assumption) and not two top-level blocks (the original cross-block
+merge's assumption). `_block_marker_start`/`parse_block_list_items`
+(`extract_text.py`) recognize this shape at the LINE level within a
+single block, including several items end to end in one block (glyph,
+text, glyph, text, ...) and wrapped continuation lines with no x check
+(they're already grouped in one PyMuPDF block). `document_list_marker_levels`
+now collects marker x-positions the same way, so the document-wide level
+ranking agrees with what the real per-page pass detects.
 """
 
 import json
+import shutil
 from pathlib import Path
 
 import fitz  # PyMuPDF
@@ -67,8 +81,6 @@ def _run_triage(doc: str, cwd) -> dict:
 
 @pytest.fixture
 def furniture_doc(tmp_project):
-    import shutil
-
     dest = tmp_project / "input" / "furniture_sample.pdf"
     shutil.copyfile(EXAMPLES_ROOT / "furniture_sample.pdf", dest)
     return "furniture_sample"
@@ -340,6 +352,180 @@ class TestSeparateGlyphBlockMerge:
         )
         assert len(elements) == 2
         assert [e["text"] for e in elements] == ["First item", "Second item"]
+
+
+# ---------------------------------------------------------------------------
+# 1d2. Fix round 1 (reviewer Finding 1, Blocking): the glyph and its text as
+#      TWO LINES of ONE block -- the real document's actual shape.
+# ---------------------------------------------------------------------------
+
+def _build_glyph_size_jump_pdf(tmp_path: Path, name: str) -> Path:
+    """A 2-level nested list, each item's bullet glyph drawn at a LARGER
+    font size (13pt Symbol) than its text (11pt Helvetica) on the same
+    insertion y -- the brief's own real-document shape ("drawn at a larger
+    size than the text ... y differs by about 1 pt"). One level-2 item's
+    text is split across two insert_text calls at the same x, simulating a
+    wrapped line. Confirmed directly against PyMuPDF's own output (see
+    TestGlyphAndTextAsTwoLinesOfOneBlock's own sanity check below) that
+    this lands the glyph and its text as two separate `lines` of the SAME
+    block -- not two spans of one line, and not two top-level blocks.    The glyph is inserted as U+F02D (a private-use Symbol-font code point,
+    matching the brief's own real-document example) -- but PyMuPDF's
+    built-in "Symbol" base-14 font round-trips every private-use bullet
+    input tried (F02D/F0B7/F0A7/F0D8) back through get_text() as the SAME
+    real Unicode character, U+00B7 (middle dot), not the PUA input
+    verbatim -- confirmed empirically while building this fixture (a real
+    document's own embedded font, with its own ToUnicode CMap, actually
+    maps back to PUA on extraction; PyMuPDF's built-in font doesn't). The
+    input glyph is still both a valid LIST_BULLET_GLYPHS member and the
+    private-use glyph the brief calls out; the PUA-preserving round-trip
+    itself is separately and precisely exercised via hand-built block
+    dicts in TestParseBlockListItemsSeveralItemsInOneBlock below, which
+    doesn't depend on PyMuPDF's font rendering at all."""
+    out_path = tmp_path / name
+    document = fitz.open()
+    page = document.new_page()
+    level1_x, level2_x = 72.0, 100.0
+    # Content starts at y=150 (well below pdf-triage's top-12% furniture
+    # edge band on a letter-size page) -- same precaution test_heading_levels.py
+    # documents for its own single-page synthetic fixtures.
+    page.insert_text((level1_x, 150), "", fontsize=13, fontname="Symbol")
+    page.insert_text((level1_x + 18, 151), "Ingestion", fontsize=11, fontname="helv")
+    page.insert_text((level2_x, 170), "", fontsize=13, fontname="Symbol")
+    page.insert_text((level2_x + 18, 171), "Normalize incoming documents before parsing and validating markers", fontsize=11, fontname="helv")
+    page.insert_text((level2_x + 18, 185), "that wraps onto a second physical line", fontsize=11, fontname="helv")
+    page.insert_text((level1_x, 205), "", fontsize=13, fontname="Symbol")
+    page.insert_text((level1_x + 18, 206), "Transformation", fontsize=11, fontname="helv")
+    page.insert_text((level2_x, 225), "", fontsize=13, fontname="Symbol")
+    page.insert_text((level2_x + 18, 226), "Apply extraction rules", fontsize=11, fontname="helv")
+    document.save(out_path)
+    document.close()
+    return out_path
+
+
+class TestGlyphAndTextAsTwoLinesOfOneBlock:
+    """Reproduces the reviewer's exact finding end to end. Must fail
+    against the pre-fix-round code (verified via `git stash` on
+    `extract_text.py` before committing this fix -- see task-A4b-report.md's
+    "Fix round 1" section)."""
+
+    def test_pymupdf_really_does_put_glyph_and_text_on_separate_lines_of_one_block(self, tmp_path):
+        # Sanity check pinning the actual PyMuPDF shape this fix targets --
+        # confirms the premise rather than assuming it, and fails loudly
+        # (not silently) if a future PyMuPDF version segments differently.
+        pdf_path = _build_glyph_size_jump_pdf(tmp_path, "glyph_size_jump_sanity.pdf")
+        doc = fitz.open(pdf_path)
+        page = doc[0]
+        text_blocks = [b for b in page.get_text("dict")["blocks"] if b.get("type") == 0]
+        doc.close()
+
+        found = False
+        for b in text_blocks:
+            lines = b["lines"]
+            if len(lines) >= 2:
+                first_text = "".join(s["text"] for s in lines[0]["spans"]).strip()
+                if len(first_text) == 1 and lines[1]["bbox"][0] > lines[0]["bbox"][0]:
+                    found = True
+                    break
+        assert found, "expected at least one block with a lone-glyph line followed by a further-right text line"
+
+    def test_list_items_recovered_end_to_end_with_correct_levels_and_text(self, tmp_path, tmp_project):
+        pdf_path = _build_glyph_size_jump_pdf(tmp_path, "glyph_size_jump.pdf")
+        shutil.copyfile(pdf_path, tmp_project / "input" / "glyph_size_jump.pdf")
+
+        triage = _run_triage("glyph_size_jump", tmp_project)
+        _run_ok(
+            "extract-text/scripts/extract_text.py", "--doc", "glyph_size_jump",
+            "--pages", "1", "--body-size", str(triage["body_size"]),
+            cwd=tmp_project,
+        )
+        shard = json.loads(paths.shard_path("glyph_size_jump", 1, "text").read_text())
+        list_items = [e for e in shard["elements"] if e["type"] == "list_item"]
+
+        assert len(list_items) == 4, f"expected 4 list items, got {shard['elements']}"
+        assert [e["text"] for e in list_items] == [
+            "Ingestion",
+            "Normalize incoming documents before parsing and validating markers that wraps onto a second physical line",
+            "Transformation",
+            "Apply extraction rules",
+        ]
+        # Two distinct indent levels: x=72 (level 1) shallower than x=100 (level 2).
+        assert [e["level"] for e in list_items] == [1, 2, 1, 2]
+        # PyMuPDF's built-in Symbol font round-trips the PUA input glyph
+        # to U+00B7 (middle dot) on extraction -- see _build_glyph_size_jump_pdf's
+        # own docstring. Still a valid LIST_BULLET_GLYPHS member either way.
+        assert list_items[0]["marker"] == "·"
+        assert list_items[3]["marker"] == "·"
+
+        # No leftover paragraph mangles the marker onto the front of the
+        # text (the bug: a lone-glyph LINE with no text after it on that
+        # same line read as "no marker" -- the real text was one line
+        # down, not absent -- so the whole block fell through to a
+        # paragraph instead).
+        paragraph_texts = " ".join(e.get("text", "") for e in shard["elements"] if e["type"] == "paragraph")
+        assert "Ingestion" not in paragraph_texts
+        assert "Normalize incoming documents" not in paragraph_texts
+        assert "Transformation" not in paragraph_texts
+        assert "Apply extraction rules" not in paragraph_texts
+
+
+class TestParseBlockListItemsSeveralItemsInOneBlock:
+    """Requirement 2 (several items in one block) + requirement 3 (a
+    private-use glyph variant), via hand-built block dicts -- matching this
+    repo's own precedent for line shapes PyMuPDF/reportlab can't reliably
+    reproduce via a base-14 font on their own (see
+    test_furniture_removal.py's TestMixedFurnitureAndRealLineBlock)."""
+
+    def test_four_items_two_distinct_glyphs_in_one_block(self):
+        lines = [
+            _line("", [72.0, 100.0, 78.0, 118.0], max_size=14.0),
+            _line("Ingestion", [90.0, 101.0, 160.0, 116.0]),
+            _line("", [72.0, 120.0, 78.0, 138.0], max_size=14.0),
+            _line("Normalize incoming documents", [90.0, 121.0, 260.0, 136.0]),
+            _line("continuation with no marker", [90.0, 137.0, 260.0, 152.0]),
+            _line("·", [72.0, 154.0, 78.0, 172.0], max_size=14.0),
+            _line("Transformation", [90.0, 155.0, 200.0, 170.0]),
+        ]
+        items = extract_text.parse_block_list_items(lines, [72.0])
+        assert len(items) == 3
+        assert items[0] == {
+            "type": "list_item", "marker": "", "level": 1, "text": "Ingestion",
+            "bbox": [72.0, 100.0, 160.0, 118.0],
+        }
+        assert items[1]["marker"] == ""
+        assert items[1]["text"] == "Normalize incoming documents continuation with no marker"
+        assert items[1]["bbox"] == [72.0, 120.0, 260.0, 152.0]
+        assert items[2]["marker"] == "·"
+        assert items[2]["text"] == "Transformation"
+
+    def test_block_not_starting_with_a_marker_returns_none(self):
+        lines = [_line("Ordinary paragraph text.", [72.0, 100.0, 300.0, 115.0])]
+        assert extract_text.parse_block_list_items(lines, [72.0]) is None
+
+    def test_empty_lines_returns_none(self):
+        assert extract_text.parse_block_list_items([], [72.0]) is None
+
+    def test_single_inline_marker_line_still_works(self):
+        # The original inline-marker shape (one span, one line) is a
+        # degenerate case of the same function -- one item, no glyph pair.
+        lines = [_line("- Ingestion", [72.0, 100.0, 200.0, 115.0])]
+        items = extract_text.parse_block_list_items(lines, [72.0])
+        assert items == [{"type": "list_item", "marker": "-", "level": 1, "text": "Ingestion", "bbox": [72.0, 100.0, 200.0, 115.0]}]
+
+
+class TestDocumentListMarkerLevelsSeesWithinBlockMarkers:
+    """Requirement 4: document_list_marker_levels must see the within-
+    block glyph/text-line-pair shape too, not just the original single-
+    line-per-block and separate-top-level-block shapes."""
+
+    def test_within_block_glyph_text_pairs_contribute_both_levels(self, tmp_path):
+        pdf_path = _build_glyph_size_jump_pdf(tmp_path, "glyph_size_jump_levels.pdf")
+        doc = fitz.open(pdf_path)
+        clusters = extract_text.document_list_marker_levels(
+            doc, body_size=11.0, furniture_masked=set(), toc_lookup={}, heading_size_ranks={},
+            page_roles={},
+        )
+        doc.close()
+        assert clusters == [72.0, 100.0]
 
 
 # ---------------------------------------------------------------------------
