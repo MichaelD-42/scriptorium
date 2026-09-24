@@ -289,23 +289,46 @@ class TestSeparateGlyphBlockMerge:
         assert elements[1]["type"] == "paragraph"
 
     def test_cross_block_wrapped_continuation_absorbed_into_the_open_item(self):
-        # Note (documented approximation, see merge_list_and_paragraph_blocks'
-        # docstring): for the same-block/marker-as-first-token case, the
-        # "item's text x-position" used to match a following continuation
-        # block is approximated as the marker's own x (this pipeline has no
-        # per-word x-position to compute the true hanging-indent text x) --
-        # so the continuation block here is positioned at that SAME x (72.0),
-        # not further indented.
-        item_block = _block([72.0, 100.0, 200.0, 115.0], [_line("- First line", [72.0, 100.0, 200.0, 115.0])])
-        continuation_block = _block([72.0, 116.0, 300.0, 131.0], [_line("continuation text with no marker", [72.0, 116.0, 300.0, 131.0])])
-        blocks_and_lines = [(item_block, item_block["lines"]), (continuation_block, continuation_block["lines"])]
+        # Cross-block continuation-absorption only fires for a list item
+        # produced by the separate-glyph-block merge (case 1) -- that's the
+        # only shape with a real, trustworthy "item text x" (the actual
+        # text block's own x0). See merge_list_and_paragraph_blocks'
+        # docstring: the inline-marker path deliberately does NOT support
+        # this, since its only available x is the marker's x, which
+        # coincides with the ordinary body-text left margin on a real
+        # document and would risk swallowing unrelated paragraphs.
+        glyph_block = _block([72.0, 100.0, 84.0, 118.0], [_line("", [72.0, 100.0, 84.0, 118.0], max_size=14.0)])
+        text_block = _block([95.0, 101.0, 300.0, 116.0], [_line("First line", [95.0, 101.0, 300.0, 116.0])])
+        continuation_block = _block([95.0, 117.0, 300.0, 132.0], [_line("continuation text with no marker", [95.0, 117.0, 300.0, 132.0])])
+        blocks_and_lines = [
+            (glyph_block, glyph_block["lines"]),
+            (text_block, text_block["lines"]),
+            (continuation_block, continuation_block["lines"]),
+        ]
 
         elements = extract_text.merge_list_and_paragraph_blocks(
-            blocks_and_lines, body_size=11.0, toc_lookup={}, heading_size_ranks={}, list_level_lookup=[72.0],
+            blocks_and_lines, body_size=11.0, toc_lookup={}, heading_size_ranks={}, list_level_lookup=[95.0],
         )
         assert len(elements) == 1
         assert elements[0]["type"] == "list_item"
         assert elements[0]["text"] == "First line continuation text with no marker"
+
+    def test_inline_marker_list_item_never_absorbs_a_following_ordinary_paragraph(self):
+        # Regression for the false-merge risk above: an inline-marker item
+        # ("- ..." as the first token of its own block) at the document's
+        # ordinary left margin must NOT swallow a following unrelated
+        # paragraph that merely starts at that same margin.
+        item_block = _block([72.0, 100.0, 200.0, 115.0], [_line("- Ingestion", [72.0, 100.0, 200.0, 115.0])])
+        unrelated_para = _block([72.0, 130.0, 400.0, 145.0], [_line("This is an unrelated new paragraph.", [72.0, 130.0, 400.0, 145.0])])
+        blocks_and_lines = [(item_block, item_block["lines"]), (unrelated_para, unrelated_para["lines"])]
+
+        elements = extract_text.merge_list_and_paragraph_blocks(
+            blocks_and_lines, body_size=11.0, toc_lookup={}, heading_size_ranks={}, list_level_lookup=[72.0],
+        )
+        assert len(elements) == 2
+        assert elements[0] == {"type": "list_item", "marker": "-", "level": 1, "text": "Ingestion", "bbox": [72.0, 100.0, 200.0, 115.0]}
+        assert elements[1]["type"] == "paragraph"
+        assert elements[1]["text"] == "This is an unrelated new paragraph."
 
     def test_next_list_item_does_not_get_absorbed_as_a_continuation(self):
         item1 = _block([72.0, 100.0, 200.0, 115.0], [_line("- First item", [72.0, 100.0, 200.0, 115.0])])

@@ -463,18 +463,23 @@ def merge_list_and_paragraph_blocks(
        other block in between (a heading, a differently-indented paragraph,
        another list item) closes the open item.
 
-    Judgment call: for case 2, the "item's text x-position" tracked after a
-    same-block marker (case where the marker is the first token of the
-    block's own first line, not a separate glyph block) is approximated as
-    that first line's own bbox x0 (the marker's x), since per-line text
-    isn't broken down by word/span in this pipeline's data model -- a true
-    hanging-indent "where does the text after the marker actually start"
-    x isn't available. For the separate-glyph-block case (1 above), the
-    real text block's own x0 is used instead, which is exact. No fixture
-    in this repo exercises a wrapped bullet-list item that also spans
-    multiple PyMuPDF blocks with an inline marker, so this approximation is
-    untested against real extracted geometry -- flagged here, not just
-    silently assumed correct."""
+    Judgment call: case 2 only fires for a list item that came from case 1
+    (the separate-glyph-block merge), because that's the only shape where
+    this pipeline has a real, trustworthy "where does this item's text
+    start" x -- the actual text block's own bbox x0. A list item produced
+    by `build_block_element`'s inline-marker path (the marker is the first
+    token of the block's own line) does NOT set a usable text x here: its
+    only available x is the marker's own bbox x0, which on a real document
+    is typically the SAME left margin ordinary (non-list) paragraphs also
+    start at (this fixture's own LEFT_MARGIN=72 is both a level-1 bullet's
+    marker x and every paragraph's left edge) -- absorbing whatever
+    happens to follow at that common margin would silently swallow
+    unrelated prose into the list item's text, a real correctness risk on
+    a document with lists followed by normal paragraphs, not a
+    hypothetical. Same-block wrapped continuation (multiple PyMuPDF lines
+    inside one block, first line has the marker) is unaffected by this --
+    `build_block_element` handles that case directly, with no x-matching
+    involved at all."""
     elements: list[dict] = []
     open_item: dict | None = None
     open_item_text_x: float | None = None
@@ -511,6 +516,7 @@ def merge_list_and_paragraph_blocks(
             element is not None
             and element["type"] == "paragraph"
             and open_item is not None
+            and open_item_text_x is not None
             and abs(block["bbox"][0] - open_item_text_x) <= LIST_MARKER_X_TOLERANCE
         ):
             open_item["text"] = open_item["text"] + " " + element["text"]
@@ -522,7 +528,20 @@ def merge_list_and_paragraph_blocks(
             elements.append(element)
 
         if element is not None and element["type"] == "list_item":
-            open_item, open_item_text_x = element, first_line["bbox"][0]
+            # Deliberately do NOT track a text x here for the inline-marker
+            # case (marker is the first token of the block's own line) --
+            # its only available x is the marker's own bbox x0, which on a
+            # real document is typically the SAME left margin ordinary
+            # (non-list) paragraphs also start at (e.g. this fixture's
+            # LEFT_MARGIN=72 is both a level-1 bullet's marker x AND every
+            # paragraph's left edge). Absorbing the next block whenever it
+            # merely shares that common margin would silently swallow
+            # unrelated paragraphs into the list item's text -- a real
+            # correctness risk on a document with lists followed by normal
+            # prose, not just a hypothetical. Only the separate-glyph-block
+            # case above (which has the real TEXT block's own x, distinct
+            # from the marker's x) sets a usable open_item_text_x.
+            open_item, open_item_text_x = element, None
         else:
             open_item, open_item_text_x = None, None
         i += 1
