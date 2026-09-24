@@ -13,13 +13,25 @@ same functions from both scripts is what keeps their answers consistent.
 Detection pipeline, per page:
 
 1. `page.get_drawings()` lists every vector-graphic item on the page. A
-   single item is dropped *before* clustering only if its own bbox matches
-   (within `FRAME_TABLE_BBOX_TOLERANCE`) one of `frame_drawings` --
-   `triage.json["furniture"]["frame_drawings"]`, `pdf-triage`'s
-   repetition-based page-frame detection (Task A5b, `triage.py`'s
-   `_find_frame_drawings`): a single vector drawing covering more than 60%
-   of the page that repeats at the same bbox on at least half the document's
-   pages. This matters more than it looks: left unfiltered, a full-page-frame
+   single item is dropped *before* clustering only if it clears ALL THREE
+   of: its own bbox matches (within `FRAME_TABLE_BBOX_TOLERANCE`) one of
+   `frame_drawings` -- `triage.json["furniture"]["frame_drawings"]`,
+   `pdf-triage`'s repetition-based page-frame detection (Task A5b,
+   `triage.py`'s `_find_frame_drawings`): a single vector drawing covering
+   more than 60% of the page that repeats at the same bbox on at least half
+   the document's pages AND on at least `FRAME_MIN_PAGE_COUNT` (3) distinct
+   pages (fix round 1: a fraction-only gate would call a single large
+   drawing on a 1- or 2-page document "repeated," since it trivially clears
+   50% of a document that short); it has no fill (`_is_stroke_only`, fix
+   round 1); and at least one of its edges sits within
+   `FRAME_DRAWING_EDGE_MARGIN_FRACTION` of the page's own edge
+   (`_touches_page_edge`, fix round 1). The latter two are independent
+   signals beyond bbox repetition, required because repetition alone
+   (even gated by page count) is not proof that THIS occurrence, on THIS
+   page, is furniture rather than a genuine figure that happens to reuse
+   the same footprint.
+
+   This matters more than it looks: left unfiltered, a full-page-frame
    border (a single stroked rectangle drawn near the page edges, which this
    plugin's own `furniture_sample.pdf` fixture has on every page) makes
    `page.cluster_drawings()` merge *every other drawing on the page* into
@@ -88,7 +100,38 @@ import pdfplumber
 # existing convention (see e.g. extract_images.py's own FRAME_TABLE_BBOX_TOLERANCE
 # docstring) of small per-file constant duplication over cross-script imports.
 FURNITURE_EDGE_BAND = 0.12
+# 3.0pt here vs. triage.py's own FRAME_TABLE_BBOX_TOLERANCE = 2.0pt --
+# deliberately not the same value, not an oversight. triage.py's 2pt is a
+# GROUPING tolerance: deciding whether two individual pages' raw bboxes are
+# "the same" frame occurrence when first building frame_tables/frame_drawings.
+# This copy is a MATCHING tolerance: comparing a freshly-queried bbox against
+# an ALREADY-AVERAGED frame_tables/frame_drawings entry (see triage.py's
+# `avg_bbox`), which, being an average across every matched page, can drift a
+# little further from any single page's own raw bbox than two raw per-page
+# bboxes drift from each other -- hence the extra point of slack here.
 FRAME_TABLE_BBOX_TOLERANCE = 3.0  # pt
+
+# Task A5b fix round 1 (controller finding 1): a drawing whose bbox matches a
+# frame_drawings entry is pre-filtered as a page-frame border only if it ALSO
+# clears both of these -- bbox repetition alone (even with triage.py's
+# FRAME_MIN_PAGE_COUNT floor) is not sufficient evidence on its own that THIS
+# particular occurrence, on THIS page, is furniture rather than a genuine
+# figure that happens to reuse the same footprint.
+#   - stroke-only, no fill (_is_stroke_only): every real page-frame border in
+#     this plugin's fixtures is a plain ruled/stroked rectangle with no fill;
+#     a filled shape repeated at the same bbox (e.g. a colored background
+#     panel) is not what this heuristic is built to recognize, so it's left
+#     alone here -- it still shows up in triage.json's frame_drawings list
+#     (that detection is unconditional), it just isn't pre-filtered out of
+#     clustering by this stricter check.
+#   - at least one edge within FRAME_DRAWING_EDGE_MARGIN_FRACTION of the
+#     page's own edge (_touches_page_edge): a real page-frame border is drawn
+#     near the page's physical edges by construction. This is a second,
+#     independent signal beyond bbox repetition, so a large content region
+#     that coincidentally repeats at a similar bbox across pages (unlikely,
+#     but not impossible) is not silently swallowed just because two
+#     unrelated pages happened to lay it out the same way.
+FRAME_DRAWING_EDGE_MARGIN_FRACTION = 0.10
 
 # Task A5b: a cluster is dropped for the furniture band only if MORE THAN
 # HALF its own area lies inside the top/bottom edge band -- tightened from
@@ -178,6 +221,38 @@ def _is_frame_drawing_bbox(bbox, frame_drawings: list[dict]) -> bool:
     return any(
         all(abs(a - b) <= FRAME_TABLE_BBOX_TOLERANCE for a, b in zip(bbox, fd["bbox"]))
         for fd in frame_drawings
+    )
+
+
+def _is_stroke_only(drawing: dict) -> bool:
+    """True if a single `page.get_drawings()` item has no fill -- PyMuPDF
+    sets a drawing dict's `fill` key to `None` for a pure stroke/line item
+    (its own `type` is `"s"`) and to a real color tuple for anything filled
+    (`"f"`/`"fs"`). See FRAME_DRAWING_EDGE_MARGIN_FRACTION's docstring for
+    why this is one of the two extra signals (Task A5b fix round 1) a
+    frame_drawings bbox match must also clear before a drawing is
+    pre-filtered as furniture."""
+    return drawing.get("fill") is None
+
+
+def _touches_page_edge(
+    bbox, page_width: float, page_height: float,
+    margin_fraction: float = FRAME_DRAWING_EDGE_MARGIN_FRACTION,
+) -> bool:
+    """True if at least one of `bbox`'s four edges sits within
+    `margin_fraction` of the corresponding page edge. See
+    FRAME_DRAWING_EDGE_MARGIN_FRACTION's docstring for why this is required
+    alongside `_is_stroke_only` before a frame_drawings bbox match is
+    actually pre-filtered."""
+    if page_width <= 0 or page_height <= 0:
+        return False
+    x_margin = margin_fraction * page_width
+    y_margin = margin_fraction * page_height
+    return (
+        bbox[0] <= x_margin
+        or bbox[1] <= y_margin
+        or bbox[2] >= page_width - x_margin
+        or bbox[3] >= page_height - y_margin
     )
 
 
@@ -275,7 +350,11 @@ def detect_figure_regions_with_exclusions(
     for d in drawings:
         rect = d["rect"]
         bbox = [rect.x0, rect.y0, rect.x1, rect.y1]
-        if _is_frame_drawing_bbox(bbox, frame_drawings):
+        if (
+            _is_frame_drawing_bbox(bbox, frame_drawings)
+            and _is_stroke_only(d)
+            and _touches_page_edge(bbox, page_width, page_height)
+        ):
             excluded_regions.append({"bbox": bbox, "reason": "frame_drawing"})
             continue
         significant.append(d)

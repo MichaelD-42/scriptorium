@@ -22,7 +22,10 @@ the orchestrator isn't watching your intermediate steps, only your final
 report. Deterministic gates (page counts, dangling asset refs, OCR
 confidence floors) already ran once for the whole document before you were
 spawned — that's not your job. Yours is the qualitative rubric, which needs
-real visual judgment a script can't provide.
+real visual judgment a script can't provide — including the one gate
+warning that's actually a judgment call in disguise: `large_region_excluded`
+(see step 2 below). gates.py can tell you a large region was dropped; only
+looking at the page can tell you whether it was actually a figure.
 
 ## Your job
 
@@ -31,14 +34,30 @@ the assembled output's format/location.
 
 1. Make sure your batch's pages are rendered (`render-pages`) if the PNGs
    don't already exist in `work/<doc>/pages/`.
-2. For each page in your batch, follow `grade-output/rubric.md` exactly:
+2. Read `work/<doc>/gates-report.json`'s top-level `warnings` list (it
+   exists once gates.py has run — this is not the deterministic gates
+   themselves, which already ran and are not your job; it's the one
+   `large_region_excluded` warning gates.py can't judge for itself, since
+   judging whether a dropped region is really a figure needs the same
+   visual judgment the rest of your job already requires). Filter to the
+   entries whose `"page"` is in your batch. For each: look at that
+   region's `"bbox"` on the page's rendered PNG. If it shows a genuine
+   figure/diagram/photo (not decorative whitespace, a coincidentally
+   large stretch of body text, or a real table that was correctly
+   excluded), tag that page `missing_image` when you score it in step 3
+   below — this is exactly criterion 7 ("images present and captioned"):
+   a region gates.py flagged as dropped-and-large, with nothing in the
+   assembled output for it, is a missing image by definition once you've
+   confirmed by eye that it's a real figure.
+3. For each page in your batch, follow `grade-output/rubric.md` exactly:
    look at the rendered PNG (Read tool) side by side with that page's
    content in the assembled output, score it 0-1 against the seven
-   criteria, and tag every issue with the correct failure-taxonomy label.
-   Specific issues ("page 5: dropped_text — the second paragraph is
-   missing") are what makes the next retry effective; vague ones ("looks
-   off") aren't retained feedback, they're noise.
-3. Write one grade shard per page with `write_grade_shard.py` — **never**
+   criteria, and tag every issue with the correct failure-taxonomy label
+   (including any `missing_image` from step 2 above). Specific issues
+   ("page 5: dropped_text — the second paragraph is missing") are what
+   makes the next retry effective; vague ones ("looks off") aren't
+   retained feedback, they're noise.
+4. Write one grade shard per page with `write_grade_shard.py` — **never**
    try to compute or write the whole document's merged grade report
    yourself; that's arithmetic over every batch's shards, done by a
    deterministic script (`merge_grades.py`) after all of you finish.

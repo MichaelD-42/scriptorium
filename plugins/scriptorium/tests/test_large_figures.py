@@ -502,6 +502,230 @@ class TestGatesEndToEndWritesWarnings:
         assert large_warnings[0]["reason"] == "table_overlap"
 
 
+class TestFrameMinPageCountFixRound1:
+    """Controller fix round 1, finding 1: a large figure on a 1- or 2-page
+    document was still being silently dropped -- confirmed by the
+    reviewer's experiment: on those short documents, a single occurrence of
+    a large drawing trivially clears FRAME_TABLE_MIN_PAGE_FRACTION (50%),
+    so it was misclassified as a repeated page frame and pre-filtered out
+    of clustering before it ever had a chance to become a region.
+
+    These go through the REAL triage.py entry point (`_run_triage`), not
+    the library with a hand-built `frame_drawings` list, per the ruling --
+    a hand-passed empty/non-empty list can't demonstrate that triage.py
+    itself now refuses to call a 1-of-1 or 1-of-2 occurrence "repeated"."""
+
+    def _build_doc(self, tmp_project, name: str, npages: int, fig_page: int, filled: bool = False) -> None:
+        width, height = 606.0, 560.0
+        x0 = (PAGE_WIDTH - width) / 2
+        y0 = (PAGE_HEIGHT - height) / 2
+        rect = fitz.Rect(x0, y0, x0 + width, y0 + height)
+
+        doc = fitz.open()
+        for i in range(1, npages + 1):
+            page = doc.new_page(width=PAGE_WIDTH, height=PAGE_HEIGHT)
+            page.insert_text((72, 60), f"Body text page {i}.")
+            if i == fig_page or filled:
+                if filled:
+                    page.draw_rect(rect, color=(0, 0, 0), fill=(0.9, 0.9, 0.9), width=2)
+                else:
+                    page.draw_rect(rect, width=2)
+        doc.save(str(tmp_project / "input" / f"{name}.pdf"))
+        doc.close()
+
+    def test_one_page_doc_large_figure_detected_frame_drawings_empty(self, tmp_project):
+        self._build_doc(tmp_project, "one_page_large_fig", npages=1, fig_page=1)
+        triage = _run_triage("one_page_large_fig", tmp_project)
+        assert triage["furniture"]["frame_drawings"] == [], (
+            "a 1-page document has no basis for calling anything 'repeated'"
+        )
+        _run_ok("extract-images/scripts/extract_images.py", "--doc", "one_page_large_fig", "--pages", "1", cwd=tmp_project)
+        shard = json.loads(paths.shard_path("one_page_large_fig", 1, "image").read_text())
+        vectors = [e for e in shard["elements"] if e["kind"] == "vector"]
+        assert len(vectors) == 1, f"large figure must survive on a 1-page doc -- shard: {shard}"
+        assert not any(r["reason"] == "frame_drawing" for r in shard["excluded_regions"])
+
+    def test_two_page_doc_large_figure_on_page_one_detected_frame_drawings_empty(self, tmp_project):
+        self._build_doc(tmp_project, "two_page_large_fig", npages=2, fig_page=1)
+        triage = _run_triage("two_page_large_fig", tmp_project)
+        assert triage["furniture"]["frame_drawings"] == [], (
+            "one occurrence out of two pages (50%) must not be enough -- "
+            "FRAME_MIN_PAGE_COUNT requires at least 3 independent occurrences"
+        )
+        _run_ok("extract-images/scripts/extract_images.py", "--doc", "two_page_large_fig", "--pages", "1", cwd=tmp_project)
+        shard = json.loads(paths.shard_path("two_page_large_fig", 1, "image").read_text())
+        vectors = [e for e in shard["elements"] if e["kind"] == "vector"]
+        assert len(vectors) == 1, f"large figure must survive on a 2-page doc -- shard: {shard}"
+        assert not any(r["reason"] == "frame_drawing" for r in shard["excluded_regions"])
+
+    def test_three_page_doc_large_figure_on_page_one_still_detected(self, tmp_project):
+        """Kept from before fix round 1 -- a 3-page document where the large
+        figure appears on only 1 of 3 pages (1/3 = 33% < 50%) was already
+        safe even before FRAME_MIN_PAGE_COUNT existed; this pins that it
+        still is."""
+        self._build_doc(tmp_project, "three_page_large_fig", npages=3, fig_page=1)
+        triage = _run_triage("three_page_large_fig", tmp_project)
+        assert triage["furniture"]["frame_drawings"] == []
+        _run_ok("extract-images/scripts/extract_images.py", "--doc", "three_page_large_fig", "--pages", "1", cwd=tmp_project)
+        shard = json.loads(paths.shard_path("three_page_large_fig", 1, "image").read_text())
+        vectors = [e for e in shard["elements"] if e["kind"] == "vector"]
+        assert len(vectors) == 1
+
+    def test_large_filled_drawing_repeated_on_three_pages_not_treated_as_frame(self, tmp_project):
+        """A large FILLED drawing repeated identically on every page of a
+        3-page document DOES clear triage's repetition gates (fraction and
+        FRAME_MIN_PAGE_COUNT alike -- triage doesn't look at fill), so it
+        legitimately lands in frame_drawings. But lib/figures.py's
+        pre-filter additionally requires stroke-only (_is_stroke_only)
+        before actually excluding a matching drawing from clustering -- a
+        filled shape is left alone, so it must still surface as a real
+        region on each page, not vanish as reason=frame_drawing."""
+        self._build_doc(tmp_project, "filled_repeated", npages=3, fig_page=1, filled=True)
+        triage = _run_triage("filled_repeated", tmp_project)
+        frame_drawings = triage["furniture"]["frame_drawings"]
+        assert frame_drawings, "sanity: a filled drawing repeated on all 3 pages should still be listed in frame_drawings"
+        assert frame_drawings[0]["page_count"] == 3
+
+        _run_ok("extract-images/scripts/extract_images.py", "--doc", "filled_repeated", "--pages", "1,2,3", cwd=tmp_project)
+        for page_number in (1, 2, 3):
+            shard = json.loads(paths.shard_path("filled_repeated", page_number, "image").read_text())
+            vectors = [e for e in shard["elements"] if e["kind"] == "vector"]
+            assert len(vectors) == 1, f"page {page_number}: filled repeated drawing must NOT be excluded as a frame -- shard: {shard}"
+            assert not any(r["reason"] == "frame_drawing" for r in shard["excluded_regions"]), (
+                f"page {page_number}: {shard['excluded_regions']}"
+            )
+
+    def test_frame_table_sample_still_detects_its_frame(self, tmp_project):
+        """frame_table_sample.pdf (3 pages, frame on all 3) must still clear
+        FRAME_MIN_PAGE_COUNT -- 3 >= 3."""
+        dest = tmp_project / "input" / "frame_table_sample.pdf"
+        shutil.copyfile(EXAMPLES_ROOT / "frame_table_sample.pdf", dest)
+        triage = _run_triage("frame_table_sample", tmp_project)
+        assert triage["furniture"]["frame_tables"], "frame_table_sample.pdf must still have its frame detected"
+
+    def test_furniture_sample_still_detects_its_frame(self, furniture_doc, tmp_project):
+        """furniture_sample.pdf (9 pages, frame on all 9) -- comfortably
+        clears FRAME_MIN_PAGE_COUNT."""
+        triage = _run_triage(furniture_doc, tmp_project)
+        assert triage["furniture"]["frame_drawings"], "furniture_sample.pdf must still have its frame detected"
+
+
+class TestFrameDrawingPreFilterRequiresStrokeAndEdge:
+    """Direct unit tests against detect_figure_regions_with_exclusions,
+    isolating each of the two extra signals fix round 1 added (stroke-only,
+    edge proximity) from a hand-built frame_drawings list -- a bbox match
+    alone must never be sufficient on its own."""
+
+    def _frame_bbox(self) -> list[float]:
+        width, height = 606.0, 560.0
+        x0 = (PAGE_WIDTH - width) / 2
+        y0 = (PAGE_HEIGHT - height) / 2
+        return [x0, y0, x0 + width, y0 + height]
+
+    def test_filled_match_is_not_excluded_even_touching_the_edge(self, tmp_path):
+        bbox = self._frame_bbox()
+
+        def draw(page):
+            page.draw_rect(fitz.Rect(*bbox), color=(0, 0, 0), fill=(0.9, 0.9, 0.9), width=2)
+
+        doc, page = _make_region_pdf(tmp_path / "filled.pdf", draw)
+        try:
+            regions, excluded = figures_lib.detect_figure_regions_with_exclusions(
+                page, 1, tmp_path / "filled.pdf", frame_tables=[], frame_drawings=[{"bbox": bbox}],
+            )
+            assert len(regions) == 1
+            assert not any(r["reason"] == "frame_drawing" for r in excluded)
+        finally:
+            doc.close()
+
+    def test_stroke_only_match_not_touching_the_edge_is_not_excluded(self, tmp_path):
+        # Centered, well clear of every page edge (>10% margin on all sides).
+        width, height = 300.0, 200.0
+        x0 = (PAGE_WIDTH - width) / 2
+        y0 = (PAGE_HEIGHT - height) / 2
+        bbox = [x0, y0, x0 + width, y0 + height]
+        assert x0 > 0.10 * PAGE_WIDTH and y0 > 0.10 * PAGE_HEIGHT
+
+        def draw(page):
+            page.draw_rect(fitz.Rect(*bbox), width=2)
+
+        doc, page = _make_region_pdf(tmp_path / "midpage.pdf", draw)
+        try:
+            regions, excluded = figures_lib.detect_figure_regions_with_exclusions(
+                page, 1, tmp_path / "midpage.pdf", frame_tables=[], frame_drawings=[{"bbox": bbox}],
+            )
+            assert len(regions) == 1
+            assert not any(r["reason"] == "frame_drawing" for r in excluded)
+        finally:
+            doc.close()
+
+    def test_stroke_only_and_edge_touching_match_is_excluded(self, tmp_path):
+        """Sanity check on the gate itself: with BOTH extra signals present
+        (as well as the bbox match), the drawing is still excluded -- fix
+        round 1 narrows the pre-filter, it doesn't disable it."""
+        bbox = self._frame_bbox()
+
+        def draw(page):
+            page.draw_rect(fitz.Rect(*bbox), width=2)
+
+        doc, page = _make_region_pdf(tmp_path / "real_frame.pdf", draw)
+        try:
+            regions, excluded = figures_lib.detect_figure_regions_with_exclusions(
+                page, 1, tmp_path / "real_frame.pdf", frame_tables=[], frame_drawings=[{"bbox": bbox}],
+            )
+            assert regions == []
+            assert any(r["reason"] == "frame_drawing" for r in excluded)
+        finally:
+            doc.close()
+
+
+class TestExcludedRegionsNeverInRenderedMarkdown:
+    """Minor: excluded_regions is page/shard-level bookkeeping for the gate
+    and a human reviewer reading gates-report.json -- it must never leak
+    into the rendered Markdown output itself."""
+
+    def test_excluded_region_bbox_and_reason_absent_from_assembled_md(self, tmp_project):
+        path = tmp_project / "input" / "md_leak_check.pdf"
+
+        width, height = 606.0, 560.0
+        x0 = (PAGE_WIDTH - width) / 2
+        y0 = (PAGE_HEIGHT - height) / 2
+        fig_rect = fitz.Rect(x0, y0, x0 + width, y0 + height)
+
+        doc = fitz.open()
+        page = doc.new_page(width=PAGE_WIDTH, height=PAGE_HEIGHT)
+        page.draw_rect(fig_rect, width=2)
+        tx0, ty0, tx1, ty1 = x0 + 20, y0 + 20, x0 + width - 20, y0 + height - 20
+        for frac in (0.0, 0.33, 0.66, 1.0):
+            yy = ty0 + frac * (ty1 - ty0)
+            page.draw_line((tx0, yy), (tx1, yy), width=1)
+        for frac in (0.0, 0.5, 1.0):
+            xx = tx0 + frac * (tx1 - tx0)
+            page.draw_line((xx, ty0), (xx, ty1), width=1)
+        doc.save(str(path))
+        doc.close()
+
+        triage = _run_triage("md_leak_check", tmp_project)
+        _run_ok(
+            "extract-text/scripts/extract_text.py", "--doc", "md_leak_check",
+            "--pages", "1", "--body-size", str(triage["body_size"]), cwd=tmp_project,
+        )
+        _run_ok("extract-images/scripts/extract_images.py", "--doc", "md_leak_check", "--pages", "1", cwd=tmp_project)
+        _run_ok("assemble-output/scripts/merge.py", "--doc", "md_leak_check", cwd=tmp_project)
+
+        shard = json.loads(paths.shard_path("md_leak_check", 1, "image").read_text())
+        assert shard["excluded_regions"], "sanity: expected at least one excluded region (the table-overlapping figure)"
+
+        _run_ok("assemble-output/scripts/assemble.py", "--doc", "md_leak_check", "--format", "md", cwd=tmp_project)
+        md_path = paths.output_file("md_leak_check", "md")
+        md_text = md_path.read_text(encoding="utf-8")
+
+        assert "excluded_regions" not in md_text
+        assert "table_overlap" not in md_text
+        assert "furniture_band" not in md_text
+        assert "frame_drawing" not in md_text
+
+
 class TestSamplePdfRegressionUnchanged:
     """sample.pdf's page-4 vector diagram -- unaffected by this task's
     changes (no page-covering drawing on that fixture at all)."""

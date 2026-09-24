@@ -23,8 +23,30 @@ FURNITURE_EDGE_BAND = 0.12  # top/bottom 12% of page height counts as "near an e
 LINE_PATTERN_MIN_PAGE_FRACTION = 0.60
 FRAME_TABLE_MIN_AREA_FRACTION = 0.60
 FRAME_TABLE_MIN_PAGE_FRACTION = 0.50
-FRAME_TABLE_BBOX_TOLERANCE = 2.0  # pt
+FRAME_TABLE_BBOX_TOLERANCE = 2.0  # pt -- see lib/figures.py's own copy of this
+# constant (3.0pt there) for why the two values differ: this one is the
+# GROUPING tolerance used here to decide whether two pages' bboxes are "the
+# same" frame occurrence in the first place; lib/figures.py's looser copy is
+# a separate MATCHING tolerance, comparing a freshly-queried bbox against an
+# already-averaged frame_tables/frame_drawings entry (which, being an
+# average across every matched page, drifts a little further from any single
+# page's raw bbox than two raw per-page bboxes drift from each other) --
+# not aligned on purpose, not an oversight.
 REPEATED_IMAGE_MIN_PAGE_FRACTION = 0.50
+
+# Task A5b fix round 1 (controller finding 1): a document with fewer than
+# this many pages can never have a "repeated" frame_table/frame_drawing at
+# all, no matter how high FRAME_TABLE_MIN_PAGE_FRACTION's *fraction* is
+# satisfied -- a single large drawing/table on a 1-page document trivially
+# "repeats" on 100% of that one page, and on a 2-page document a drawing on
+# just page 1 already clears the 50% fraction. Both are real documents A5b's
+# original fraction-only gate would have silently misclassified as page
+# furniture on the strength of a single occurrence. Requiring at least
+# FRAME_MIN_PAGE_COUNT independent occurrences is a second, page-count-based
+# gate alongside the fraction, applied identically by both
+# _find_frame_tables and _find_frame_drawings (one named constant, so they
+# can't drift apart from each other).
+FRAME_MIN_PAGE_COUNT = 3
 
 # Task A5b: a single vector drawing (page.get_drawings()) whose own bbox
 # covers more than FRAME_TABLE_MIN_AREA_FRACTION of the page, repeating at
@@ -148,9 +170,11 @@ def _find_frame_tables(pdf_path: Path, page_count: int) -> list[dict]:
     """Tables (per pdfplumber's `find_tables()`) whose bbox covers more than
     FRAME_TABLE_MIN_AREA_FRACTION of the page area, and that repeat at
     (approximately) the same bbox on at least FRAME_TABLE_MIN_PAGE_FRACTION
-    of pages. A plain ruled rectangle with no internal lines is often not
-    detected as a table at all by pdfplumber's heuristics -- that's a
-    legitimate empty result, not a bug."""
+    of pages AND at least FRAME_MIN_PAGE_COUNT distinct pages (both gates
+    must hold -- see that constant's docstring for why the fraction alone
+    isn't enough on a short document). A plain ruled rectangle with no
+    internal lines is often not detected as a table at all by pdfplumber's
+    heuristics -- that's a legitimate empty result, not a bug."""
     groups: list[dict] = []  # [{"bboxes": [...], "pages": set()}]
 
     with pdfplumber.open(pdf_path) as pdf:
@@ -185,7 +209,11 @@ def _find_frame_tables(pdf_path: Path, page_count: int) -> list[dict]:
     frame_tables = []
     for group in groups:
         matched_page_count = len(group["pages"])
-        if page_count and matched_page_count / page_count >= FRAME_TABLE_MIN_PAGE_FRACTION:
+        if (
+            page_count
+            and matched_page_count >= FRAME_MIN_PAGE_COUNT
+            and matched_page_count / page_count >= FRAME_TABLE_MIN_PAGE_FRACTION
+        ):
             n = len(group["bboxes"])
             avg_bbox = [round(sum(b[i] for b in group["bboxes"]) / n, 2) for i in range(4)]
             frame_tables.append({"bbox": avg_bbox, "page_count": matched_page_count})
@@ -196,7 +224,8 @@ def _find_frame_drawings(document) -> list[dict]:
     """Single vector drawings (`page.get_drawings()`) whose bbox covers more
     than FRAME_TABLE_MIN_AREA_FRACTION of the page area, repeating at
     (approximately, within FRAME_TABLE_BBOX_TOLERANCE) the same bbox on at
-    least FRAME_TABLE_MIN_PAGE_FRACTION of pages. Mirrors
+    least FRAME_TABLE_MIN_PAGE_FRACTION of pages AND at least
+    FRAME_MIN_PAGE_COUNT distinct pages (both gates must hold). Mirrors
     `_find_frame_tables`'s grouping shape exactly, over a different item
     source (fitz drawings, not pdfplumber tables) -- see the constants'
     docstring above for why this exists alongside frame_tables rather than
@@ -232,7 +261,11 @@ def _find_frame_drawings(document) -> list[dict]:
     frame_drawings = []
     for group in groups:
         matched_page_count = len(group["pages"])
-        if page_count and matched_page_count / page_count >= FRAME_TABLE_MIN_PAGE_FRACTION:
+        if (
+            page_count
+            and matched_page_count >= FRAME_MIN_PAGE_COUNT
+            and matched_page_count / page_count >= FRAME_TABLE_MIN_PAGE_FRACTION
+        ):
             n = len(group["bboxes"])
             avg_bbox = [round(sum(b[i] for b in group["bboxes"]) / n, 2) for i in range(4)]
             frame_drawings.append({"bbox": avg_bbox, "page_count": matched_page_count})

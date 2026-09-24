@@ -84,20 +84,32 @@ This is deliberately a **warning**, not one of the `checks` above, so it
 never flips `passed` to `false` on its own: a large excluded region is very
 often a *correct* exclusion (an oversized real table, say), and a hard
 gate would force an escalation every time one legitimately occurs. The
-point is visibility, not blocking — a human reviewer (or the `grader`
-subagent, reading `gates-report.json` before applying the rubric) must be
-able to see that a large region was dropped and judge for themselves
-whether it should have been a figure, the same way A5's original size-based
-pre-filter silently removed a real figure with no trace at all before this
-task.
+point is visibility, not blocking, and visibility is wired through the rest
+of the pipeline (Task A5b fix round 1):
+
+- The `grader` subagent (`agents/grader.md`) reads `gates-report.json`'s
+  `warnings` for its own batch's pages, looks at the flagged region on the
+  rendered PNG, and — only when it's actually a real figure, a judgment
+  call gates.py can't make on its own — tags that page `missing_image`
+  when it writes its grade shard. A large excluded region that turns out
+  to be a correctly-dropped table, say, gets no tag; the warning stays
+  informational.
+- `merge_grades.py` lifts the same `warnings` list to the top level of
+  `output/<doc>/grade-report.json` (alongside `overall_passed`), not just
+  nested under `gates`.
+- `commands/extract.md`'s Decide step records a non-empty `warnings` list
+  in the document's `runs/state.json` queue entry and reports it to the
+  human in the loop summary, regardless of `overall_passed` — a warning is
+  never silently dropped even when everything else passes.
 
 ## Notes for the calling agent
 
 - A rubric verdict of "pass" cannot rescue a failed gate — gates are the
   floor, not one more opinion.
-- Read `gates-report.json`'s `warnings` list alongside `checks` — a passing
-  `checks` result with a non-empty `warnings` list still deserves a look
-  before calling the extraction done.
+- Read `gates-report.json`'s `warnings` list (or `grade-report.json`'s
+  top-level copy, once merge_grades.py has run) alongside `checks` — a
+  passing `checks` result with a non-empty `warnings` list still deserves a
+  look before calling the extraction done.
 - Don't grade your own extraction output in the same turn you produced it;
   that's exactly the self-congratulation failure mode this design avoids.
 - Each `grader` batch only ever writes shards for **its own** pages — never

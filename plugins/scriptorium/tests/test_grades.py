@@ -188,6 +188,38 @@ class TestMergeGrades:
         assert result["rubric_verdict"]["passed"] is True
         assert result["overall_passed"] is False
 
+    def test_warnings_lifted_to_top_level_when_gate_fired(self, tmp_project, monkeypatch):
+        """Task A5b fix round 1 (controller finding 2): gates-report.json's
+        warnings (e.g. large_region_excluded) must reach grade-report.json
+        at the TOP level, not just nested under "gates" -- that's what
+        commands/extract.md's Decide step actually reads."""
+        warning = {"name": "large_region_excluded", "page": 1, "reason": "table_overlap", "area_fraction": 0.7}
+        gates_path = paths.gates_report_json("doc")
+        gates_path.parent.mkdir(parents=True, exist_ok=True)
+        gates_path.write_text(json.dumps({"doc": "doc", "passed": True, "checks": [], "warnings": [warning]}))
+        _seed_grade_shard(tmp_project, "doc", 1, 1.0, [])
+
+        monkeypatch.setattr("sys.argv", ["merge_grades.py", "--doc", "doc"])
+        merge_grades.main()
+
+        result = json.loads(paths.grade_report_json("doc").read_text())
+        assert result["warnings"] == [warning]
+        assert result["gates"]["warnings"] == [warning]  # nested copy still present too
+        assert result["overall_passed"] is True  # a warning never blocks overall_passed
+
+    def test_warnings_defaults_to_empty_list_when_gates_report_has_none(self, tmp_project, monkeypatch):
+        """A gates-report.json predating the warnings field (or one with
+        nothing to warn about) must still yield an explicit top-level
+        `[]`, not a missing key."""
+        _seed_gates_report(tmp_project, "doc", passed=True)  # no "warnings" key at all
+        _seed_grade_shard(tmp_project, "doc", 1, 1.0, [])
+
+        monkeypatch.setattr("sys.argv", ["merge_grades.py", "--doc", "doc"])
+        merge_grades.main()
+
+        result = json.loads(paths.grade_report_json("doc").read_text())
+        assert result["warnings"] == []
+
     def test_missing_gates_report_exits_with_error(self, tmp_project, monkeypatch):
         monkeypatch.setattr("sys.argv", ["merge_grades.py", "--doc", "doc"])
         with pytest.raises(SystemExit) as exc_info:

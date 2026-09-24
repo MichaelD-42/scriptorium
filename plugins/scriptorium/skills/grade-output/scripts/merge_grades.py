@@ -53,6 +53,16 @@ def main() -> None:
             "failure_taxonomy": failure_taxonomy,
         },
         "overall_passed": gates["passed"] and rubric_passed,
+        # Task A5b fix round 1 (controller finding 2): gates.py's warnings
+        # (e.g. large_region_excluded) already reach this report nested
+        # under "gates" above, but nothing downstream (commands/extract.md's
+        # Decide step) reads that deep -- it only looks at overall_passed
+        # and per_page. Lifting the same list to the top level, alongside
+        # overall_passed, is what actually makes it visible to the
+        # orchestrator (and the human it reports to) without requiring a
+        # schema change to what already exists nested. Always present, `[]`
+        # when gates.py fired none.
+        "warnings": gates.get("warnings", []),
     }
 
     out_path = paths.grade_report_json(args.doc)
