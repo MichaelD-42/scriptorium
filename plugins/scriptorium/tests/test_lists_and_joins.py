@@ -529,6 +529,197 @@ class TestDocumentListMarkerLevelsSeesWithinBlockMarkers:
 
 
 # ---------------------------------------------------------------------------
+# 1d3. Fix round 2 (reviewer Re-review 1, Important): within-block
+#      continuation absorption needs an x-check too, or an unrelated
+#      paragraph that PyMuPDF groups into the same block as a preceding
+#      list item gets silently swallowed into that item's text.
+# ---------------------------------------------------------------------------
+
+def _build_item_plus_paragraph_pdf_inline(tmp_path: Path, name: str) -> Path:
+    """Case 1: an inline-marker item ("- Ingestion", one line) at x=90
+    (e.g. a nested/indented bullet), immediately followed -- same block --
+    by an ordinary paragraph resuming at the document's regular left
+    margin, x=72 (LESS indented than the item -- a realistic, common shape:
+    body prose resumes at the outer margin after a nested list item, not
+    at that item's own indent). Confirmed (see the sanity-check test
+    below) that PyMuPDF groups all three lines into ONE block despite the
+    x change between lines."""
+    out_path = tmp_path / name
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((90, 150), "- Ingestion", fontsize=11, fontname="helv")
+    page.insert_text((72, 165), "This is an unrelated paragraph that follows", fontsize=11, fontname="helv")
+    page.insert_text((72, 180), "immediately after the list item above.", fontsize=11, fontname="helv")
+    document.save(out_path)
+    document.close()
+    return out_path
+
+
+def _build_item_plus_paragraph_pdf_glyph_pair(tmp_path: Path, name: str) -> Path:
+    """Case 2 (the coordinator's own spec, matching the reviewer's exact
+    repro): a larger glyph line (13pt Symbol) at x=72, then the item's own
+    text at x=90, then an ordinary paragraph resuming at x=72 -- the
+    MARKER's own x, not the item's real text x (90). Same block (confirmed
+    below)."""
+    out_path = tmp_path / name
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 150), "", fontsize=13, fontname="Symbol")
+    page.insert_text((90, 151), "Ingestion", fontsize=11, fontname="helv")
+    page.insert_text((72, 166), "This is an unrelated paragraph that follows", fontsize=11, fontname="helv")
+    page.insert_text((72, 181), "immediately after the list item above.", fontsize=11, fontname="helv")
+    document.save(out_path)
+    document.close()
+    return out_path
+
+
+class TestWithinBlockContinuationXCheck:
+    """Must fail against the fix-round-1 code (`0d3fdd1`) -- verified via
+    `git stash` before committing this fix, see task-A4b-report.md's
+    "Fix round 2" section."""
+
+    def test_inline_case_pymupdf_really_does_put_item_and_paragraph_in_one_block(self, tmp_path):
+        pdf_path = _build_item_plus_paragraph_pdf_inline(tmp_path, "item_plus_para_inline_sanity.pdf")
+        doc = fitz.open(pdf_path)
+        text_blocks = [b for b in doc[0].get_text("dict")["blocks"] if b.get("type") == 0]
+        doc.close()
+        assert len(text_blocks) == 1, f"expected one block, got {len(text_blocks)}"
+        assert len(text_blocks[0]["lines"]) == 3
+
+    def test_glyph_pair_case_pymupdf_really_does_put_item_and_paragraph_in_one_block(self, tmp_path):
+        pdf_path = _build_item_plus_paragraph_pdf_glyph_pair(tmp_path, "item_plus_para_glyph_sanity.pdf")
+        doc = fitz.open(pdf_path)
+        text_blocks = [b for b in doc[0].get_text("dict")["blocks"] if b.get("type") == 0]
+        doc.close()
+        assert len(text_blocks) == 1, f"expected one block, got {len(text_blocks)}"
+        assert len(text_blocks[0]["lines"]) == 4
+
+    def test_inline_case_the_paragraph_survives_as_its_own_element(self, tmp_path, tmp_project):
+        pdf_path = _build_item_plus_paragraph_pdf_inline(tmp_path, "item_plus_para_inline.pdf")
+        shutil.copyfile(pdf_path, tmp_project / "input" / "item_plus_para_inline.pdf")
+        triage = _run_triage("item_plus_para_inline", tmp_project)
+        _run_ok(
+            "extract-text/scripts/extract_text.py", "--doc", "item_plus_para_inline",
+            "--pages", "1", "--body-size", str(triage["body_size"]),
+            cwd=tmp_project,
+        )
+        shard = json.loads(paths.shard_path("item_plus_para_inline", 1, "text").read_text())
+        list_items = [e for e in shard["elements"] if e["type"] == "list_item"]
+        paragraphs = [e for e in shard["elements"] if e["type"] == "paragraph"]
+
+        assert len(list_items) == 1, f"expected one list item, got {shard['elements']}"
+        assert list_items[0]["text"] == "Ingestion"
+        assert len(paragraphs) == 1, f"expected the paragraph to survive as its own element, got {shard['elements']}"
+        assert paragraphs[0]["text"] == "This is an unrelated paragraph that follows immediately after the list item above."
+
+    def test_glyph_pair_case_the_paragraph_at_the_marker_x_survives_as_its_own_element(self, tmp_path, tmp_project):
+        pdf_path = _build_item_plus_paragraph_pdf_glyph_pair(tmp_path, "item_plus_para_glyph.pdf")
+        shutil.copyfile(pdf_path, tmp_project / "input" / "item_plus_para_glyph.pdf")
+        triage = _run_triage("item_plus_para_glyph", tmp_project)
+        _run_ok(
+            "extract-text/scripts/extract_text.py", "--doc", "item_plus_para_glyph",
+            "--pages", "1", "--body-size", str(triage["body_size"]),
+            cwd=tmp_project,
+        )
+        shard = json.loads(paths.shard_path("item_plus_para_glyph", 1, "text").read_text())
+        list_items = [e for e in shard["elements"] if e["type"] == "list_item"]
+        paragraphs = [e for e in shard["elements"] if e["type"] == "paragraph"]
+
+        assert len(list_items) == 1, f"expected one list item, got {shard['elements']}"
+        assert list_items[0]["text"] == "Ingestion"
+        assert len(paragraphs) == 1, f"expected the paragraph to survive as its own element, got {shard['elements']}"
+        assert paragraphs[0]["text"] == "This is an unrelated paragraph that follows immediately after the list item above."
+
+    def test_parse_block_list_items_directly_ends_the_list_at_the_first_x_mismatch(self):
+        # Same shape as the glyph-pair real-PDF case above, pinned via
+        # hand-built dicts for a fast, precise unit check: the item's text
+        # x is 90.0 (the "Ingestion" line); the paragraph lines sit at
+        # 72.0 (the marker's x, NOT the item's text x) -- fails the check
+        # immediately, on the very first non-marker line.
+        lines = [
+            _line("Q", [72.0, 100.0, 78.0, 118.0], max_size=14.0),
+            _line("Ingestion", [90.0, 101.0, 160.0, 116.0]),
+            _line("This is an unrelated paragraph that follows", [72.0, 120.0, 300.0, 135.0]),
+            _line("immediately after the list item above.", [72.0, 136.0, 280.0, 151.0]),
+        ]
+        lines[0]["text"] = ""
+        lines[0]["masked"] = ""
+        elements = extract_text.parse_block_list_items(lines, [90.0])
+        assert len(elements) == 2
+        assert elements[0]["type"] == "list_item"
+        assert elements[0]["text"] == "Ingestion"
+        assert elements[0]["bbox"] == [72.0, 100.0, 160.0, 118.0]
+        assert elements[1] == {
+            "type": "paragraph",
+            "text": "This is an unrelated paragraph that follows immediately after the list item above.",
+            "bbox": [72.0, 120.0, 300.0, 151.0],
+        }
+
+    def test_a_marker_after_the_broken_out_paragraph_still_starts_a_new_item(self):
+        # "or further items, if a marker comes next" -- the paragraph run
+        # doesn't swallow a later marker-start line either.
+        lines = [
+            _line("- First item", [72.0, 100.0, 200.0, 115.0]),
+            _line("An unrelated paragraph line.", [130.0, 116.0, 300.0, 131.0]),
+            _line("- Second item", [72.0, 132.0, 200.0, 147.0]),
+        ]
+        elements = extract_text.parse_block_list_items(lines, [72.0])
+        assert [e["type"] for e in elements] == ["list_item", "paragraph", "list_item"]
+        assert elements[0]["text"] == "First item"
+        assert elements[1]["text"] == "An unrelated paragraph line."
+        assert elements[2]["text"] == "Second item"
+
+    def test_wrapped_item_from_round_1_still_passes_wrap_line_at_the_text_x(self):
+        # Requirement 3: round 1's own wrapped-continuation shape (same
+        # block, inline marker, continuation line at the SAME x as the
+        # marker line -- the only "text x" available for that shape) must
+        # still be absorbed correctly under the new x-check.
+        lines = [
+            _line("- First line of the item", [72.0, 100.0, 300.0, 115.0]),
+            _line("continues here with no marker", [72.0, 115.0, 300.0, 130.0]),
+        ]
+        elements = extract_text.parse_block_list_items(lines, [72.0])
+        assert len(elements) == 1
+        assert elements[0]["type"] == "list_item"
+        assert elements[0]["text"] == "First line of the item continues here with no marker"
+
+
+class TestBuildBlockElementBoundedContinuation:
+    """Fix round 2's other required change: build_block_element's own
+    single-line inline-marker continuation path gets the same x-check
+    (`LIST_MARKER_X_TOLERANCE`, not a second constant), so no path in this
+    module has unbounded absorption."""
+
+    def test_continuation_within_tolerance_still_absorbed(self):
+        block = _block(
+            [72.0, 100.0, 300.0, 130.0],
+            [
+                _line("- First line of the item", [72.0, 100.0, 300.0, 115.0]),
+                _line("continues here with no marker", [72.0, 115.0, 300.0, 130.0]),
+            ],
+        )
+        el = extract_text.build_block_element(block, block["lines"], body_size=11.0, toc_lookup={}, heading_size_ranks={}, list_level_lookup=[72.0])
+        assert el["type"] == "list_item"
+        assert el["text"] == "First line of the item continues here with no marker"
+
+    def test_line_beyond_tolerance_is_excluded_from_the_item(self):
+        block = _block(
+            [90.0, 100.0, 300.0, 145.0],
+            [
+                _line("- Ingestion", [90.0, 100.0, 160.0, 115.0]),
+                _line("This is an unrelated paragraph that follows", [72.0, 116.0, 300.0, 131.0]),
+                _line("immediately after the list item above.", [72.0, 131.0, 280.0, 146.0]),
+            ],
+        )
+        el = extract_text.build_block_element(block, block["lines"], body_size=11.0, toc_lookup={}, heading_size_ranks={}, list_level_lookup=[90.0])
+        assert el["type"] == "list_item"
+        assert el["text"] == "Ingestion"
+        assert "unrelated paragraph" not in el["text"]
+        # bbox covers only the absorbed (marker) line, not the excluded ones.
+        assert el["bbox"] == [90.0, 100.0, 160.0, 115.0]
+
+
+# ---------------------------------------------------------------------------
 # 1e. Real fixture: furniture_sample.pdf's nested 2-level "-" list (page 6)
 # ---------------------------------------------------------------------------
 

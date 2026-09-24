@@ -208,9 +208,25 @@ def build_block_element(
             # Wrapped continuation lines of the SAME block (no marker of
             # their own) belong to this item's text -- e.g. a bullet whose
             # body text wraps onto a second PyMuPDF line within one block.
-            item_text = " ".join([rest] + [line["text"] for line in kept_lines[1:]])
+            # Fix round 2: bounded by the same LIST_MARKER_X_TOLERANCE
+            # x-check `parse_block_list_items` uses -- an unconditional
+            # join (any remaining kept_lines, regardless of x) risked
+            # silently absorbing an unrelated following paragraph that
+            # PyMuPDF happened to group into the same block (reviewer
+            # Re-review 1, Important). The marker is inline (first token of
+            # `first_line`'s own text), so its "text x0" is approximated as
+            # that same line's own bbox x0 -- same approximation this
+            # module already documents elsewhere (no per-word x available).
+            text_x = first_line["bbox"][0]
+            absorbed = [first_line]
+            for line in kept_lines[1:]:
+                if abs(line["bbox"][0] - text_x) > LIST_MARKER_X_TOLERANCE:
+                    break
+                absorbed.append(line)
+            item_text = " ".join([rest] + [line["text"] for line in absorbed[1:]])
             item_level = level_for_x(first_line["bbox"][0], list_level_lookup)
-            return {"type": "list_item", "marker": marker, "level": item_level, "text": item_text, "bbox": bbox}
+            item_bbox = compute_kept_bbox(block, absorbed)
+            return {"type": "list_item", "marker": marker, "level": item_level, "text": item_text, "bbox": item_bbox}
 
     return {"type": "paragraph", "text": text, "bbox": bbox}
 
@@ -363,7 +379,7 @@ def level_for_x(x: float, cluster_reps: list[float]) -> int:
     return best_i + 1
 
 
-def _block_marker_start(kept_lines: list[dict], i: int) -> tuple[str, str, dict, int] | None:
+def _block_marker_start(kept_lines: list[dict], i: int) -> tuple[str, str, dict, float, int] | None:
     """Task A4b fix round 1 (reviewer Finding 1): does `kept_lines[i]`
     start a new list item WITHIN a single block? Two shapes, both reusing
     `parse_list_marker` (no second copy of the marker-recognition rule):
@@ -382,11 +398,15 @@ def _block_marker_start(kept_lines: list[dict], i: int) -> tuple[str, str, dict,
       original inline-marker shape (e.g. `furniture_sample.pdf`'s
       `"- Ingestion"`, one span, one line).
 
-    Returns `(marker, item_text_so_far, x_line, lines_consumed)` --
-    `x_line` is whichever line's bbox determines the marker's level (the
+    Returns `(marker, item_text_so_far, x_line, text_x, lines_consumed)`:
+    `x_line` is whichever line's bbox determines the marker's LEVEL (the
     glyph line for the pair shape, the marker line itself for the inline
-    shape) -- or `None` if `kept_lines[i]` doesn't start an item either
-    way."""
+    shape); `text_x` (fix round 2) is the item's own TEXT x0, used to
+    bound continuation-line absorption -- the real text line's own x0 for
+    the glyph-pair shape (an exact value), or the marker line's own x0 for
+    the inline shape (an approximation: this pipeline has no per-word x to
+    find where the text after the marker actually starts on that shared
+    line). `None` if `kept_lines[i]` doesn't start an item either way."""
     line = kept_lines[i]
     stripped = line["text"].strip()
     if len(stripped) == 1 and stripped in LIST_BULLET_GLYPHS and i + 1 < len(kept_lines):
@@ -394,58 +414,98 @@ def _block_marker_start(kept_lines: list[dict], i: int) -> tuple[str, str, dict,
         same_line = abs(next_line["bbox"][1] - line["bbox"][1]) <= LIST_MARKER_Y_TOLERANCE
         further_right = next_line["bbox"][0] > line["bbox"][0]
         if same_line and further_right and parse_list_marker(next_line["text"]) is None:
-            return stripped, next_line["text"], line, 2
+            return stripped, next_line["text"], line, next_line["bbox"][0], 2
         return None
     marker_info = parse_list_marker(line["text"])
     if marker_info:
         marker, rest = marker_info
-        return marker, rest, line, 1
+        return marker, rest, line, line["bbox"][0], 1
     return None
 
 
 def parse_block_list_items(kept_lines: list[dict], list_level_lookup: list[float]) -> list[dict] | None:
-    """Task A4b fix round 1: a single block can hold ONE OR SEVERAL list
-    items end to end (glyph, text, glyph, text, ... -- the reviewer's own
-    repro shape), each recognized via `_block_marker_start`. Every line
-    between one item's start and the next (or the end of the block)
-    belongs to that item's `text`, unconditionally -- the same "a block's
-    remaining lines default to the open item" latitude the pre-existing
-    single-item inline case already had (reviewed and accepted as Minor
-    Finding 2), now bounded at the NEXT marker-start instead of always the
-    whole block, since one block can hold more than one item. This is also
-    how a wrapped continuation line (no marker, following either shape)
-    stays in its item -- no x-position check needed here, unlike the
-    CROSS-block continuation case, because these lines are already
-    guaranteed to be part of the one PyMuPDF block PyMuPDF itself grouped
-    together.
+    """Task A4b: a single block can hold ONE OR SEVERAL list items end to
+    end (glyph, text, glyph, text, ... -- fix round 1's reviewer repro
+    shape), each recognized via `_block_marker_start`.
+
+    Fix round 2 (reviewer Re-review 1, Important): a line with no marker
+    of its own continues the currently open item ONLY IF its x0 is within
+    `LIST_MARKER_X_TOLERANCE` of that item's own `text_x` (see
+    `_block_marker_start`'s docstring) -- the same tolerance constant the
+    pre-existing cross-BLOCK continuation case already uses, not a second
+    one. PyMuPDF sometimes groups a short list item and the ordinary
+    paragraph that follows it (same left margin, normal line spacing) into
+    ONE block -- confirmed directly against real PyMuPDF output -- so
+    absorbing every remaining line unconditionally (fix round 1's original
+    behavior) risked silently swallowing that unrelated paragraph into the
+    item's text. The FIRST line that fails the x-check ends the list: that
+    line, and everything after it in the block up to the next marker-start
+    (or the end of the block), becomes its own `paragraph` element instead
+    -- or the start of a further list item, if a marker-start line comes
+    next. Line order and text are otherwise unchanged (no rewrapping, no
+    character changes).
 
     Returns `None` (not a list) when `kept_lines[0]` isn't itself a marker
     start -- the block isn't list content at all, so the caller falls back
-    to ordinary heading/paragraph handling exactly as before this fix
+    to ordinary heading/paragraph handling exactly as before this task
     (this function changes nothing for a block that doesn't start with a
-    marker)."""
+    marker). Otherwise returns a list of `list_item`/`paragraph` elements
+    in document order (never headings -- the caller already ruled that out
+    before calling this)."""
     if not kept_lines or _block_marker_start(kept_lines, 0) is None:
         return None
 
-    items: list[dict] = []
+    elements: list[dict] = []
+    open_item: dict | None = None
+    open_item_text_x: float | None = None
+    paragraph_lines: list[dict] = []
+
+    def flush_paragraph() -> None:
+        if not paragraph_lines:
+            return
+        p_bbox = list(paragraph_lines[0]["bbox"])
+        for p_line in paragraph_lines[1:]:
+            p_bbox = _union_bbox(p_bbox, p_line["bbox"])
+        elements.append({
+            "type": "paragraph",
+            "text": " ".join(p_line["text"] for p_line in paragraph_lines),
+            "bbox": p_bbox,
+        })
+        paragraph_lines.clear()
+
     i, n = 0, len(kept_lines)
     while i < n:
         start = _block_marker_start(kept_lines, i)
         if start is not None:
-            marker, first_text, x_line, consumed = start
+            flush_paragraph()
+            marker, first_text, x_line, text_x, consumed = start
             level = level_for_x(x_line["bbox"][0], list_level_lookup)
             if consumed == 2:
-                bbox = _union_bbox(kept_lines[i]["bbox"], kept_lines[i + 1]["bbox"])
+                item_bbox = _union_bbox(kept_lines[i]["bbox"], kept_lines[i + 1]["bbox"])
             else:
-                bbox = list(kept_lines[i]["bbox"])
-            items.append({"type": "list_item", "marker": marker, "level": level, "text": first_text, "bbox": bbox})
+                item_bbox = list(kept_lines[i]["bbox"])
+            item = {"type": "list_item", "marker": marker, "level": level, "text": first_text, "bbox": item_bbox}
+            elements.append(item)
+            open_item, open_item_text_x = item, text_x
             i += consumed
             continue
-        items[-1]["text"] = items[-1]["text"] + " " + kept_lines[i]["text"]
-        items[-1]["bbox"] = _union_bbox(items[-1]["bbox"], kept_lines[i]["bbox"])
+
+        line = kept_lines[i]
+        if open_item is not None and abs(line["bbox"][0] - open_item_text_x) <= LIST_MARKER_X_TOLERANCE:
+            open_item["text"] = open_item["text"] + " " + line["text"]
+            open_item["bbox"] = _union_bbox(open_item["bbox"], line["bbox"])
+            i += 1
+            continue
+
+        # x-check failed (or no item open yet) -- this line ends the
+        # currently open item for good (no later line can re-open it) and
+        # starts (or continues) a trailing paragraph run instead.
+        open_item, open_item_text_x = None, None
+        paragraph_lines.append(line)
         i += 1
 
-    return items
+    flush_paragraph()
+    return elements
 
 
 def document_list_marker_levels(
@@ -510,7 +570,7 @@ def document_list_marker_levels(
                     start = _block_marker_start(kept_lines, j)
                     if start is not None:
                         xs.append(start[2]["bbox"][0])  # x_line's own x0
-                        j += start[3]
+                        j += start[4]  # lines_consumed (index 4 -- text_x is now index 3)
                     else:
                         j += 1
             elif len(kept_lines) == 1 and first_line["text"].strip() in LIST_BULLET_GLYPHS \
@@ -630,8 +690,15 @@ def merge_list_and_paragraph_blocks(
                 # text x (not available here -- see parse_block_list_items'
                 # docstring) would make cross-BLOCK continuation-absorption
                 # safe, so the next block is never auto-absorbed into the
-                # last item found here.
-                open_item, open_item_text_x = block_items[-1], None
+                # last item found here. Fix round 2: block_items can now
+                # end in a `paragraph` (the within-block x-check bounced a
+                # trailing line out of the list) -- only track it as an
+                # open list item when it actually is one.
+                last_block_item = block_items[-1]
+                if last_block_item["type"] == "list_item":
+                    open_item, open_item_text_x = last_block_item, None
+                else:
+                    open_item, open_item_text_x = None, None
                 i += 1
                 continue
 
