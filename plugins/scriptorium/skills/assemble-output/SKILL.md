@@ -28,16 +28,17 @@ The one place all three extraction tiers converge. Three scripts:
 uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
   "${CLAUDE_PLUGIN_ROOT}/skills/assemble-output/scripts/merge.py" --doc <doc-name>
 uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
-  "${CLAUDE_PLUGIN_ROOT}/skills/assemble-output/scripts/assemble.py" --doc <doc-name> [--format md|html|okf|md-tree|reqif|reqifz] [--split-depth N]
+  "${CLAUDE_PLUGIN_ROOT}/skills/assemble-output/scripts/assemble.py" --doc <doc-name> [--format md|html|okf|md-tree|reqif|reqifz] [--split-depth 2]
 ```
 
 Default format is `md`. `html` renders through the Jinja2 template in
 `templates/output.html.j2`. `okf` splits the document by top-level heading
 into a multi-file [OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)
 bundle instead of one file — see the "OKF format" section below. `md-tree`
-splits the document into nested folders and files down to a configurable
-heading depth (`--split-depth`, default `2`) — see the "md-tree format"
-section below. `reqif`/`reqifz` write an OMG
+splits the document into nested folders and files at a heading depth
+(`--split-depth`, default `2` — **the only value currently supported;
+anything else exits non-zero**) — see the "md-tree format" section below.
+`reqif`/`reqifz` write an OMG
 [ReqIF](https://www.omg.org/spec/ReqIF/About-ReqIF/) document instead — see
 the "ReqIF format" section below.
 
@@ -106,11 +107,18 @@ consumer (the downstream step: a downstream consumer's RFQ-intake pipeline) need
 per section, addressable by a stable per-heading anchor. `N` is the heading
 level at which a NEW FILE starts: levels shallower than `N` become folders,
 level `N` itself starts a file, levels deeper than `N` stay as headings
-inline within that file. This repo's own tests only exercise `--split-depth
-2` (folder per level-1 heading, file per level-2 heading) — deeper
-`split-depth` values collapse every level `< N` onto a single flattened
-"current folder" rather than a truly nested folder stack, so `N > 2` is not
-fully correct yet (documented in `build_md_tree_sections`'s docstring).
+inline within that file.
+
+**Only `--split-depth 2` is currently supported** (folder per level-1
+heading, file per level-2 heading) — `assemble.py` rejects any other value
+with a non-zero exit rather than silently producing wrong output.
+Internally, `build_md_tree_sections` collapses every level `< N` onto a
+single flattened "current folder" rather than a truly nested folder stack,
+which is only correct for `N == 2`; for `N > 2` this produces colliding
+folder numbers across unrelated chapters (confirmed, not just theoretical —
+see `build_md_tree_sections`'s docstring). Nested-folder generalization for
+`N > 2` is unimplemented, not merely untested; the CLI check exists so that
+gap can't be hit silently.
 
 **Layout** (`--split-depth 2`):
 

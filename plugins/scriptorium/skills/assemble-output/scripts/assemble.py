@@ -217,7 +217,7 @@ def write_okf(doc_data: dict, doc: str) -> list[Path]:
         nav_block = f"\n---\n\n{' | '.join(nav)}\n" if nav else ""
 
         sec["path"].parent.mkdir(parents=True, exist_ok=True)
-        sec["path"].write_text(f"{frontmatter}\n{sec['body']}{nav_block}", encoding="utf-8")
+        sec["path"].write_text(f"{frontmatter}\n{sec['body']}{nav_block}", encoding="utf-8", newline="")
         written.append(sec["path"])
 
     toc_lines = [f"# {doc}", ""]
@@ -227,7 +227,7 @@ def write_okf(doc_data: dict, doc: str) -> list[Path]:
 
     index_path = paths.okf_index(doc)
     index_path.parent.mkdir(parents=True, exist_ok=True)
-    index_path.write_text('---\nokf_version: "0.1"\n---\n\n' + "\n".join(toc_lines) + "\n", encoding="utf-8")
+    index_path.write_text('---\nokf_version: "0.1"\n---\n\n' + "\n".join(toc_lines) + "\n", encoding="utf-8", newline="")
     written.append(index_path)
     return written
 
@@ -448,7 +448,7 @@ def write_md_tree(doc_data: dict, doc: str, split_depth: int) -> list[Path]:
             "source_pages": front_matter["source_pages"],
         })
         body = elements_to_markdown_with_anchors(front_matter["elements"])
-        fm_path.write_text(f"{frontmatter}\n{body}", encoding="utf-8")
+        fm_path.write_text(f"{frontmatter}\n{body}", encoding="utf-8", newline="")
         written.append(fm_path)
         index_lines.append(f"* [Front Matter]({fm_path.name})")
 
@@ -486,7 +486,7 @@ def write_md_tree(doc_data: dict, doc: str, split_depth: int) -> list[Path]:
                 "source_pages": pre["source_pages"],
             })
             body = elements_to_markdown_with_anchors(pre["elements"], asset_prefix="../")
-            pre_path.write_text(f"{frontmatter}\n{body}", encoding="utf-8")
+            pre_path.write_text(f"{frontmatter}\n{body}", encoding="utf-8", newline="")
             written.append(pre_path)
             index_lines.append(f"* [{folder_label}]({folder_dirname}/{pre_path.name})")
         else:
@@ -504,13 +504,13 @@ def write_md_tree(doc_data: dict, doc: str, split_depth: int) -> list[Path]:
                 "source_pages": file["source_pages"],
             })
             body = elements_to_markdown_with_anchors(file["elements"], asset_prefix="../")
-            file_path.write_text(f"{frontmatter}\n{body}", encoding="utf-8")
+            file_path.write_text(f"{frontmatter}\n{body}", encoding="utf-8", newline="")
             written.append(file_path)
             file_label = f"{file['number']} {file['title']}".strip() if file["number"] else (file["title"] or mm)
             index_lines.append(f"  * [{file_label}]({folder_dirname}/{file_path.name})")
 
     index_path = out_dir / "index.md"
-    index_path.write_text("\n".join(index_lines) + "\n", encoding="utf-8")
+    index_path.write_text("\n".join(index_lines) + "\n", encoding="utf-8", newline="")
     written.append(index_path)
     return written
 
@@ -538,6 +538,22 @@ def main() -> None:
         return
 
     if args.format == "md-tree":
+        if args.split_depth != 2:
+            # build_md_tree_sections only implements true folder splitting
+            # for split_depth == 2 (folder-per-level-1/file-per-level-2) --
+            # any level < split_depth collapses onto ONE flattened "current
+            # folder" instead of a real nested stack, which silently
+            # produces wrong output (colliding folder numbers across
+            # unrelated chapters) for split_depth != 2. Rejected at the CLI
+            # rather than left to produce wrong-but-exit-0 output, until
+            # nested-folder generalization is implemented -- see
+            # build_md_tree_sections' docstring and SKILL.md.
+            print(
+                f"error: --split-depth {args.split_depth} is not supported yet -- "
+                "only --split-depth 2 (folder-per-level-1/file-per-level-2) is implemented",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         for path in write_md_tree(doc_data, args.doc, args.split_depth):
             print(path)
         return
@@ -546,7 +562,7 @@ def main() -> None:
         reqif_xml = reqif_builder.build_reqif_xml(args.doc, doc_data)
         reqif_path = paths.output_file(args.doc, "reqif")
         reqif_path.parent.mkdir(parents=True, exist_ok=True)
-        reqif_path.write_text(reqif_xml, encoding="utf-8")
+        reqif_path.write_text(reqif_xml, encoding="utf-8", newline="")
         print(str(reqif_path))
         if args.format == "reqifz":
             print(str(reqif_builder.write_reqifz(args.doc, doc_data, reqif_xml)))
@@ -555,7 +571,7 @@ def main() -> None:
     content = to_markdown(doc_data) if args.format == "md" else to_html(doc_data)
     out_path = paths.output_file(args.doc, args.format)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(content, encoding="utf-8")
+    out_path.write_text(content, encoding="utf-8", newline="")
     print(str(out_path))
 
 

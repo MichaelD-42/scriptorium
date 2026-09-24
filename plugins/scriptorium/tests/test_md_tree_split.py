@@ -368,7 +368,12 @@ class TestFurnitureSampleMdTree:
     def _golden(self) -> dict:
         return json.loads((EXAMPLES_ROOT / "furniture_golden.json").read_text())
 
-    def _build(self, furniture_doc, tmp_project):
+    def _extract(self, furniture_doc, tmp_project):
+        """triage -> extract-text/-images -> merge, no assemble.py call --
+        shared by every test below (both the successful md-tree build and
+        the --split-depth rejection test need elements.json to exist first,
+        so the failure they check for is genuinely the split-depth check,
+        not a missing-elements.json error)."""
         _run_ok("pdf-triage/scripts/triage.py", "--doc", furniture_doc, cwd=tmp_project)
         triage = json.loads(paths.triage_json(furniture_doc).read_text())
         pages = list(range(1, triage["page_count"] + 1))
@@ -382,6 +387,9 @@ class TestFurnitureSampleMdTree:
             "--pages", ",".join(map(str, pages)), cwd=tmp_project,
         )
         _run_ok("assemble-output/scripts/merge.py", "--doc", furniture_doc, cwd=tmp_project)
+
+    def _build(self, furniture_doc, tmp_project):
+        self._extract(furniture_doc, tmp_project)
         _run_ok(
             "assemble-output/scripts/assemble.py", "--doc", furniture_doc,
             "--format", "md-tree", "--split-depth", "2", cwd=tmp_project,
@@ -506,19 +514,7 @@ class TestFurnitureSampleMdTree:
     def test_regular_md_html_okf_reqif_formats_unaffected(self, furniture_doc, tmp_project):
         """Full regression check that adding md-tree didn't disturb the
         other formats' behavior for the same document."""
-        _run_ok("pdf-triage/scripts/triage.py", "--doc", furniture_doc, cwd=tmp_project)
-        triage = json.loads(paths.triage_json(furniture_doc).read_text())
-        pages = list(range(1, triage["page_count"] + 1))
-        _run_ok(
-            "extract-text/scripts/extract_text.py", "--doc", furniture_doc,
-            "--pages", ",".join(map(str, pages)), "--body-size", str(triage["body_size"]),
-            cwd=tmp_project,
-        )
-        _run_ok(
-            "extract-images/scripts/extract_images.py", "--doc", furniture_doc,
-            "--pages", ",".join(map(str, pages)), cwd=tmp_project,
-        )
-        _run_ok("assemble-output/scripts/merge.py", "--doc", furniture_doc, cwd=tmp_project)
+        self._extract(furniture_doc, tmp_project)
 
         for fmt in ("md", "html", "okf", "reqif"):
             out = _run_ok("assemble-output/scripts/assemble.py", "--doc", furniture_doc, "--format", fmt, cwd=tmp_project)
@@ -527,3 +523,45 @@ class TestFurnitureSampleMdTree:
 
         gates_out = _run_ok("grade-output/scripts/gates.py", "--doc", furniture_doc, "--format", "md", cwd=tmp_project)
         assert json.loads(gates_out)["passed"] is True
+
+    # --------------------------------------------------------------------
+    # Fix round 1 findings.
+    # --------------------------------------------------------------------
+
+    def test_output_bytes_contain_no_crlf(self, furniture_doc, tmp_project):
+        # write_text() on Windows defaults to translating "\n" -> os.linesep
+        # (CRLF) unless newline="" is passed. The other repo's object
+        # tagger reads md-tree files as raw bytes and substring-matches an
+        # LF-joined block_md against them, so any CRLF here silently breaks
+        # every multi-line match on Windows. Checked against real pipeline
+        # output (raw bytes, not `.read_text()`, which would normalize line
+        # endings back and hide the bug), across every md-tree file plus
+        # the single-file md format, since both share the same write_text()
+        # call sites in assemble.py.
+        self._build(furniture_doc, tmp_project)
+        out_dir = paths.output_dir(furniture_doc)
+        md_tree_files = list(out_dir.rglob("*.md"))
+        assert md_tree_files  # sanity: the glob actually found files
+        for md_path in md_tree_files:
+            assert b"\r" not in md_path.read_bytes(), f"{md_path} contains a CR byte"
+
+        _run_ok("assemble-output/scripts/assemble.py", "--doc", furniture_doc, "--format", "md", cwd=tmp_project)
+        md_single = paths.output_file(furniture_doc, "md")
+        assert b"\r" not in md_single.read_bytes()
+
+    def test_split_depth_other_than_2_is_rejected(self, furniture_doc, tmp_project):
+        # build_md_tree_sections only implements true nested-folder
+        # splitting for split_depth == 2 -- any other value silently
+        # produces wrong output (colliding folder numbers across unrelated
+        # chapters) rather than crashing, so it must be rejected at the CLI
+        # instead. Confirmed against the real CLI subprocess, not just a
+        # direct function call, so this covers argparse wiring too.
+        self._extract(furniture_doc, tmp_project)
+        result = run_script(
+            "assemble-output/scripts/assemble.py", "--doc", furniture_doc,
+            "--format", "md-tree", "--split-depth", "3", cwd=tmp_project,
+        )
+        assert result.returncode != 0
+        assert "split-depth" in result.stderr.lower()
+        assert "2" in result.stderr
+        assert not (paths.output_dir(furniture_doc) / "index.md").exists()
