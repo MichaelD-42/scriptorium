@@ -12,6 +12,7 @@ i.e. ${CLAUDE_PROJECT_DIR}).
     work/<doc>/gates-report.json
     output/<doc>/<doc>.{md,html,reqif,reqifz}          single-file formats (reqifz is also a zip archive)
     output/<doc>/{index.md,NN-slug.md}                 okf format (multi-file bundle)
+    output/<doc>/{index.md,00-front-matter.md,NN-slug/NN.MM-slug.md}  md-tree format (split multi-file bundle, configurable depth)
     output/<doc>/assets/*.png
     output/<doc>/grade-shards/page{N}.json              one per grader batch page
     output/<doc>/grade-report.json                      merge_grades.py's output

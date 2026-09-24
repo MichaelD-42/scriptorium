@@ -1,6 +1,6 @@
 ---
 name: assemble-output
-description: Assemble the merged elements.json (text + OCR + images, from all tiers) into the final Markdown, HTML, OKF, or ReqIF document.
+description: Assemble the merged elements.json (text + OCR + images, from all tiers) into the final Markdown, HTML, OKF, md-tree, or ReqIF document.
 ---
 
 # Assemble Output
@@ -28,15 +28,18 @@ The one place all three extraction tiers converge. Three scripts:
 uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
   "${CLAUDE_PLUGIN_ROOT}/skills/assemble-output/scripts/merge.py" --doc <doc-name>
 uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
-  "${CLAUDE_PLUGIN_ROOT}/skills/assemble-output/scripts/assemble.py" --doc <doc-name> [--format md|html|okf|reqif|reqifz]
+  "${CLAUDE_PLUGIN_ROOT}/skills/assemble-output/scripts/assemble.py" --doc <doc-name> [--format md|html|okf|md-tree|reqif|reqifz] [--split-depth N]
 ```
 
 Default format is `md`. `html` renders through the Jinja2 template in
 `templates/output.html.j2`. `okf` splits the document by top-level heading
 into a multi-file [OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)
-bundle instead of one file — see the "OKF format" section below. `reqif`/
-`reqifz` write an OMG [ReqIF](https://www.omg.org/spec/ReqIF/About-ReqIF/)
-document instead — see the "ReqIF format" section below.
+bundle instead of one file — see the "OKF format" section below. `md-tree`
+splits the document into nested folders and files down to a configurable
+heading depth (`--split-depth`, default `2`) — see the "md-tree format"
+section below. `reqif`/`reqifz` write an OMG
+[ReqIF](https://www.omg.org/spec/ReqIF/About-ReqIF/) document instead — see
+the "ReqIF format" section below.
 
 ## Element -> output mapping
 
@@ -94,6 +97,93 @@ instead of one large document):
 `H2`/`H3` headings do **not** start new files — they stay inside whichever
 `H1` section they fall under (a flat split, not nested chapters/sections).
 A document with no `H1` at all produces a single `00-front-matter.md` file.
+
+## md-tree format
+
+`--format md-tree --split-depth N` splits the document into nested folders
+and files, unlike OKF's flat H1-only split — useful when a downstream
+consumer (the downstream step: a downstream consumer's RFQ-intake pipeline) needs one file
+per section, addressable by a stable per-heading anchor. `N` is the heading
+level at which a NEW FILE starts: levels shallower than `N` become folders,
+level `N` itself starts a file, levels deeper than `N` stay as headings
+inline within that file. This repo's own tests only exercise `--split-depth
+2` (folder per level-1 heading, file per level-2 heading) — deeper
+`split-depth` values collapse every level `< N` onto a single flattened
+"current folder" rather than a truly nested folder stack, so `N > 2` is not
+fully correct yet (documented in `build_md_tree_sections`'s docstring).
+
+**Layout** (`--split-depth 2`):
+
+- `output/<doc>/index.md` — links every split file, in document order, with
+  the section number + title as link text. No frontmatter.
+- `output/<doc>/00-front-matter.md` — content before the first level-1
+  heading, in true document order (bbox-y0 sorted, so an image positioned
+  above a page's heading counts as front matter even if it's on the same
+  page as that heading). Omitted if empty.
+- `output/<doc>/NN-<slug>/` — one folder per level-1 heading. `NN` is that
+  heading's own leading number, zero-padded to 2 digits (a 1-based
+  sequential index if the heading has no parseable leading number); `<slug>`
+  is a URL-safe slug of its title (the OKF format's existing `slugify()`
+  helper).
+- `output/<doc>/NN-<slug>/NN.00-<slug>.md` — that level-1 heading's own body
+  content that isn't yet under any level-2 child. Also used for a chapter
+  with NO level-2 children at all (its whole body lands here, rather than
+  inventing a third naming scheme). Omitted if empty; if a chapter has
+  neither body content nor level-2 children, no folder/file is written for
+  it at all, but its number+title still appears as a plain (non-linked)
+  label in `index.md`.
+- `output/<doc>/NN-<slug>/NN.MM-<slug>.md` — one file per level-2 heading,
+  `MM` zero-padded the same way. Always written, even with an empty body —
+  the heading itself defines the section.
+- One shared `output/<doc>/assets/` at the bundle root (not duplicated per
+  folder). `image` elements' asset paths are rewritten per file's location:
+  `assets/...` from a root-level file (`00-front-matter.md`), `../assets/
+  ...` from inside an `NN-slug/` folder — same `render_image_markdown`/
+  `elements_to_markdown` functions as single-file md (see the mapping table
+  above), called with an `asset_prefix` argument, not a second rendering
+  path.
+- The heading that OPENS a folder/file becomes that file's frontmatter
+  `title`/`section`, not a duplicated body heading (same convention
+  `split_sections_by_h1`/OKF already use for `H1`).
+
+**Frontmatter** — every split file except `index.md`: `doc` (the doc name),
+`section` (the heading's own number, e.g. `"2.3"`, or `null` for
+`00-front-matter.md`), `title`, `level` (`null` for front matter), and
+`source_pages` (the list of page numbers whose content landed in this
+file). Written with the same `render_frontmatter` YAML helper OKF uses.
+
+**Anchors — exact cross-repo contract.** Every heading that stays inline
+within a file (level `> N`, e.g. level 3+ for `--split-depth 2`) gets a
+stable `<a id="...">` anchor immediately before its heading line, from
+`slugify_heading(text)`:
+
+- If the heading text starts with a leading number (digit groups separated
+  by dots, matched from the very start of the text with only leading
+  whitespace skipped — e.g. `"2.3.1 Some Title"`), the anchor is that
+  number with every `.` replaced by `-` (`"2-3-1"`). No word-boundary check
+  follows the digits, so `"3D Printing"` anchors as `"3"`, not
+  `"3d-printing"` — intentional, not a bug, because it must match the other
+  repo's regex exactly.
+- Otherwise, slugify the full heading text: lowercase, every run of
+  non-alphanumeric characters replaced with a single `-`, leading/trailing
+  `-` stripped, falling back to the literal `"section"` if that's empty.
+
+This is implemented independently in a downstream consumer (a different repo, no
+shared code) as its own `slugify_heading()`
+(`plugins/rfq-intake/skills/rfq-object-ids/scripts/tag_objects.py`), which
+that repo's own objects carry as `locator.anchor`/`object_anchor`. the downstream step
+(a later, separate step) directly compares this repo's anchors against that
+output — **any drift here breaks that cross-reference.** `slugify_heading`
+in `assemble.py` is unit-tested against the exact same input/output pairs
+that repo's own tests use (`"2.3.1 Some Title"` → `"2-3-1"`, `"Appendix A"`
+→ `"appendix-a"`) — see `tests/test_md_tree_split.py::TestSlugifyHeading`.
+
+Note this is a *different* rule from the `NN`/`MM` folder/file naming above:
+folder/file naming uses `split_section_number`, which requires whitespace
+after the number (so `"3D Printing"` is never misparsed as folder/file
+number `"3"`) and slugifies the *title only* (not the number) for `<slug>`.
+The two rules deliberately diverge — one is a byte-for-byte external
+contract, the other is this repo's own filesystem-naming convention.
 
 ## ReqIF format
 
