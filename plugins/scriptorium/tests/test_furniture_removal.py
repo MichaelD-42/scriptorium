@@ -175,7 +175,7 @@ class TestExtractImagesFurnitureSkip:
             shard = json.loads(paths.shard_path(furniture_doc, n, "image").read_text())
             all_bitmaps += [e for e in shard["elements"] if e["kind"] == "bitmap"]
 
-        # None of the 9 repeated-logo placements were emitted -- only the
+        # None of the repeated-logo placements (one per page) were emitted -- only the
         # single unique, non-repeated bitmap on page 4 (see
         # generate_furniture_fixture.py) should survive.
         assert len(all_bitmaps) == 1, f"expected exactly the one unique bitmap, got {all_bitmaps}"

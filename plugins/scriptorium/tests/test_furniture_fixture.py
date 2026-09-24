@@ -59,7 +59,7 @@ def test_golden_json_page_count_matches_committed_pdf():
     golden = json.loads(COMMITTED_JSON.read_text())
     with fitz.open(COMMITTED_PDF) as doc:
         assert doc.page_count == golden["page_count"]
-        assert doc.page_count >= 6  # brief: "6-8 pages is enough" -- this fixture needs 9, see task-A0-report.md
+        assert doc.page_count >= 6  # brief: "6-8 pages is enough" -- this fixture needs 9, plus 2 appendix pages since Task A9
 
 
 class TestGoldenFurniture:
@@ -108,6 +108,18 @@ class TestGoldenHeadings:
         toc_keys = {(e["number"], e["title"]) for e in golden["toc"]["entries"]}
         for h in golden["headings"]:
             assert (h["number"], h["title"]) in toc_keys
+
+    def test_every_toc_entry_has_a_body_heading_on_its_page(self):
+        """Task A9: the reverse direction. grade-output's toc_headings_match
+        gate requires every TOC entry to appear as a body heading, so the
+        fixture's TOC must not list entries that the body never prints --
+        the appendix-style entries print on their own page (page 10)."""
+        golden = json.loads(COMMITTED_JSON.read_text())
+        heading_pages = {(h["number"], h["title"]): h["page"] for h in golden["headings"]}
+        for e in golden["toc"]["entries"]:
+            key = (e["number"], e["title"])
+            assert key in heading_pages, f"TOC entry {key} has no body heading"
+            assert heading_pages[key] == e["page"]
 
 
 class TestGoldenFigures:

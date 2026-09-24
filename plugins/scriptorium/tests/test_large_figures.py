@@ -604,7 +604,7 @@ class TestFrameMinPageCountFixRound1:
         assert triage["furniture"]["frame_tables"], "frame_table_sample.pdf must still have its frame detected"
 
     def test_furniture_sample_still_detects_its_frame(self, furniture_doc, tmp_project):
-        """furniture_sample.pdf (9 pages, frame on all 9) -- comfortably
+        """furniture_sample.pdf (11 pages, frame on all 11) -- comfortably
         clears FRAME_MIN_PAGE_COUNT."""
         triage = _run_triage(furniture_doc, tmp_project)
         assert triage["furniture"]["frame_drawings"], "furniture_sample.pdf must still have its frame detected"

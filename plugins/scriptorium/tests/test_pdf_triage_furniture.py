@@ -3,7 +3,7 @@
 Exercises `triage.py`'s new furniture pass (repeated header/footer lines,
 repeated full-page-covering tables, repeated images) against two fixtures:
 
-- `furniture_sample.pdf` (Task A0): 9 pages, real furniture on every page --
+- `furniture_sample.pdf` (Task A0): 11 pages, real furniture on every page --
   the detector must find it.
 - `sample.pdf` (pre-existing): 5 single-purpose pages, no repeated furniture
   at all -- the detector must find *nothing*, not a false positive that

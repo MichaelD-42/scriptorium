@@ -1,5 +1,5 @@
 {
-  "page_count": 9,
+  "page_count": 11,
   "page_size": {
     "width": 612.0,
     "height": 792.0
@@ -14,7 +14,9 @@
       6,
       7,
       8,
-      9
+      9,
+      10,
+      11
     ],
     "frame_bbox": [
       24,
@@ -96,70 +98,70 @@
       {
         "number": "4",
         "title": "Appendix A: Glossary",
-        "page": 9,
+        "page": 10,
         "level": 1,
         "split_line": false
       },
       {
         "number": "4.1",
         "title": "Terms and Definitions",
-        "page": 9,
+        "page": 10,
         "level": 2,
         "split_line": false
       },
       {
         "number": "4.2",
         "title": "Abbreviations",
-        "page": 9,
+        "page": 10,
         "level": 2,
         "split_line": false
       },
       {
         "number": "5",
         "title": "Appendix B: References",
-        "page": 9,
+        "page": 10,
         "level": 1,
         "split_line": false
       },
       {
         "number": "5.1",
         "title": "Normative References",
-        "page": 9,
+        "page": 10,
         "level": 2,
         "split_line": false
       },
       {
         "number": "5.2",
         "title": "Informative References",
-        "page": 9,
+        "page": 10,
         "level": 2,
         "split_line": false
       },
       {
         "number": "6",
         "title": "Appendix C: Revision History",
-        "page": 9,
+        "page": 10,
         "level": 1,
         "split_line": false
       },
       {
         "number": "6.1",
         "title": "Change Log",
-        "page": 9,
+        "page": 10,
         "level": 2,
         "split_line": false
       },
       {
         "number": "6.2",
         "title": "Approval Record",
-        "page": 9,
+        "page": 10,
         "level": 2,
         "split_line": false
       },
       {
         "number": "7",
         "title": "Appendix D: Index",
-        "page": 9,
+        "page": 10,
         "level": 1,
         "split_line": false
       },
@@ -201,70 +203,70 @@
       {
         "number": "8",
         "title": "Appendix E: Contact Information",
-        "page": 9,
+        "page": 11,
         "level": 1,
         "split_line": false
       },
       {
         "number": "8.1",
         "title": "Program Office",
-        "page": 9,
+        "page": 11,
         "level": 2,
         "split_line": false
       },
       {
         "number": "8.2",
         "title": "Technical Support",
-        "page": 9,
+        "page": 11,
         "level": 2,
         "split_line": false
       },
       {
         "number": "9",
         "title": "Appendix F: Safety Notes",
-        "page": 9,
+        "page": 11,
         "level": 1,
         "split_line": false
       },
       {
         "number": "9.1",
         "title": "Handling Precautions",
-        "page": 9,
+        "page": 11,
         "level": 2,
         "split_line": false
       },
       {
         "number": "9.2",
         "title": "Compliance Statement",
-        "page": 9,
+        "page": 11,
         "level": 2,
         "split_line": false
       },
       {
         "number": "10",
         "title": "Appendix G: Standards Referenced",
-        "page": 9,
+        "page": 11,
         "level": 1,
         "split_line": false
       },
       {
         "number": "10.1",
         "title": "Industry Standards",
-        "page": 9,
+        "page": 11,
         "level": 2,
         "split_line": false
       },
       {
         "number": "10.2",
         "title": "Internal Standards",
-        "page": 9,
+        "page": 11,
         "level": 2,
         "split_line": false
       },
       {
         "number": "11",
         "title": "Closing Notes",
-        "page": 9,
+        "page": 11,
         "level": 1,
         "split_line": false
       }
@@ -350,6 +352,166 @@
       "level": 2,
       "split_line": true,
       "font_size": 16
+    },
+    {
+      "number": "4",
+      "title": "Appendix A: Glossary",
+      "page": 10,
+      "level": 1,
+      "split_line": false,
+      "font_size": 18
+    },
+    {
+      "number": "4.1",
+      "title": "Terms and Definitions",
+      "page": 10,
+      "level": 2,
+      "split_line": false,
+      "font_size": 16
+    },
+    {
+      "number": "4.2",
+      "title": "Abbreviations",
+      "page": 10,
+      "level": 2,
+      "split_line": false,
+      "font_size": 16
+    },
+    {
+      "number": "5",
+      "title": "Appendix B: References",
+      "page": 10,
+      "level": 1,
+      "split_line": false,
+      "font_size": 18
+    },
+    {
+      "number": "5.1",
+      "title": "Normative References",
+      "page": 10,
+      "level": 2,
+      "split_line": false,
+      "font_size": 16
+    },
+    {
+      "number": "5.2",
+      "title": "Informative References",
+      "page": 10,
+      "level": 2,
+      "split_line": false,
+      "font_size": 16
+    },
+    {
+      "number": "6",
+      "title": "Appendix C: Revision History",
+      "page": 10,
+      "level": 1,
+      "split_line": false,
+      "font_size": 18
+    },
+    {
+      "number": "6.1",
+      "title": "Change Log",
+      "page": 10,
+      "level": 2,
+      "split_line": false,
+      "font_size": 16
+    },
+    {
+      "number": "6.2",
+      "title": "Approval Record",
+      "page": 10,
+      "level": 2,
+      "split_line": false,
+      "font_size": 16
+    },
+    {
+      "number": "7",
+      "title": "Appendix D: Index",
+      "page": 10,
+      "level": 1,
+      "split_line": false,
+      "font_size": 18
+    },
+    {
+      "number": "8",
+      "title": "Appendix E: Contact Information",
+      "page": 11,
+      "level": 1,
+      "split_line": false,
+      "font_size": 18
+    },
+    {
+      "number": "8.1",
+      "title": "Program Office",
+      "page": 11,
+      "level": 2,
+      "split_line": false,
+      "font_size": 16
+    },
+    {
+      "number": "8.2",
+      "title": "Technical Support",
+      "page": 11,
+      "level": 2,
+      "split_line": false,
+      "font_size": 16
+    },
+    {
+      "number": "9",
+      "title": "Appendix F: Safety Notes",
+      "page": 11,
+      "level": 1,
+      "split_line": false,
+      "font_size": 18
+    },
+    {
+      "number": "9.1",
+      "title": "Handling Precautions",
+      "page": 11,
+      "level": 2,
+      "split_line": false,
+      "font_size": 16
+    },
+    {
+      "number": "9.2",
+      "title": "Compliance Statement",
+      "page": 11,
+      "level": 2,
+      "split_line": false,
+      "font_size": 16
+    },
+    {
+      "number": "10",
+      "title": "Appendix G: Standards Referenced",
+      "page": 11,
+      "level": 1,
+      "split_line": false,
+      "font_size": 18
+    },
+    {
+      "number": "10.1",
+      "title": "Industry Standards",
+      "page": 11,
+      "level": 2,
+      "split_line": false,
+      "font_size": 16
+    },
+    {
+      "number": "10.2",
+      "title": "Internal Standards",
+      "page": 11,
+      "level": 2,
+      "split_line": false,
+      "font_size": 16
+    },
+    {
+      "number": "11",
+      "title": "Closing Notes",
+      "page": 11,
+      "level": 1,
+      "split_line": false,
+      "font_size": 18
     }
   ],
   "figures": [

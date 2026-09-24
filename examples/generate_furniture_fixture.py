@@ -4,7 +4,7 @@ by Track A of the PDF-extraction plan (Task A0 onward).
 
 This is a *second*, purpose-built PDF alongside sample.pdf -- sample.pdf
 stays untouched as the existing regression fixture. This one packs, in a
-single 9-page document, the cases the furniture/TOC/heading/figure/list
+single 11-page document, the cases the furniture/TOC/heading/figure/list
 handling needs and sample.pdf does not exercise:
 
   1. Page frame + furniture (a ruled border, a small logo, a 3-line footer
@@ -23,6 +23,9 @@ handling needs and sample.pdf does not exercise:
      with no terminating punctuation at the break.
   10. A page whose only content is a table entirely inside the page-frame
       rectangle (page 9) -- the frame-vs-real-table disambiguation case.
+  11. Two appendix pages (pages 10-11) that print the TOC's appendix-style
+      entries as headings, so every TOC entry has a body heading (Task A9's
+      toc_headings_match gate checks both directions).
 
 Alongside the PDF this writes a hand-authored answer key,
 furniture_golden.json, recording furniture line texts + y-bands, the frame
@@ -54,7 +57,8 @@ OUTPUT_PDF = ROOT / "plugins" / "scriptorium" / "examples" / "furniture_sample.p
 GOLDEN_JSON = ROOT / "plugins" / "scriptorium" / "examples" / "furniture_golden.json"
 
 PAGE_WIDTH, PAGE_HEIGHT = letter
-PAGE_COUNT = 9
+PAGE_COUNT = 11
+APPENDIX_PAGES = (10, 11)
 LEFT_MARGIN = 72
 
 # --- furniture geometry (identical on every page) --------------------------
@@ -89,32 +93,33 @@ ORIGINAL_TOC_ENTRIES = [
 # (raised from the fixture-fitting 3 back to the brief's spec'd 15; see
 # task-A3-report.md's fix note). Longer, appendix-style back matter is also
 # more realistic for a real document's TOC than the original 5-entry pages.
-# All point at page 9 (a real page in the document) -- the target page
-# doesn't matter for TOC-detection/parsing, only that a trailing integer is
-# present for the dot-leader regex to match.
+# Page 2's padding entries point at page 10 and page 3's at page 11 -- the
+# two appendix pages, which print each of them as a body heading (Task A9:
+# grade-output's toc_headings_match gate requires every TOC entry to have a
+# heading; before A9 these all pointed at page 9 and had no heading).
 PADDING_TOC_ENTRIES_PAGE2 = [
-    {"number": "4", "title": "Appendix A: Glossary", "page": 9, "level": 1, "split_line": False},
-    {"number": "4.1", "title": "Terms and Definitions", "page": 9, "level": 2, "split_line": False},
-    {"number": "4.2", "title": "Abbreviations", "page": 9, "level": 2, "split_line": False},
-    {"number": "5", "title": "Appendix B: References", "page": 9, "level": 1, "split_line": False},
-    {"number": "5.1", "title": "Normative References", "page": 9, "level": 2, "split_line": False},
-    {"number": "5.2", "title": "Informative References", "page": 9, "level": 2, "split_line": False},
-    {"number": "6", "title": "Appendix C: Revision History", "page": 9, "level": 1, "split_line": False},
-    {"number": "6.1", "title": "Change Log", "page": 9, "level": 2, "split_line": False},
-    {"number": "6.2", "title": "Approval Record", "page": 9, "level": 2, "split_line": False},
-    {"number": "7", "title": "Appendix D: Index", "page": 9, "level": 1, "split_line": False},
+    {"number": "4", "title": "Appendix A: Glossary", "page": APPENDIX_PAGES[0], "level": 1, "split_line": False},
+    {"number": "4.1", "title": "Terms and Definitions", "page": APPENDIX_PAGES[0], "level": 2, "split_line": False},
+    {"number": "4.2", "title": "Abbreviations", "page": APPENDIX_PAGES[0], "level": 2, "split_line": False},
+    {"number": "5", "title": "Appendix B: References", "page": APPENDIX_PAGES[0], "level": 1, "split_line": False},
+    {"number": "5.1", "title": "Normative References", "page": APPENDIX_PAGES[0], "level": 2, "split_line": False},
+    {"number": "5.2", "title": "Informative References", "page": APPENDIX_PAGES[0], "level": 2, "split_line": False},
+    {"number": "6", "title": "Appendix C: Revision History", "page": APPENDIX_PAGES[0], "level": 1, "split_line": False},
+    {"number": "6.1", "title": "Change Log", "page": APPENDIX_PAGES[0], "level": 2, "split_line": False},
+    {"number": "6.2", "title": "Approval Record", "page": APPENDIX_PAGES[0], "level": 2, "split_line": False},
+    {"number": "7", "title": "Appendix D: Index", "page": APPENDIX_PAGES[0], "level": 1, "split_line": False},
 ]
 PADDING_TOC_ENTRIES_PAGE3 = [
-    {"number": "8", "title": "Appendix E: Contact Information", "page": 9, "level": 1, "split_line": False},
-    {"number": "8.1", "title": "Program Office", "page": 9, "level": 2, "split_line": False},
-    {"number": "8.2", "title": "Technical Support", "page": 9, "level": 2, "split_line": False},
-    {"number": "9", "title": "Appendix F: Safety Notes", "page": 9, "level": 1, "split_line": False},
-    {"number": "9.1", "title": "Handling Precautions", "page": 9, "level": 2, "split_line": False},
-    {"number": "9.2", "title": "Compliance Statement", "page": 9, "level": 2, "split_line": False},
-    {"number": "10", "title": "Appendix G: Standards Referenced", "page": 9, "level": 1, "split_line": False},
-    {"number": "10.1", "title": "Industry Standards", "page": 9, "level": 2, "split_line": False},
-    {"number": "10.2", "title": "Internal Standards", "page": 9, "level": 2, "split_line": False},
-    {"number": "11", "title": "Closing Notes", "page": 9, "level": 1, "split_line": False},
+    {"number": "8", "title": "Appendix E: Contact Information", "page": APPENDIX_PAGES[1], "level": 1, "split_line": False},
+    {"number": "8.1", "title": "Program Office", "page": APPENDIX_PAGES[1], "level": 2, "split_line": False},
+    {"number": "8.2", "title": "Technical Support", "page": APPENDIX_PAGES[1], "level": 2, "split_line": False},
+    {"number": "9", "title": "Appendix F: Safety Notes", "page": APPENDIX_PAGES[1], "level": 1, "split_line": False},
+    {"number": "9.1", "title": "Handling Precautions", "page": APPENDIX_PAGES[1], "level": 2, "split_line": False},
+    {"number": "9.2", "title": "Compliance Statement", "page": APPENDIX_PAGES[1], "level": 2, "split_line": False},
+    {"number": "10", "title": "Appendix G: Standards Referenced", "page": APPENDIX_PAGES[1], "level": 1, "split_line": False},
+    {"number": "10.1", "title": "Industry Standards", "page": APPENDIX_PAGES[1], "level": 2, "split_line": False},
+    {"number": "10.2", "title": "Internal Standards", "page": APPENDIX_PAGES[1], "level": 2, "split_line": False},
+    {"number": "11", "title": "Closing Notes", "page": APPENDIX_PAGES[1], "level": 1, "split_line": False},
 ]
 
 # Render order for the two TOC pages -- page 2 first, then page 3, each
@@ -125,6 +130,8 @@ PADDING_TOC_ENTRIES_PAGE3 = [
 TOC_PAGE2_ENTRIES = ORIGINAL_TOC_ENTRIES[0:5] + PADDING_TOC_ENTRIES_PAGE2
 TOC_PAGE3_ENTRIES = ORIGINAL_TOC_ENTRIES[5:10] + PADDING_TOC_ENTRIES_PAGE3
 TOC_ENTRIES = TOC_PAGE2_ENTRIES + TOC_PAGE3_ENTRIES
+
+APPENDIX_BODY_LINE = "This appendix section is a placeholder for synthetic test content."
 
 COVER_PARA = (
     "This synthetic document combines a bordered page frame, running header and footer "
@@ -489,6 +496,24 @@ def generate(output_pdf: Path = OUTPUT_PDF, output_json: Path = GOLDEN_JSON) -> 
     lone_table_bbox = rect_bbox(lone_x, lone_y - lone_row_height * len(LONE_TABLE_ROWS), sum(lone_col_widths), lone_row_height * len(LONE_TABLE_ROWS))
     draw_furniture(c, logo_reader, 9, PAGE_COUNT)
     c.showPage()
+
+    # Pages 10-11: the appendix pages -- every TOC-only (padding) entry
+    # printed as a body heading followed by one short body line, in TOC
+    # order, so the TOC and the body agree in both directions (Task A9).
+    # The body line keeps PyMuPDF from merging two adjacent headings into
+    # one text block.
+    for page_num, padding in zip(APPENDIX_PAGES, (PADDING_TOC_ENTRIES_PAGE2, PADDING_TOC_ENTRIES_PAGE3)):
+        y = PAGE_HEIGHT - 100
+        for i, e in enumerate(padding):
+            if i and e["level"] == 1:
+                y -= 12  # a wider gap before a chapter heading, same reason
+            y = draw_heading(c, LEFT_MARGIN, y, e)
+            headings_golden.append({**e, "font_size": HEADING_SIZES[e["level"]]})
+            y -= 2
+            y = generate_sample.draw_wrapped_text(c, APPENDIX_BODY_LINE, LEFT_MARGIN, y, 90, 11, 15)
+            y -= 12
+        draw_furniture(c, logo_reader, page_num, PAGE_COUNT)
+        c.showPage()
 
     c.save()
 

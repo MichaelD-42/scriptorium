@@ -400,7 +400,8 @@ class TestFurnitureSampleMdTree:
         out_dir = paths.output_dir(furniture_doc)
 
         # Real body headings in furniture_sample.pdf: 1, 1.1, 1.2, 2, 2.1,
-        # 2.1.1, 2.1.2, 2.2, 3, 3.1 (see furniture_golden.json's "headings").
+        # 2.1.1, 2.1.2, 2.2, 3, 3.1, then the appendix chapters 4-11 (see
+        # furniture_golden.json's "headings").
         # Every level-1 chapter has pre-content on this fixture (checked
         # against generate_furniture_fixture.py's actual draw order).
         expected_files = {
@@ -414,6 +415,28 @@ class TestFurnitureSampleMdTree:
             "02-system-requirements/02.02-non-functional-requirements.md",
             "03-process-diagrams/03.00-process-diagrams.md",
             "03-process-diagrams/03.01-workflow-overview.md",
+            # Task A9: the appendix pages (10-11) print the TOC's
+            # appendix-style entries as headings, one short body line each.
+            "04-appendix-a-glossary/04.00-appendix-a-glossary.md",
+            "04-appendix-a-glossary/04.01-terms-and-definitions.md",
+            "04-appendix-a-glossary/04.02-abbreviations.md",
+            "05-appendix-b-references/05.00-appendix-b-references.md",
+            "05-appendix-b-references/05.01-normative-references.md",
+            "05-appendix-b-references/05.02-informative-references.md",
+            "06-appendix-c-revision-history/06.00-appendix-c-revision-history.md",
+            "06-appendix-c-revision-history/06.01-change-log.md",
+            "06-appendix-c-revision-history/06.02-approval-record.md",
+            "07-appendix-d-index/07.00-appendix-d-index.md",
+            "08-appendix-e-contact-information/08.00-appendix-e-contact-information.md",
+            "08-appendix-e-contact-information/08.01-program-office.md",
+            "08-appendix-e-contact-information/08.02-technical-support.md",
+            "09-appendix-f-safety-notes/09.00-appendix-f-safety-notes.md",
+            "09-appendix-f-safety-notes/09.01-handling-precautions.md",
+            "09-appendix-f-safety-notes/09.02-compliance-statement.md",
+            "10-appendix-g-standards-referenced/10.00-appendix-g-standards-referenced.md",
+            "10-appendix-g-standards-referenced/10.01-industry-standards.md",
+            "10-appendix-g-standards-referenced/10.02-internal-standards.md",
+            "11-closing-notes/11.00-closing-notes.md",
         }
         actual_files = {
             str(p.relative_to(out_dir)).replace("\\", "/")
