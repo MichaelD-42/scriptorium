@@ -96,13 +96,37 @@ def render_image_markdown(el: dict, asset_prefix: str = "") -> list[str]:
     return lines
 
 
+def render_list_item_markdown(el: dict) -> str:
+    """Task A4b's exact, cross-repo-comparable Markdown rendering rule for
+    a `list_item`: `"  " * (level - 1)` (2 spaces per indent level below
+    the first) + the rendered marker + a space + `text`. A bullet-glyph
+    marker (a single character -- see `extract_text.py`'s
+    LIST_BULLET_GLYPHS) always renders as a plain ASCII `-`, regardless of
+    which glyph was actually printed; an enumerator marker (more than one
+    character, e.g. `"1)"`, `"a)"`, `"(1)"`) renders verbatim, exactly as
+    extracted. See SKILL.md's element -> output mapping table -- a later
+    cross-repo check compares this output byte for byte, so this rule must
+    not change without updating both."""
+    marker = el["marker"]
+    marker_render = marker if len(marker) > 1 else "-"
+    indent = "  " * (el["level"] - 1)
+    return f"{indent}{marker_render} {el['text']}"
+
+
 def elements_to_markdown(elements: list[dict], asset_prefix: str = "") -> str:
     lines = []
-    for el in elements:
+    for i, el in enumerate(elements):
         if el["type"] == "heading":
             lines.append(f"{'#' * el['level']} {el['text']}")
         elif el["type"] == "paragraph":
             lines.append(el["text"])
+        elif el["type"] == "list_item":
+            lines.append(render_list_item_markdown(el))
+            # Consecutive list items render with no blank line between them
+            # -- only append the usual trailing blank line once the run of
+            # list items ends (or the elements stream ends).
+            if i + 1 < len(elements) and elements[i + 1]["type"] == "list_item":
+                continue
         elif el["type"] == "table":
             lines.append(render_markdown_table(el["rows"]))
         elif el["type"] == "image":
@@ -408,7 +432,7 @@ def elements_to_markdown_with_anchors(elements: list[dict], asset_prefix: str = 
     `md.startswith("## Title")`) are unaffected -- anchors are new behavior
     scoped to md-tree only."""
     lines = []
-    for el in elements:
+    for i, el in enumerate(elements):
         if el["type"] == "heading":
             anchor = slugify_heading(el["text"])
             lines.append(f'<a id="{anchor}"></a>')
@@ -416,6 +440,12 @@ def elements_to_markdown_with_anchors(elements: list[dict], asset_prefix: str = 
             lines.append(f"{'#' * el['level']} {el['text']}")
         elif el["type"] == "paragraph":
             lines.append(el["text"])
+        elif el["type"] == "list_item":
+            # Same rendering/blank-line rule as elements_to_markdown -- see
+            # render_list_item_markdown's docstring.
+            lines.append(render_list_item_markdown(el))
+            if i + 1 < len(elements) and elements[i + 1]["type"] == "list_item":
+                continue
         elif el["type"] == "table":
             lines.append(render_markdown_table(el["rows"]))
         elif el["type"] == "image":

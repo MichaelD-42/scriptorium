@@ -46,6 +46,14 @@ from pathlib import Path
 
 BODY_KINDS_BY_PRIORITY = ("vision", "ocr", "text")  # highest tier first — wins at merge time
 
+# Task A4b: page-break joins. A page's last body element with no terminal
+# punctuation is assumed to continue onto the next page's first body
+# element -- these are the characters that count as "ends the sentence".
+JOIN_TERMINAL_PUNCTUATION = ".!?:;"
+# Same ~3pt tolerance convention as extract_text.py's other geometry
+# tolerances (FRAME_TABLE_BBOX_TOLERANCE, LIST_MARKER_X_TOLERANCE, etc).
+JOIN_X_TOLERANCE = 3.0  # pt
+
 
 def write_shard(shard_path: Path, page_number: int, elements: list, **extra) -> None:
     shard_path.parent.mkdir(parents=True, exist_ok=True)
@@ -102,7 +110,98 @@ def merge_shards(shards_dir: Path, page_count: int) -> dict[int, dict]:
             }
         else:
             pages[n] = {"page_number": n, "tier": "text", "elements": image_elements, **image_extra}
+
+    apply_page_break_joins(pages)
     return pages
+
+
+def _body_elements(page: dict) -> list[dict]:
+    """The elements a page-break join considers -- every non-`image`
+    element, in the page's own (already reading-order-sorted) order. A
+    figure-region-excluded drawing (`excluded_regions`, Task A5b) never
+    became an element in the first place, so "ignore ... anything in
+    excluded_regions" needs no extra filtering here beyond dropping images
+    -- there is nothing else to filter out."""
+    return [el for el in page["elements"] if el["type"] != "image"]
+
+
+def _ends_with_terminal_punctuation(text: str) -> bool:
+    stripped = text.rstrip()
+    return bool(stripped) and stripped[-1] in JOIN_TERMINAL_PUNCTUATION
+
+
+def apply_page_break_joins(pages: dict[int, dict]) -> None:
+    """Task A4b, controller-ruled: page-break joins are detected HERE, at
+    merge time (the step that already sees every page), not in the
+    extractor -- extractors run as parallel per-page-batch subprocesses, so
+    the extractor for page n+1 can't see page n's last element to know a
+    join is even needed.
+
+    For each page n (ascending) with a page n+1 also present: if page n's
+    last body element (see `_body_elements`) is a `paragraph` or
+    `list_item` whose text does NOT end with terminal punctuation
+    (`JOIN_TERMINAL_PUNCTUATION`), and page n+1's first body element is a
+    plain `paragraph` (not a heading, not a table, not a new list item —
+    anything else is excluded by construction, since only `type ==
+    "paragraph"` passes) starting within `JOIN_X_TOLERANCE` of the first
+    element's left x, the two are joined into ONE element: the second
+    element's text is appended to the first with a single space (no
+    de-hyphenation, no other character changes — a verbatim concatenation),
+    the first element gains `"pages": [n, n+1]` (additive; absent on every
+    element this doesn't touch) and stays under page n, and the second
+    element is removed from page n+1's own list.
+
+    Never joins two tables (page n's last element being a `table` always
+    fails the type check above) -- a table cut by a page break stays two
+    tables, a known, documented, out-of-scope risk per the brief. Pairwise
+    only, one pass, ascending page order -- a 3+ page chain (page n's
+    element joins page n+1's, and the COMBINED text still lacks terminal
+    punctuation, and page n+2's first element would also qualify) is not
+    attempted; no fixture in this repo exercises more than a 2-page split,
+    and the brief's own wording ("for each page n and n+1") is pairwise,
+    not transitive.
+
+    Judgment call: when the joining (page n) element is a `list_item`
+    rather than a `paragraph`, its "text x0" for the x-tolerance check is
+    approximated as its own `bbox[0]` (the marker's x), since this pipeline
+    doesn't track a separate "where does the text after the marker start"
+    x for list items (see `extract_text.py`'s
+    `merge_list_and_paragraph_blocks` docstring for the same approximation
+    made there). Untested against real extracted geometry -- no fixture in
+    this repo has a list item cut across a page break -- flagged, not
+    silently assumed correct."""
+    page_numbers = sorted(pages)
+    for n in page_numbers:
+        n_next = n + 1
+        if n_next not in pages:
+            continue
+        prev_body = _body_elements(pages[n])
+        next_body = _body_elements(pages[n_next])
+        if not prev_body or not next_body:
+            continue
+        prev_el = prev_body[-1]
+        next_el = next_body[0]
+
+        if prev_el["type"] not in ("paragraph", "list_item"):
+            continue
+        if _ends_with_terminal_punctuation(prev_el["text"]):
+            continue
+        if next_el["type"] != "paragraph":
+            continue
+        if "bbox" not in prev_el or "bbox" not in next_el:
+            continue  # defensive: real elements always carry bbox (Task A2); a hand-built fixture without one just never joins
+        if abs(next_el["bbox"][0] - prev_el["bbox"][0]) > JOIN_X_TOLERANCE:
+            continue
+
+        prev_el["text"] = prev_el["text"] + " " + next_el["text"]
+        prev_el["pages"] = [n, n_next]
+        prev_el["bbox"] = [
+            min(prev_el["bbox"][0], next_el["bbox"][0]),
+            min(prev_el["bbox"][1], next_el["bbox"][1]),
+            max(prev_el["bbox"][2], next_el["bbox"][2]),
+            max(prev_el["bbox"][3], next_el["bbox"][3]),
+        ]
+        pages[n_next]["elements"] = [el for el in pages[n_next]["elements"] if el is not next_el]
 
 
 def load_doc(elements_path: Path) -> dict:

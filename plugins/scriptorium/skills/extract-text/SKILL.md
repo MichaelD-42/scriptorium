@@ -78,6 +78,38 @@ document.
   groups a footer note and a page number into one block) keeps the real
   line, with its `bbox` recomputed from just the surviving line(s). No
   `triage.json`/`furniture` section => no removal, same output as before.
+- **List items (Task A4b)**: a text line that starts with a bullet glyph
+  (a single character — ``/``/``/`` (Symbol-font
+  private-use glyphs found on the golden document), `·`/`•`/`▪`/`–`/`-`)
+  or an enumerator token (`1)`, `1.`, `(1)`, `a)`, `(a)`, a short roman
+  numeral like `i)`/`ii)`) followed by whitespace and more real text on
+  the same line becomes a `list_item` instead of a `paragraph`:
+  `{"type": "list_item", "marker": <verbatim marker>, "level": <int>,
+  "text": <text without the marker>, "bbox": [...]}`. A TOC-matched (or
+  fallback-ranked) heading always wins — the heading check runs first, so
+  numbered-heading text is never misread as an enumerator marker. A lone
+  marker/number with nothing after it on the same line (e.g. a table
+  cell's bare `"10"`) is never a list item — a marker needs text after it.
+  Wrapped continuation lines with no marker of their own — whether a
+  second PyMuPDF line inside the same block, or (an approximation,
+  documented inline in `merge_list_and_paragraph_blocks`) a following
+  block at the item's own x-position — stay part of that item's `text`.
+  A bullet drawn as its own glyph-sized block next to a separate text
+  block on the same visual line (the marker glyph is drawn at a distinctly
+  larger font size than its text, so PyMuPDF splits them into two blocks)
+  is merged into one `list_item` too. `level` is the marker's x-position's
+  1-based rank among every distinct marker x-position (clustered within
+  ~3pt) found anywhere in the document — computed once, document-wide,
+  same cross-batch-consistency reason as the fallback heading-size
+  ranking above (a printed TOC page never contributes a marker
+  x-position, matching that page's own empty shard).
+- **Page-break joins are NOT done here.** A paragraph or list item cut by
+  a page break — this script's own per-`--pages`-batch view can't see the
+  next page, since the elastic-loop pipeline runs separate page batches as
+  parallel subprocesses — is joined later, in `lib/elements.py`'s
+  `merge_shards()` (invoked by `assemble-output`'s `merge.py`), which
+  already sees every page. See that skill's SKILL.md/`lib/elements.py`'s
+  own docstrings for the exact join rule.
 - **Figure regions (Task A5)**: this script detects the same
   vector-graphic figure regions `extract-images` crop-renders
   (`lib/figures.py`'s `detect_figure_regions`, a shared helper so the two

@@ -16,6 +16,18 @@ The one place all three extraction tiers converge. Three scripts:
    verbatim repeated header/footer text, if any) to the top level of
    `elements.json`, alongside `doc`/`source_file`/`page_count` — `None` if
    `triage.json` doesn't exist or has no `furniture_text`.
+   **Page-break joins (Task A4b)**: after combining, `lib/elements.py`'s
+   `merge_shards()` walks every adjacent page pair once, ascending. If page
+   `n`'s last non-image element is a `paragraph`/`list_item` whose text
+   does NOT end in `. ! ? : ;`, and page `n+1`'s first non-image element is
+   a plain `paragraph` (never a heading/table/new list item) starting
+   within ~3pt of the same left x, the two are joined into ONE element:
+   the second element's text is appended to the first with a single space
+   (verbatim — no de-hyphenation, no other character changes), the first
+   gains `"pages": [n, n+1]` (additive, absent everywhere else) and stays
+   under page `n`, and the second is removed from page `n+1`. Pairwise
+   only (no 3+ page chains); a table cut by a page break always stays two
+   tables — never joined.
 2. **`assemble.py`** reads that merged file and writes the final deliverable
    (`--format reqif`/`reqifz` delegates the XML build to `reqif_builder.py`,
    an internal helper module, not a script run on its own).
@@ -48,8 +60,46 @@ the "ReqIF format" section below.
 |---|---|---|---|
 | `heading` (level 1-6) | `#` through `######` | `<h1>` through `<h6>` | `SPEC-OBJECT` with a `ReqIF.ChapterName` string value; builds the `SPEC-HIERARCHY` tree |
 | `paragraph` | plain text, blank-line separated | `<p>` | `SPEC-OBJECT` with a `ReqIF.Text` XHTML value (`<xhtml:p>`) |
+| `list_item` | see "List items" below | one shared `<ul>` per run of consecutive `list_item`s, each `<li class="level-N">` | `SPEC-OBJECT` with a `ReqIF.Text` XHTML value (`<xhtml:p>`) holding the same rendered marker+text line as Markdown |
 | `table` | pipe table | `<table>` | `SPEC-OBJECT` with a `ReqIF.Text` XHTML value (`<xhtml:table>`) |
 | `image` | `![alt](assets/...)`, then `caption` verbatim, then `figure_text` as a blockquote, then any of `description`/`data_table`/`mermaid` wrapped in `<!-- scriptorium:interpretation -->` markers | `<img src="assets/..." alt="...">`, `<figcaption>`, a `<blockquote>` for `figure_text`, then the same three fields inside an HTML-comment marker pair | `SPEC-OBJECT` with a `ReqIF.Text` XHTML value (`<xhtml:object data="assets/...">caption</xhtml:object>`, plus an `<xhtml:pre>` of the mermaid source if the element has one) |
+
+### List items (Task A4b)
+
+A `list_item` element (`{"type": "list_item", "marker": <verbatim marker>,
+"level": <1-based int>, "text": <text without the marker>, "bbox": [...]}`,
+written by `extract-text` — see its own SKILL.md's "List items" section)
+renders as, in Markdown (`elements_to_markdown`/
+`elements_to_markdown_with_anchors` — the exact same function, so md-tree's
+per-file output matches single-file `md` byte for byte for the same
+elements):
+
+```
+"  " * (level - 1) + <rendered marker> + " " + text
+```
+
+`<rendered marker>` is a plain ASCII `-` for a bullet-glyph marker (a
+single character, e.g. `-`/`•`/a private-use Symbol-font glyph — always
+normalized to `-` regardless of which glyph was actually printed) and the
+marker rendered **verbatim** for an enumerator (more than one character,
+e.g. `1)`, `a)`, `(1)`). Consecutive list items render with **no** blank
+line between them; the surrounding elements still get their own blank
+line before the first item and after the last one, same as any other
+element. This exact rule is a later cross-repo byte-for-byte comparison
+target — see `tests/test_lists_and_joins.py`'s
+`TestMarkdownListRendering` — do not change it without updating both
+sides.
+
+HTML wraps each run of consecutive `list_item` elements in one shared
+`<ul>`, with each item's level expressed as an `li` class
+(`class="level-N"`, CSS-indented in `output.html.j2`) rather than truly
+nested `<ul>`s — a deliberate "keep it small" choice, not semantic list
+nesting. ReqIF has no list concept of its own, so a `list_item` renders as
+an ordinary `ReqIF.Text` paragraph holding the exact same indent+marker+
+text line Markdown uses (duplicated in miniature inside
+`reqif_builder.py` rather than importing `assemble.py`, which would be a
+circular import — `assemble.py` already imports `reqif_builder` at module
+scope).
 
 For `image`, alt text prefers `description`, falling back to `caption`,
 else empty. `caption` and `figure_text` are script-authoritative/

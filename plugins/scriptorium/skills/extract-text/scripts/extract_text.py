@@ -147,31 +147,52 @@ def caption_filtered_lines(lines: list[dict], caption_bboxes: set[tuple]) -> lis
     return [line for line in lines if tuple(line["bbox"]) not in caption_bboxes]
 
 
+def compute_kept_bbox(block: dict, kept_lines: list[dict]) -> list[float]:
+    """The element bbox for `kept_lines` -- PyMuPDF's own block bbox
+    unchanged when nothing was dropped, else recomputed from just the
+    surviving lines so a partially-furniture/figure/caption-trimmed block
+    doesn't keep reporting a discarded line's geometry."""
+    if len(kept_lines) == len(block["lines"]):
+        return list(block["bbox"])  # nothing dropped -- keep PyMuPDF's own block bbox
+    return [
+        min(line["bbox"][0] for line in kept_lines),
+        min(line["bbox"][1] for line in kept_lines),
+        max(line["bbox"][2] for line in kept_lines),
+        max(line["bbox"][3] for line in kept_lines),
+    ]
+
+
 def build_block_element(
     block: dict,
     kept_lines: list[dict],
     body_size: float,
     toc_lookup: dict[str, int],
     heading_size_ranks: dict[float, int],
+    list_level_lookup: list[float] | None = None,
 ) -> dict | None:
-    """Reassemble a `heading`/`paragraph` element from `kept_lines` (a
-    possibly-trimmed subset of `block["lines"]`, per `furniture_filtered_lines`).
-    Returns None if nothing survived (the whole block was furniture).
+    """Reassemble a `heading`/`list_item`/`paragraph` element from
+    `kept_lines` (a possibly-trimmed subset of `block["lines"]`, per
+    `furniture_filtered_lines`). Returns None if nothing survived (the
+    whole block was furniture).
 
     When lines were dropped, the bbox and heading-classification size are
     recomputed from just the surviving lines, so a partially-furniture
-    block doesn't keep reporting the discarded line's geometry/size."""
+    block doesn't keep reporting the discarded line's geometry/size.
+
+    Task A4b: `list_level_lookup` is the document-wide, sorted-ascending
+    list-marker x-position clusters (`document_list_marker_levels`). Kept
+    optional, defaulting to None (list-item detection skipped entirely) so
+    the two direct-call unit tests in `test_furniture_removal.py` that
+    predate this task keep working unchanged -- neither of their hand-built
+    blocks' text starts with a marker anyway, but this keeps the function's
+    old behavior available on purpose, not just by accident. A TOC-matched
+    heading always wins over marker-shaped text (checked first, same as
+    before) -- e.g. a numbered heading like "1) Some Heading" would never
+    reach the list-item check if its text matches a TOC entry."""
     if not kept_lines:
         return None
-    if len(kept_lines) == len(block["lines"]):
-        bbox = list(block["bbox"])  # nothing dropped -- keep PyMuPDF's own block bbox
-    else:
-        bbox = [
-            min(line["bbox"][0] for line in kept_lines),
-            min(line["bbox"][1] for line in kept_lines),
-            max(line["bbox"][2] for line in kept_lines),
-            max(line["bbox"][3] for line in kept_lines),
-        ]
+    bbox = compute_kept_bbox(block, kept_lines)
+    first_line = kept_lines[0]
     text = " ".join(line["text"] for line in kept_lines)
     max_size = max(line["max_size"] for line in kept_lines)
     is_bold_block = all(line["bold"] for line in kept_lines)
@@ -179,6 +200,18 @@ def build_block_element(
     level = classify_heading_level(text, is_bold_block, max_size, body_size, toc_lookup, heading_size_ranks)
     if level:
         return {"type": "heading", "level": level, "text": text, "bbox": bbox}
+
+    if list_level_lookup is not None:
+        marker_info = parse_list_marker(first_line["text"])
+        if marker_info:
+            marker, rest = marker_info
+            # Wrapped continuation lines of the SAME block (no marker of
+            # their own) belong to this item's text -- e.g. a bullet whose
+            # body text wraps onto a second PyMuPDF line within one block.
+            item_text = " ".join([rest] + [line["text"] for line in kept_lines[1:]])
+            item_level = level_for_x(first_line["bbox"][0], list_level_lookup)
+            return {"type": "list_item", "marker": marker, "level": item_level, "text": item_text, "bbox": bbox}
+
     return {"type": "paragraph", "text": text, "bbox": bbox}
 
 
@@ -244,6 +277,257 @@ def is_fallback_heading_candidate(text: str, is_bold_block: bool, max_size: floa
     if body_size <= 0 or not is_bold_block or max_size <= body_size:
         return False
     return non_glyph_char_count(text) >= FALLBACK_NON_GLYPH_MIN_CHARS
+
+
+# Task A4b: list items. Bullet-glyph markers are single characters -- Symbol-
+# font private-use glyphs (U+F02D/U+F0B7/U+F0A7/U+F0D8, the shapes actually
+# found on the golden document), plus the common Unicode bullet punctuation
+# (middle dot, bullet, black small square, en dash) and a plain ASCII
+# hyphen. Keep the set in one place so parse_list_marker/document scanning/
+# tests all agree on exactly which characters count.
+LIST_BULLET_GLYPHS = "·•▪–-"
+
+# Enumerator marker shapes: "1)" / "1.", "(1)", "a)", "(a)", short roman
+# numerals like "i)"/"ii)" (1-4 roman-numeral characters -- "short" per the
+# brief). Order doesn't affect correctness here: every alternative that can
+# match a given prefix captures the identical substring (e.g. "i)" matches
+# both the roman-numeral and the single-letter alternative the same way),
+# so which one "wins" the alternation never changes the captured marker text.
+_ROMAN_NUMERAL_MARKER = r"[ivxlcdmIVXLCDM]{1,4}\)"
+_ENUMERATOR_RE = re.compile(
+    r"^(?:\d{1,3}[.)]|\(\d{1,3}\)|\([A-Za-z]\)|" + _ROMAN_NUMERAL_MARKER + r"|[A-Za-z]\))(?=\s)"
+)
+
+# Marker x-positions within this many points count as the same indent level
+# (Task A4b) -- same tolerance convention as FRAME_TABLE_BBOX_TOLERANCE/A5's
+# other ~3pt geometry tolerances elsewhere in this pipeline.
+LIST_MARKER_X_TOLERANCE = 3.0  # pt
+# How close two lines' y0 must be to count as "the same visual line" for the
+# separate-glyph-block merge case (brief: "y differs by about 1 pt" on the
+# real document -- cushioned to match the other ~3pt tolerances above).
+LIST_MARKER_Y_TOLERANCE = 3.0  # pt
+
+
+def parse_list_marker(text: str) -> tuple[str, str] | None:
+    """If `text` starts with a bullet-glyph or enumerator marker token
+    followed by whitespace and more text on the same line, return
+    `(marker, rest)` -- `marker` verbatim (exactly as printed), `rest` the
+    remaining text with the separating whitespace stripped. `None` if
+    `text` doesn't start with a recognized marker, or if there's no real
+    text after it on the same line (a lone marker/number -- e.g. a table
+    cell's bare "10" -- is not a list item; a marker needs text after it)."""
+    if not text:
+        return None
+    if text[0] in LIST_BULLET_GLYPHS:
+        rest = text[1:]
+        if rest[:1] in (" ", "\t") and rest.strip():
+            return text[0], rest.strip()
+        return None
+    match = _ENUMERATOR_RE.match(text)
+    if match:
+        rest = text[match.end():]
+        if rest.strip():
+            return match.group(0), rest.lstrip()
+    return None
+
+
+def cluster_x_positions(xs: list[float], tolerance: float = LIST_MARKER_X_TOLERANCE) -> list[float]:
+    """Distinct x-positions, clustered within `tolerance` pt and returned
+    sorted ascending -- `document_list_marker_levels`'s document-wide
+    ranking table (index+1, via `level_for_x`, becomes a list_item's
+    `level`). Deterministic: sorts first, then greedily joins each value
+    into the previous cluster if it's within `tolerance` of that cluster's
+    (lowest-x) representative, else starts a new cluster."""
+    clusters: list[float] = []
+    for x in sorted(set(xs)):
+        if clusters and x - clusters[-1] <= tolerance:
+            continue
+        clusters.append(x)
+    return clusters
+
+
+def level_for_x(x: float, cluster_reps: list[float]) -> int:
+    """1-based rank (in `cluster_reps`, sorted ascending) of the cluster
+    nearest to `x` -- ties broken toward the lower (shallower) level. Falls
+    back to level 1 if `cluster_reps` is empty (defensive: only possible if
+    a block matches `parse_list_marker` during real per-page classification
+    but was somehow missed by the whole-document scan that builds
+    `cluster_reps`)."""
+    if not cluster_reps:
+        return 1
+    best_i, best_d = 0, abs(x - cluster_reps[0])
+    for i, rep in enumerate(cluster_reps[1:], start=1):
+        d = abs(x - rep)
+        if d < best_d:
+            best_i, best_d = i, d
+    return best_i + 1
+
+
+def document_list_marker_levels(
+    fitz_doc,
+    body_size: float,
+    furniture_masked: set[str],
+    toc_lookup: dict[str, int],
+    heading_size_ranks: dict[float, int],
+    page_roles: dict[int, str],
+) -> list[float]:
+    """Document-wide list-marker x-position clusters (Task A4b's "collect
+    the distinct marker x-positions ... across the whole document, sort
+    ascending, level = rank" rule) -- see `cluster_x_positions`/`level_for_x`.
+
+    Scans the WHOLE document rather than just the current `--pages` batch,
+    for the same reason `document_heading_size_ranks` does (see that
+    function's own docstring): the elastic-loop pipeline can invoke this
+    script once per page batch, as separate subprocesses, and a given
+    indent's level must come out identical regardless of which batch runs.
+
+    Applies furniture-line filtering (the same `furniture_filtered_lines`
+    helper the per-page loop uses, and the same lesson
+    `document_heading_size_ranks` learned the hard way in its own fix round
+    1 -- an unfiltered running header/footer could otherwise seed a bogus
+    cluster) AND skips pages `pdf-triage` marked `role: "toc"` -- a printed
+    TOC's dot-leader lines can start with a bare number immediately
+    followed by "." (e.g. "10.1 Internal Standards ....... 9" reads as
+    marker "10." to `parse_list_marker`), which would otherwise pollute the
+    cluster table with a spurious x-position from a page that never
+    contributes any elements at all (`main()` skips TOC pages entirely).
+    Does NOT apply figure-region/caption filtering -- a whole-document scan
+    would need every page's figure regions computed twice (once here, once
+    in `main()`'s own per-page loop); same documented, accepted gap shape
+    as `document_heading_size_ranks`'s own carried-forward figure/table-
+    overlap gap (see task-A5-report.md's "Concerns" section)."""
+    xs: list[float] = []
+    for page in fitz_doc:
+        page_number = page.number + 1
+        if page_roles.get(page_number) == "toc":
+            continue
+        page_height = page.rect.height
+        text_blocks, _ = extract_page_text_blocks(page, body_size)
+        for block in text_blocks:
+            kept_lines = furniture_filtered_lines(block, furniture_masked, page_height)
+            if not kept_lines:
+                continue
+            first_line = kept_lines[0]
+            text = " ".join(line["text"] for line in kept_lines)
+            max_size = max(line["max_size"] for line in kept_lines)
+            is_bold_block = all(line["bold"] for line in kept_lines)
+            if classify_heading_level(text, is_bold_block, max_size, body_size, toc_lookup, heading_size_ranks):
+                continue  # a TOC-matched/fallback heading never seeds a marker x-position
+            if parse_list_marker(first_line["text"]) is not None:
+                xs.append(first_line["bbox"][0])
+            elif len(kept_lines) == 1 and first_line["text"].strip() in LIST_BULLET_GLYPHS \
+                    and len(first_line["text"].strip()) == 1:
+                # Separate-glyph-block candidate (Task A4b item 1's other
+                # case): a block that is nothing but one bullet-glyph
+                # character also seeds a cluster/level at its own x, same
+                # as the merged case `merge_list_and_paragraph_blocks`
+                # builds in the real per-page loop.
+                xs.append(first_line["bbox"][0])
+    return cluster_x_positions(xs)
+
+
+def _union_bbox(a: list[float], b: list[float]) -> list[float]:
+    return [min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3])]
+
+
+def merge_list_and_paragraph_blocks(
+    blocks_and_lines: list[tuple[dict, list[dict]]],
+    body_size: float,
+    toc_lookup: dict[str, int],
+    heading_size_ranks: dict[float, int],
+    list_level_lookup: list[float],
+) -> list[dict]:
+    """Second pass over a page's furniture/figure/caption/table-filtered
+    blocks (Task A4b) -- `blocks_and_lines` is `[(block, kept_lines), ...]`
+    with every entry's `kept_lines` already non-empty. Classifies each
+    block via `build_block_element` (heading / single-block list_item,
+    including same-block wrapped continuation lines / paragraph), then
+    resolves two cross-block cases `build_block_element` can't see on its
+    own, looking only at the single block it was given:
+
+    1. A bullet-glyph block (exactly one character, one of
+       LIST_BULLET_GLYPHS, nothing else) immediately followed by a block
+       that starts on the same visual line (`LIST_MARKER_Y_TOLERANCE`) at a
+       larger x -- the marker glyph and its text are two separate PyMuPDF
+       blocks whenever the glyph is drawn at a distinctly larger font size
+       than the text (the brief's own worked description of the real
+       document's Symbol-font bullets). Merged into one `list_item` before
+       either block is classified on its own (a lone glyph would otherwise
+       become a useless one-character paragraph).
+    2. A wrapped continuation block: no marker of its own, not classified
+       as a heading, sitting at the immediately-preceding list item's text
+       x-position (within `LIST_MARKER_X_TOLERANCE`) -- absorbed into that
+       item's text/bbox instead of becoming a standalone paragraph. Only
+       the block immediately following an open list item is eligible (the
+       brief's own "the next block ... with no marker of its own"); any
+       other block in between (a heading, a differently-indented paragraph,
+       another list item) closes the open item.
+
+    Judgment call: for case 2, the "item's text x-position" tracked after a
+    same-block marker (case where the marker is the first token of the
+    block's own first line, not a separate glyph block) is approximated as
+    that first line's own bbox x0 (the marker's x), since per-line text
+    isn't broken down by word/span in this pipeline's data model -- a true
+    hanging-indent "where does the text after the marker actually start"
+    x isn't available. For the separate-glyph-block case (1 above), the
+    real text block's own x0 is used instead, which is exact. No fixture
+    in this repo exercises a wrapped bullet-list item that also spans
+    multiple PyMuPDF blocks with an inline marker, so this approximation is
+    untested against real extracted geometry -- flagged here, not just
+    silently assumed correct."""
+    elements: list[dict] = []
+    open_item: dict | None = None
+    open_item_text_x: float | None = None
+
+    i, n = 0, len(blocks_and_lines)
+    while i < n:
+        block, kept_lines = blocks_and_lines[i]
+        first_line = kept_lines[0]
+        stripped_first = first_line["text"].strip()
+
+        if (
+            len(kept_lines) == 1
+            and len(stripped_first) == 1
+            and stripped_first in LIST_BULLET_GLYPHS
+            and i + 1 < n
+        ):
+            next_block, next_kept_lines = blocks_and_lines[i + 1]
+            next_first = next_kept_lines[0]
+            same_line = abs(next_first["bbox"][1] - first_line["bbox"][1]) <= LIST_MARKER_Y_TOLERANCE
+            further_right = next_block["bbox"][0] > block["bbox"][0]
+            if same_line and further_right and parse_list_marker(next_first["text"]) is None:
+                item_text = " ".join(line["text"] for line in next_kept_lines)
+                bbox = _union_bbox(block["bbox"], next_block["bbox"])
+                item_level = level_for_x(block["bbox"][0], list_level_lookup)
+                item = {"type": "list_item", "marker": stripped_first, "level": item_level, "text": item_text, "bbox": bbox}
+                elements.append(item)
+                open_item, open_item_text_x = item, next_block["bbox"][0]
+                i += 2
+                continue
+
+        element = build_block_element(block, kept_lines, body_size, toc_lookup, heading_size_ranks, list_level_lookup)
+
+        if (
+            element is not None
+            and element["type"] == "paragraph"
+            and open_item is not None
+            and abs(block["bbox"][0] - open_item_text_x) <= LIST_MARKER_X_TOLERANCE
+        ):
+            open_item["text"] = open_item["text"] + " " + element["text"]
+            open_item["bbox"] = _union_bbox(open_item["bbox"], element["bbox"])
+            i += 1
+            continue
+
+        if element is not None:
+            elements.append(element)
+
+        if element is not None and element["type"] == "list_item":
+            open_item, open_item_text_x = element, first_line["bbox"][0]
+        else:
+            open_item, open_item_text_x = None, None
+        i += 1
+
+    return elements
 
 
 def document_heading_size_ranks(fitz_doc, body_size: float, furniture_masked: set[str]) -> dict[float, int]:
@@ -415,9 +699,21 @@ def main() -> None:
     # there's no TOC to drive classification instead -- skip the extra
     # whole-document scan otherwise.
     heading_size_ranks: dict[float, int] = {}
+    ranking_body_size = args.body_size or 0.0
     if not toc_lookup:
         ranking_body_size = args.body_size if args.body_size else resolve_document_body_size(fitz_doc)
         heading_size_ranks = document_heading_size_ranks(fitz_doc, ranking_body_size, furniture_masked)
+
+    # Task A4b: list-marker x-position levels are document-wide too, for the
+    # same cross-batch-consistency reason as heading_size_ranks above --
+    # computed unconditionally (list items can appear in either a TOC-driven
+    # or fallback document). `ranking_body_size` is only actually consulted
+    # by classify_heading_level's fallback branch inside this scan; when
+    # toc_lookup is non-empty it's ignored entirely, so the 0.0 default
+    # above is harmless in that case.
+    list_level_lookup = document_list_marker_levels(
+        fitz_doc, ranking_body_size, furniture_masked, toc_lookup, heading_size_ranks, page_roles,
+    )
 
     for page_number in page_numbers:
         if page_roles.get(page_number) == "toc":
@@ -457,18 +753,25 @@ def main() -> None:
             if line
         }
 
-        page_elements = []
         # Drop text blocks that mostly overlap a detected table; the table
         # element replaces them so cell text isn't duplicated as prose.
+        # Every surviving block's kept_lines is non-empty (an empty result
+        # is dropped right here) -- merge_list_and_paragraph_blocks (Task
+        # A4b) relies on that so its cross-block lookahead never has to
+        # special-case an empty entry.
+        filtered_blocks: list[tuple[dict, list[dict]]] = []
         for block in text_blocks:
             if any(bbox_overlap_ratio(block["bbox"], t["bbox"]) > 0.5 for t in tables):
                 continue
             kept_lines = furniture_filtered_lines(block, furniture_masked, page_height)
             kept_lines = figure_region_filtered_lines(kept_lines, figure_regions)
             kept_lines = caption_filtered_lines(kept_lines, caption_bboxes)
-            element = build_block_element(block, kept_lines, body_size, toc_lookup, heading_size_ranks)
-            if element is not None:
-                page_elements.append(element)
+            if kept_lines:
+                filtered_blocks.append((block, kept_lines))
+
+        page_elements = merge_list_and_paragraph_blocks(
+            filtered_blocks, body_size, toc_lookup, heading_size_ranks, list_level_lookup,
+        )
 
         for table in tables:
             page_elements.append({"type": "table", "rows": table["rows"], "bbox": list(table["bbox"])})
