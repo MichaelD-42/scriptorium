@@ -38,17 +38,15 @@ the same JSON to stdout.
   "body_size": 11.0,
   "furniture": {
     "line_patterns": [
-      {"masked": "Doc No. SYN-FUR-#", "edge": "bottom", "y_min": 0.9159, "y_max": 0.9298, "page_count": 9}
+      {"masked": "Doc No. SYN-FUR-#", "edge": "bottom", "y_min": 0.9159, "y_max": 0.9298, "page_count": 11}
     ],
-    "frame_tables": [
-      {"bbox": [24.0, 24.0, 588.0, 768.0], "page_count": 9}
-    ],
+    "frame_tables": [],
     "frame_drawings": [
-      {"bbox": [24.0, 24.0, 588.0, 768.0], "page_count": 9}
+      {"bbox": [24.0, 24.0, 588.0, 768.0], "page_count": 11}
     ],
     "image_xrefs": [4]
   },
-  "furniture_text": "Doc No. SYN-FUR-0001\nRev. B\npage 1 (9)"
+  "furniture_text": "Doc No. SYN-FUR-0001\nRev. B\npage 1 (11)"
 }
 ```
 
