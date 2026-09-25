@@ -74,9 +74,9 @@ iteration, Heading-1 pagination, and inline-image extraction, shared by
 - `assemble-output/scripts/assemble.py --doc <name> [--format md|html|okf|md-tree|reqif|reqifz] [--split-depth 2]`
   (`--split-depth` only applies to `md-tree`; only `2` is currently supported)
 - `assemble-output/scripts/zip_output.py --doc <name>` (optional; packages `output/<doc>/` into `output/<doc>.zip`)
-- `grade-output/scripts/gates.py --doc <name> [--format md|html|okf|reqif|reqifz]`
-  (`md-tree` is not yet an accepted value here; the `output_file_exists`
-  check has no dedicated case for it)
+- `grade-output/scripts/gates.py --doc <name> [--format md|html|okf|md-tree|reqif|reqifz]`
+  (for `md-tree`, `output_file_exists` checks `index.md` plus the
+  `NN-slug/NN.MM-slug.md` files or `00-front-matter.md`)
 - `grade-output/scripts/write_grade_shard.py --doc <name> --page <n> --score <0-1> [--issues <csv>]`
 - `grade-output/scripts/text_mode_grade.py --doc <name>` (docx/xlsx/html only — grades every page in one call, no batching)
 - `grade-output/scripts/merge_grades.py --doc <name> [--attempt <n>]`

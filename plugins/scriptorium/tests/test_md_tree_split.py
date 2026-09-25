@@ -592,3 +592,25 @@ class TestFurnitureSampleMdTree:
         assert "split-depth" in result.stderr.lower()
         assert "2" in result.stderr
         assert not (paths.output_dir(furniture_doc) / "index.md").exists()
+
+    def test_gates_accepts_md_tree_end_to_end(self, furniture_doc, tmp_project):
+        # Fix wave B2: the loop runs assemble.py --format md (the grader
+        # reads <doc>.md) and --format md-tree, then gates.py --format
+        # md-tree. gates.py must accept the value, exit 0 and write
+        # gates-report.json, with output_file_exists passing on the bundle.
+        self._extract(furniture_doc, tmp_project)
+        describe_all_images(furniture_doc, tmp_project)
+        _run_ok("assemble-output/scripts/merge.py", "--doc", furniture_doc, cwd=tmp_project)
+        _run_ok("assemble-output/scripts/assemble.py", "--doc", furniture_doc, "--format", "md", cwd=tmp_project)
+        _run_ok(
+            "assemble-output/scripts/assemble.py", "--doc", furniture_doc,
+            "--format", "md-tree", "--split-depth", "2", cwd=tmp_project,
+        )
+        _run_ok("grade-output/scripts/gates.py", "--doc", furniture_doc, "--format", "md-tree", cwd=tmp_project)
+        report_path = paths.gates_report_json(furniture_doc)
+        assert report_path.exists()
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        checks = {c["name"]: c for c in report["checks"]}
+        assert checks["output_file_exists"]["passed"] is True, checks["output_file_exists"]
+        assert checks["furniture_absent"]["passed"] is True, checks["furniture_absent"]
+        assert checks["toc_headings_match"]["passed"] is True, checks["toc_headings_match"]

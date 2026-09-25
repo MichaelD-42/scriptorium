@@ -423,6 +423,20 @@ def check_output_file_exists(doc: str, fmt: str) -> dict:
             return {"name": "output_file_exists", "passed": True, "detail": f"{index} + {len(sections)} section file(s)"}
         return {"name": "output_file_exists", "passed": False, "detail": "okf bundle incomplete: missing index.md or section files"}
 
+    if fmt == "md-tree":
+        # The folder glob does not match OKF's flat NN-slug.md files, so a
+        # stale OKF bundle in the same output folder cannot satisfy it.
+        out = paths.output_dir(doc)
+        index = out / "index.md"
+        split_files = sorted(out.glob("[0-9][0-9]-*/[0-9][0-9].[0-9][0-9]-*.md"))
+        front = out / "00-front-matter.md"
+        if index.exists() and index.stat().st_size >= MIN_OUTPUT_BYTES and (split_files or front.exists()):
+            return {"name": "output_file_exists", "passed": True, "detail": f"{index} + {len(split_files)} split file(s)"}
+        return {
+            "name": "output_file_exists", "passed": False,
+            "detail": "md-tree bundle incomplete: missing index.md or NN-slug/NN.MM-slug.md files",
+        }
+
     if fmt == "reqif":
         candidate = paths.output_file(doc, "reqif")
         if not candidate.exists() or candidate.stat().st_size < MIN_OUTPUT_BYTES:
@@ -456,7 +470,7 @@ def check_output_file_exists(doc: str, fmt: str) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--doc", required=True)
-    parser.add_argument("--format", choices=["md", "html", "okf", "reqif", "reqifz"], default="md")
+    parser.add_argument("--format", choices=["md", "html", "okf", "md-tree", "reqif", "reqifz"], default="md")
     args = parser.parse_args()
 
     input_path = paths.input_file(args.doc)

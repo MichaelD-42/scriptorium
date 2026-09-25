@@ -35,7 +35,7 @@ Three steps:
 ```bash
 # once per document, before dispatching graders
 uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
-  "${CLAUDE_PLUGIN_ROOT}/skills/grade-output/scripts/gates.py" --doc <doc-name> [--format md|html|okf|reqif|reqifz]
+  "${CLAUDE_PLUGIN_ROOT}/skills/grade-output/scripts/gates.py" --doc <doc-name> [--format md|html|okf|md-tree|reqif|reqifz]
 
 # inside each grader subagent, per page it graded — see rubric.md
 uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
@@ -65,7 +65,7 @@ pass/fail decision.
 | `no_empty_pages` | a page has zero elements (a page whose merged shard has `"skipped": "toc"` — a printed TOC page, see `pdf-triage`/`extract-text` — is exempt: zero elements there is expected, not a failure) |
 | `image_refs_resolve` | an `image` element's `asset` path doesn't exist on disk |
 | `ocr_confidence_floor` | a tier-`ocr` page's `ocr_confidence` < 0.5 |
-| `output_file_exists` | the assembled output is missing or near-empty (format-aware: single file for `md`/`html`, `index.md` + section files for `okf`) |
+| `output_file_exists` | the assembled output is missing or near-empty (format-aware: single file for `md`/`html`, `index.md` + section files for `okf`, `index.md` + `NN-slug/NN.MM-slug.md` files or `00-front-matter.md` for `md-tree`) |
 | `furniture_absent` | a heading/paragraph/list_item, table cell, image `figure_text` or `caption`, or a line of any `.md`/`.html` file under `output/<doc>/`, has digit-masked text equal to a `triage.json` furniture `line_patterns` entry; or a `table` element's bbox matches a `frame_tables` entry (3pt). A digit-only pattern (no letters, e.g. `#` for a bare page-number footer) matches an element only when its bbox is in the top/bottom 12% furniture band of its PDF page, and is not checked in the output files. Passes trivially with no furniture. Furniture images are not checked: no element records its source xref |
 | `toc_headings_match` | a `toc.json` entry has no `heading` with the same normalized text (`lib/toc.py`'s `normalize_toc_text`) within ±1 page, or the heading's level differs from the entry's `level`; or a heading matches no entry. Passes trivially when `toc.json` has no entries |
 | `figures_complete` | an `image` element has no non-empty `caption`, no non-empty `figure_text` and no `no_visible_text: true` flag (`describe_image.py --no-visible-text`; counts for pdf and image documents only), or no non-empty `description` |

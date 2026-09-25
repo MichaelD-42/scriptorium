@@ -26,8 +26,9 @@ yourself about to `Read` a page image or `elements.json` directly: stop,
 that's a subagent's job, not yours.
 
 Arguments (`$ARGUMENTS`, all optional): `--doc <name>` to process a single
-named document instead of the whole queue; `--format md|html|okf|reqif|reqifz`
-(default `md`); `--max-attempts <n>` (default `3`); `--batch-size <n>` (default `8`
+named document instead of the whole queue; `--format md|html|okf|md-tree|reqif|reqifz`
+(default `md`); `--split-depth <n>` (`md-tree` only, default `2`; only `2` is
+accepted); `--max-attempts <n>` (default `3`); `--batch-size <n>` (default `8`
 pages per subagent); `--zip` to also package each document's `output/<doc>/`
 into `output/<doc>.zip` once it passes (off by default).
 
@@ -57,7 +58,7 @@ that actually have scanned pages, and that's handled per-document below.
   stem isn't yet a key under `docs`, add it:
   `{"status": "pending", "attempt": 0, "input_format": "<ext>", "format": "<output format>", "escalated_pages": {}, "lang_flag": null, "tessdata_prefix": null}`.
   `input_format` is the source file's extension — not to be confused with
-  `format`, which is the output format (`md`/`html`/`okf`/`reqif`/`reqifz`).
+  `format`, which is the output format (`md`/`html`/`okf`/`md-tree`/`reqif`/`reqifz`).
   The five image extensions all normalize to `input_format: "image"`
   (`lib/paths.py`'s `detect_input_format`) — record `"image"`, not the raw
   extension.
@@ -127,6 +128,19 @@ uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/skills/as
 uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/skills/grade-output/scripts/gates.py" --doc <name> --format <format>
 ```
 
+For `--format md-tree`, run `assemble.py` twice: first `--format md`, then
+`--format md-tree --split-depth <n>`. Then run `gates.py --format md-tree`.
+The grader in step 4 reads the single-file `output/<doc>/<doc>.md`: md-tree
+renders the heading that opens a file only as frontmatter, so a grader that
+reads the split files would flag every level-1/level-2 heading as missing.
+Both formats use the same element renderers.
+
+```bash
+uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/skills/assemble-output/scripts/assemble.py" --doc <name> --format md
+uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/skills/assemble-output/scripts/assemble.py" --doc <name> --format md-tree --split-depth <n>
+uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/skills/grade-output/scripts/gates.py" --doc <name> --format md-tree
+```
+
 `merge.py` recombines **every** page's shards, old and new — untouched
 pages' shards from a previous attempt are picked up automatically, so a
 retry that only re-extracted 2 pages still produces a complete document.
@@ -140,7 +154,8 @@ regrading).
 
 - **`pdf`/`pptx`/`image`** (rendered pages exist): partition into
   `--batch-size` groups, **spawn one `grader` subagent per group in
-  parallel**, each with its page list and the assembled output's location.
+  parallel**, each with its page list and the assembled output's location
+  (for `md-tree`, give it `output/<doc>/<doc>.md` — see step 3).
   Wait for all of them. (`image` is always a single page, so this is one
   `grader` subagent.)
 - **`docx`/`xlsx`/`html`** (no rendered page — see
