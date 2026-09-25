@@ -14,7 +14,7 @@ Detection pipeline, per page:
 
 1. `page.get_drawings()` lists every vector-graphic item on the page. A
    single item is dropped *before* clustering only if it clears ALL THREE
-   of: its own bbox matches (within `FRAME_TABLE_BBOX_TOLERANCE`) one of
+   of: its own bbox matches (within `FRAME_MATCH_TOLERANCE`) one of
    `frame_drawings` -- `triage.json["furniture"]["frame_drawings"]`,
    `pdf-triage`'s repetition-based page-frame detection (Task A5b,
    `triage.py`'s `_find_frame_drawings`): a single vector drawing covering
@@ -62,13 +62,13 @@ Detection pipeline, per page:
      area, almost certainly a stray rule/line rather than a real figure;
    - has *more than half its own area* inside the top/bottom furniture edge
      band (reuses the same `FURNITURE_EDGE_BAND` convention
-     `extract_text.py`'s `in_furniture_band`/`furniture_filtered_lines`
+     `lib/furniture.py`'s `in_furniture_band` and `extract_text.py`'s `furniture_filtered_lines`
      use, but as a majority-area test rather than either a containment or a
      bare-overlap test -- see `_furniture_band_overlap_fraction`'s
      docstring for why Task A5b tightened this from "any overlap at all");
    - or overlaps a real (non-frame) table's bbox, queried fresh via
      `pdfplumber` and filtered the same way `extract_text.py`'s
-     `is_frame_table()` filters `frame_tables` out of its own table query.
+     `furniture_lib.matches_any_frame()` filters `frame_tables` out of its own table query.
 
 Task A5b: every candidate this pipeline drops -- a pre-filtered frame
 drawing, or an excluded cluster -- is also returned as an "excluded region"
@@ -95,21 +95,12 @@ from pathlib import Path
 
 import pdfplumber
 
-# Independent copies of constants that already exist, under the same name,
-# in triage.py/extract_text.py/extract_images.py -- matching this codebase's
-# existing convention (see e.g. extract_images.py's own FRAME_TABLE_BBOX_TOLERANCE
-# docstring) of small per-file constant duplication over cross-script imports.
-FURNITURE_EDGE_BAND = 0.12
-# 3.0pt here vs. triage.py's own FRAME_TABLE_BBOX_TOLERANCE = 2.0pt --
-# deliberately not the same value, not an oversight. triage.py's 2pt is a
-# GROUPING tolerance: deciding whether two individual pages' raw bboxes are
-# "the same" frame occurrence when first building frame_tables/frame_drawings.
-# This copy is a MATCHING tolerance: comparing a freshly-queried bbox against
-# an ALREADY-AVERAGED frame_tables/frame_drawings entry (see triage.py's
-# `avg_bbox`), which, being an average across every matched page, can drift a
-# little further from any single page's own raw bbox than two raw per-page
-# bboxes drift from each other -- hence the extra point of slack here.
-FRAME_TABLE_BBOX_TOLERANCE = 3.0  # pt
+import furniture as furniture_lib
+
+# The furniture band (FURNITURE_EDGE_BAND) and the frame matching tolerance
+# (FRAME_MATCH_TOLERANCE, 3pt; triage groups with 2pt) are in
+# lib/furniture.py, shared with every other stage.
+FURNITURE_EDGE_BAND = furniture_lib.FURNITURE_EDGE_BAND
 
 # Task A5b fix round 1 (controller finding 1): a drawing whose bbox matches a
 # frame_drawings entry is pre-filtered as a page-frame border only if it ALSO
@@ -189,16 +180,6 @@ CAPTION_PATTERN = re.compile(r"^(figure|fig\.?|table)\s+\d+\.?:?\s", re.IGNORECA
 CAPTION_SEARCH_DISTANCE = 60.0
 
 
-def _is_frame_table_bbox(bbox, frame_tables: list[dict]) -> bool:
-    """Independent copy of extract_text.py's/extract_images.py's
-    is_frame_table -- same tolerance-based bbox match against
-    triage.json["furniture"]["frame_tables"]."""
-    return any(
-        all(abs(a - b) <= FRAME_TABLE_BBOX_TOLERANCE for a, b in zip(bbox, ft["bbox"]))
-        for ft in frame_tables
-    )
-
-
 def real_table_bboxes(pdf_path: Path, page_number: int, frame_tables: list[dict] | None = None) -> list[list[float]]:
     """Real (non-frame) table bboxes on this page, queried fresh via
     pdfplumber -- not read from any shard, on purpose: extract_images.py and
@@ -208,20 +189,7 @@ def real_table_bboxes(pdf_path: Path, page_number: int, frame_tables: list[dict]
     frame_tables = frame_tables or []
     with pdfplumber.open(pdf_path) as pl_doc:
         tables = pl_doc.pages[page_number - 1].find_tables()
-        return [list(t.bbox) for t in tables if not _is_frame_table_bbox(t.bbox, frame_tables)]
-
-
-def _is_frame_drawing_bbox(bbox, frame_drawings: list[dict]) -> bool:
-    """True if `bbox` (a single page.get_drawings() item's own bbox) matches
-    one of triage.json["furniture"]["frame_drawings"] within
-    FRAME_TABLE_BBOX_TOLERANCE -- the repetition-based page-frame
-    identification `triage.py`'s `_find_frame_drawings` computes
-    document-wide (Task A5b). Same shape as `_is_frame_table_bbox` above,
-    over a different furniture list."""
-    return any(
-        all(abs(a - b) <= FRAME_TABLE_BBOX_TOLERANCE for a, b in zip(bbox, fd["bbox"]))
-        for fd in frame_drawings
-    )
+        return [list(t.bbox) for t in tables if not furniture_lib.matches_any_frame(t.bbox, frame_tables)]
 
 
 def _is_stroke_only(drawing: dict) -> bool:
@@ -286,21 +254,7 @@ def _furniture_band_overlap_fraction(bbox, page_height: float) -> float:
     return (width * (top_overlap + bottom_overlap)) / area
 
 
-def _overlap_ratio(a, b) -> float:
-    """Fraction of bbox a's area covered by bbox b (same shape as
-    extract_text.py's bbox_overlap_ratio, duplicated here for the same
-    "these scripts/modules don't share code today" reason as the other
-    small helpers above -- this one is used with two different thresholds
-    by two different callers in this module, so it's kept local)."""
-    ax0, ay0, ax1, ay1 = a
-    bx0, by0, bx1, by1 = b
-    ix0, iy0 = max(ax0, bx0), max(ay0, by0)
-    ix1, iy1 = min(ax1, bx1), min(ay1, by1)
-    if ix1 <= ix0 or iy1 <= iy0:
-        return 0.0
-    inter = (ix1 - ix0) * (iy1 - iy0)
-    area_a = max(1e-6, (ax1 - ax0) * (ay1 - ay0))
-    return inter / area_a
+_overlap_ratio = furniture_lib.overlap_ratio
 
 
 def _overlaps_any_table(bbox, table_bboxes: list[list[float]]) -> bool:
@@ -351,7 +305,7 @@ def detect_figure_regions_with_exclusions(
         rect = d["rect"]
         bbox = [rect.x0, rect.y0, rect.x1, rect.y1]
         if (
-            _is_frame_drawing_bbox(bbox, frame_drawings)
+            furniture_lib.matches_any_frame(bbox, frame_drawings)
             and _is_stroke_only(d)
             and _touches_page_edge(bbox, page_width, page_height)
         ):

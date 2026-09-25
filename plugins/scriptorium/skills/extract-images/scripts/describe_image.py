@@ -78,6 +78,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 import elements as elements_lib  # noqa: E402
+import furniture as furniture_lib  # noqa: E402
 import paths  # noqa: E402
 
 # Sibling import -- same convention assemble.py's `import reqif_builder`
@@ -86,8 +87,7 @@ import paths  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mermaid_image  # noqa: E402
 
-# Same set as grade-output/scripts/gates.py's NO_VISIBLE_TEXT_FORMATS.
-NO_VISIBLE_TEXT_FORMATS = {"pdf", "image"}
+NO_VISIBLE_TEXT_FORMATS = furniture_lib.NO_VISIBLE_TEXT_FORMATS
 
 
 def main() -> None:

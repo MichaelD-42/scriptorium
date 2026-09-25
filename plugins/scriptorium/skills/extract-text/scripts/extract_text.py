@@ -12,43 +12,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 import elements as elements_lib  # noqa: E402
 import figures as figures_lib  # noqa: E402
+import furniture as furniture_lib  # noqa: E402
 import paths  # noqa: E402
 import toc as toc_lib  # noqa: E402
 
 import fitz  # PyMuPDF
 import pdfplumber
 
-# Furniture removal (Task A2) -- reads triage.json["furniture"], written by
-# pdf-triage's detect_furniture(). FURNITURE_EDGE_BAND matches triage.py's
-# constant of the same name; FRAME_TABLE_BBOX_TOLERANCE is a looser,
-# independent "couple points" tolerance for matching a pdfplumber-found
-# table against a frame_tables bbox that may be an average across pages.
-FURNITURE_EDGE_BAND = 0.12
-FRAME_TABLE_BBOX_TOLERANCE = 3.0  # pt
-
-EMPTY_FURNITURE = {"line_patterns": [], "frame_tables": [], "frame_drawings": [], "image_xrefs": []}
-
-
-def load_furniture(doc: str) -> dict:
-    """triage.json["furniture"], or an empty/no-op default if triage hasn't
-    run for this document (or predates furniture detection) -- extract_text.py
-    must still work standalone, per its own docstring."""
-    triage_path = paths.triage_json(doc)
-    if not triage_path.exists():
-        return dict(EMPTY_FURNITURE)
-    triage = json.loads(triage_path.read_text())
-    return triage.get("furniture", dict(EMPTY_FURNITURE))
-
-
-def load_page_roles(doc: str) -> dict[int, str]:
-    """{page_number: role} for every page triage.py marked with a non-default
-    role (currently only "toc") -- empty dict if triage hasn't run for this
-    document (extract_text.py must still work standalone)."""
-    triage_path = paths.triage_json(doc)
-    if not triage_path.exists():
-        return {}
-    triage = json.loads(triage_path.read_text())
-    return {p["page_number"]: p["role"] for p in triage.get("pages", []) if p.get("role")}
+# Furniture removal (Task A2) reads triage.json["furniture"], written by
+# pdf-triage's detect_furniture(). The band, the frame matching tolerance and
+# the loaders are in lib/furniture.py.
 
 
 def load_toc_entries(doc: str) -> list[dict]:
@@ -56,8 +29,8 @@ def load_toc_entries(doc: str) -> list[dict]:
     output) -- empty list if `toc.json` doesn't exist (triage hasn't run) or
     this document has none (no printed TOC, no outline). Drives Task A4's
     TOC-driven heading classification; extract_text.py must still work
-    standalone without it, same convention as `load_furniture`/
-    `load_page_roles` above."""
+    standalone without it, same convention as `furniture_lib.load_furniture`/
+    `furniture_lib.load_page_roles`."""
     toc_path = paths.toc_json(doc)
     if not toc_path.exists():
         return []
@@ -77,27 +50,6 @@ def build_toc_heading_lookup(toc_entries: list[dict]) -> dict[str, int]:
     return lookup
 
 
-def is_frame_table(bbox, frame_tables: list[dict]) -> bool:
-    """True if `bbox` (a pdfplumber table bbox) matches one of
-    triage.json["furniture"]["frame_tables"] within FRAME_TABLE_BBOX_TOLERANCE
-    -- these are page frames, not real tables, and must never become a
-    `table` element."""
-    return any(
-        all(abs(a - b) <= FRAME_TABLE_BBOX_TOLERANCE for a, b in zip(bbox, ft["bbox"]))
-        for ft in frame_tables
-    )
-
-
-def in_furniture_band(bbox, page_height: float) -> bool:
-    """True if `bbox` (a fitz-style [x0, y0, x1, y1]) falls inside the top or
-    bottom FURNITURE_EDGE_BAND of the page -- same bands pdf-triage's
-    _find_repeated_lines() used to find the patterns in the first place."""
-    if page_height <= 0:
-        return False
-    top_frac, bottom_frac = bbox[1] / page_height, bbox[3] / page_height
-    return bottom_frac <= FURNITURE_EDGE_BAND or top_frac >= 1 - FURNITURE_EDGE_BAND
-
-
 def furniture_filtered_lines(block: dict, furniture_masked: set[str], page_height: float) -> list[dict]:
     """The subset of `block["lines"]` that survive furniture filtering.
 
@@ -110,7 +62,7 @@ def furniture_filtered_lines(block: dict, furniture_masked: set[str], page_heigh
     block is only dropped if every one of its lines matches (the caller
     sees an empty list back). A block outside the edge band, or one with no
     matching lines, is returned unchanged."""
-    if not furniture_masked or not in_furniture_band(block["bbox"], page_height):
+    if not furniture_masked or not furniture_lib.in_furniture_band(block["bbox"], page_height):
         return block["lines"]
     return [line for line in block["lines"] if line["masked"] not in furniture_masked]
 
@@ -231,19 +183,6 @@ def build_block_element(
     return {"type": "paragraph", "text": text, "bbox": bbox}
 
 
-def bbox_overlap_ratio(a, b) -> float:
-    """Fraction of bbox a's area covered by bbox b."""
-    ax0, ay0, ax1, ay1 = a
-    bx0, by0, bx1, by1 = b
-    ix0, iy0 = max(ax0, bx0), max(ay0, by0)
-    ix1, iy1 = min(ax1, bx1), min(ay1, by1)
-    if ix1 <= ix0 or iy1 <= iy0:
-        return 0.0
-    inter = (ix1 - ix0) * (iy1 - iy0)
-    area_a = max(1e-6, (ax1 - ax0) * (ay1 - ay0))
-    return inter / area_a
-
-
 # Task A4: heading-level classification is TOC-driven when this document
 # has TOC entries at all, with a rank-by-distinct-bold-size fallback when it
 # doesn't. The old fixed-ratio thresholds (1.9/1.45/1.15) are gone --
@@ -315,7 +254,7 @@ _ENUMERATOR_RE = re.compile(
 )
 
 # Marker x-positions within this many points count as the same indent level
-# (Task A4b) -- same tolerance convention as FRAME_TABLE_BBOX_TOLERANCE/A5's
+# (Task A4b) -- same tolerance convention as FRAME_MATCH_TOLERANCE/A5's
 # other ~3pt geometry tolerances elsewhere in this pipeline.
 LIST_MARKER_X_TOLERANCE = 3.0  # pt
 # How close two lines' y0 must be to count as "the same visual line" for the
@@ -848,7 +787,7 @@ def extract_page_text_blocks(page, body_size: float | None) -> tuple[list[dict],
                 line_max_size = max(line_max_size, span["size"])
             lines.append({
                 "text": stripped,
-                "masked": re.sub(r"\d+", "#", stripped),
+                "masked": furniture_lib.mask_digits(stripped),
                 "bbox": line["bbox"],
                 "max_size": line_max_size,
                 "bold": bool(line_spans) and all(is_bold_span(s) for s in line_spans),
@@ -864,7 +803,7 @@ def resolve_document_body_size(fitz_doc) -> float:
     computation as `pdf-triage`'s `document_body_size()`, duplicated here
     (rather than imported cross-skill) so this script stays runnable
     standalone without triage having run, same convention as
-    `load_furniture`/`load_page_roles`/`load_toc_entries` above. Only used
+    `load_furniture`/`load_page_roles`/`load_toc_entries`. Only used
     to size the fallback (no-TOC) heading ranking document-wide when
     `--body-size` wasn't passed in; per-page extraction keeps its own
     existing sparser per-page fallback in `extract_page_text_blocks`,
@@ -895,12 +834,12 @@ def main() -> None:
         print(f"error: {pdf_path} not found", file=sys.stderr)
         sys.exit(1)
 
-    furniture = load_furniture(args.doc)
+    furniture = furniture_lib.load_furniture(args.doc)
     frame_tables = furniture.get("frame_tables", [])
     frame_drawings = furniture.get("frame_drawings", [])
     furniture_masked = {p["masked"] for p in furniture.get("line_patterns", [])}
     furniture_xrefs = set(furniture.get("image_xrefs", []))
-    page_roles = load_page_roles(args.doc)
+    page_roles = furniture_lib.load_page_roles(args.doc)
     toc_lookup = build_toc_heading_lookup(load_toc_entries(args.doc))
 
     fitz_doc = fitz.open(pdf_path)
@@ -943,7 +882,7 @@ def main() -> None:
         # anything else with the table list -- must happen before the
         # overlap-drop below, or a frame "table" would swallow real text
         # blocks that merely sit underneath it.
-        tables = [t for t in tables if not is_frame_table(t["bbox"], frame_tables)]
+        tables = [t for t in tables if not furniture_lib.matches_any_frame(t["bbox"], frame_tables)]
         # Task A5: figure regions detected the same way extract_images.py
         # detects them (same shared helper, so the two scripts can never
         # disagree about where a page's figures are) -- their text-layer
@@ -972,7 +911,7 @@ def main() -> None:
         # special-case an empty entry.
         filtered_blocks: list[tuple[dict, list[dict]]] = []
         for block in text_blocks:
-            if any(bbox_overlap_ratio(block["bbox"], t["bbox"]) > 0.5 for t in tables):
+            if any(furniture_lib.overlap_ratio(block["bbox"], t["bbox"]) > 0.5 for t in tables):
                 continue
             kept_lines = furniture_filtered_lines(block, furniture_masked, page_height)
             kept_lines = figure_region_filtered_lines(kept_lines, figure_regions)

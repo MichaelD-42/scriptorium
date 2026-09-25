@@ -15,6 +15,7 @@ from xml.etree import ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 import elements as elements_lib  # noqa: E402
+import furniture as furniture_lib  # noqa: E402
 import paths  # noqa: E402
 import toc as toc_lib  # noqa: E402
 
@@ -33,27 +34,19 @@ MIN_OUTPUT_BYTES = 20
 LARGE_REGION_EXCLUDED_AREA_FRACTION = 0.2
 LARGE_REGION_EXCLUDED_BENIGN_REASONS = {"frame_drawing", "tiny"}
 
-# Task A9: a `table` element whose bbox is within this many points of a
-# triage `frame_tables` entry is the page frame, not a real table. Same
-# matching tolerance extract_text.py uses when it drops frame tables.
-FRAME_TABLE_BBOX_TOLERANCE = 3.0
-
-# Task A9 fix round 1: the top/bottom fraction of the page that counts as
-# a furniture band -- the same value and rule as pdf-triage's and
-# extract_text.py's FURNITURE_EDGE_BAND / in_furniture_band. triage.json
-# records no band field, so this copy applies the same rule.
-FURNITURE_EDGE_BAND = 0.12
+# Task A9: a `table` element whose bbox is within
+# furniture_lib.FRAME_MATCH_TOLERANCE of a triage `frame_tables` entry is the
+# page frame, not a real table. The furniture band is
+# furniture_lib.in_furniture_band: triage.json records no band field, so
+# every stage applies the same fixed rule from lib/furniture.py.
 
 # Task A9: a TOC entry's heading may land one page away from the printed
 # page number (a heading at the very top of a page, a page-number offset).
 TOC_PAGE_TOLERANCE = 1
 
-EMPTY_FURNITURE = {"line_patterns": [], "frame_tables": [], "frame_drawings": [], "image_xrefs": []}
-
-# Task A9 fix round 2: the input formats whose image `caption` is only the
-# printed caption the script extracts. Only these may use the
-# no_visible_text flag; for pptx/docx/xlsx/html the agent writes --caption.
-NO_VISIBLE_TEXT_FORMATS = {"pdf", "image"}
+# Task A9 fix round 2: only pdf and image documents may use the
+# no_visible_text flag (see lib/furniture.py).
+NO_VISIBLE_TEXT_FORMATS = furniture_lib.NO_VISIBLE_TEXT_FORMATS
 
 
 def check_page_count_match(doc_data: dict, true_page_count: int) -> dict:
@@ -151,19 +144,13 @@ def check_large_region_excluded(doc_data: dict, page_areas: dict[int, float]) ->
     return warnings
 
 
-def _mask_digits(text: str) -> str:
-    """The same digit mask pdf-triage uses for `line_patterns` (every run of
-    digits becomes one "#")."""
-    return re.sub(r"\d+", "#", text)
-
-
 def _furniture_hits(text: str, masked_patterns: set[str]) -> list[str]:
     """Every line of `text` (and the whole text) whose stripped,
     digit-masked form equals a furniture pattern."""
     hits = []
     for candidate in [text] + text.splitlines():
         stripped = candidate.strip()
-        if stripped and _mask_digits(stripped) in masked_patterns and stripped not in hits:
+        if stripped and furniture_lib.mask_digits(stripped) in masked_patterns and stripped not in hits:
             hits.append(stripped)
     return hits
 
@@ -186,20 +173,6 @@ def _is_digit_only_pattern(masked: str) -> bool:
     """A masked furniture pattern with no letters, e.g. "#" or "# / #" (a
     footer that is only the page number)."""
     return not re.search(r"[^\W\d_]", masked)
-
-
-def _in_furniture_band(bbox, page_height: float | None) -> bool:
-    """Same rule as extract_text.py's in_furniture_band: the bbox lies in
-    the top or bottom FURNITURE_EDGE_BAND of the page. False when the bbox
-    or the page height is unknown."""
-    if not page_height or not bbox or len(bbox) != 4:
-        return False
-    top_frac, bottom_frac = bbox[1] / page_height, bbox[3] / page_height
-    return bottom_frac <= FURNITURE_EDGE_BAND or top_frac >= 1 - FURNITURE_EDGE_BAND
-
-
-def _bbox_matches(a: list[float], b: list[float], tolerance: float) -> bool:
-    return len(a) == 4 and len(b) == 4 and all(abs(x - y) <= tolerance for x, y in zip(a, b))
 
 
 def check_furniture_absent(doc_data: dict, furniture: dict, output_dir: Path, page_heights: dict[int, float] | None = None) -> dict:
@@ -243,7 +216,7 @@ def check_furniture_absent(doc_data: dict, furniture: dict, output_dir: Path, pa
             for el in page.get("elements", []):
                 el_type = el.get("type")
                 patterns = masked_patterns
-                if digit_only_patterns and _in_furniture_band(el.get("bbox"), page_heights.get(page_number)):
+                if digit_only_patterns and furniture_lib.in_furniture_band(el.get("bbox"), page_heights.get(page_number)):
                     patterns = all_patterns
                 if el_type in ("heading", "paragraph", "list_item"):
                     for hit in _furniture_hits(el.get("text") or "", patterns):
@@ -253,7 +226,7 @@ def check_furniture_absent(doc_data: dict, furniture: dict, output_dir: Path, pa
                         for cell in row:
                             for hit in _furniture_hits(str(cell or ""), patterns):
                                 add(page_number, "table cell", hit)
-                    if any(_bbox_matches(list(el.get("bbox") or []), fb, FRAME_TABLE_BBOX_TOLERANCE) for fb in frame_bboxes):
+                    if any(furniture_lib.bbox_matches(el.get("bbox"), fb) for fb in frame_bboxes):
                         add(page_number, "frame table", f"table bbox {el.get('bbox')}")
                 elif el_type == "image":
                     for field in ("figure_text", "caption"):
@@ -265,7 +238,7 @@ def check_furniture_absent(doc_data: dict, furniture: dict, output_dir: Path, pa
             rel = out_file.relative_to(output_dir).as_posix()
             for line_number, line in enumerate(out_file.read_text(encoding="utf-8").splitlines(), start=1):
                 for candidate in _output_line_candidates(line):
-                    if _mask_digits(candidate) in masked_patterns:
+                    if furniture_lib.mask_digits(candidate) in masked_patterns:
                         add(None, f"{rel} line {line_number}", candidate)
                         break
 
@@ -496,7 +469,7 @@ def main() -> None:
         # formats never write toc.json) means no furniture / no TOC: pass.
         check_furniture_absent(
             doc_data,
-            _load_json(paths.triage_json(args.doc)).get("furniture") or EMPTY_FURNITURE,
+            _load_json(paths.triage_json(args.doc)).get("furniture") or furniture_lib.empty_furniture(),
             paths.output_dir(args.doc),
             _pdf_page_heights(input_path) if input_format == "pdf" else {},
         ),

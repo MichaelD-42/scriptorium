@@ -51,7 +51,7 @@ BODY_KINDS_BY_PRIORITY = ("vision", "ocr", "text")  # highest tier first — win
 # element -- these are the characters that count as "ends the sentence".
 JOIN_TERMINAL_PUNCTUATION = ".!?:;"
 # Same ~3pt tolerance convention as extract_text.py's other geometry
-# tolerances (FRAME_TABLE_BBOX_TOLERANCE, LIST_MARKER_X_TOLERANCE, etc).
+# tolerances (FRAME_MATCH_TOLERANCE, LIST_MARKER_X_TOLERANCE, etc).
 JOIN_X_TOLERANCE = 3.0  # pt
 
 

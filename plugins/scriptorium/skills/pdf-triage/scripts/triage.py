@@ -4,12 +4,12 @@ document into a loop size (tight|loose). See SKILL.md for the schema."""
 
 import argparse
 import json
-import re
 import statistics
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+import furniture as furniture_lib  # noqa: E402
 import paths  # noqa: E402
 import toc as toc_lib  # noqa: E402
 
@@ -18,20 +18,14 @@ import pdfplumber
 
 TEXT_CHAR_THRESHOLD = 20  # fewer non-whitespace chars than this => treat page as scanned
 
-# Furniture thresholds (see SKILL.md).
-FURNITURE_EDGE_BAND = 0.12  # top/bottom 12% of page height counts as "near an edge"
+# Furniture thresholds (see SKILL.md). The edge band and the bbox
+# tolerances are in lib/furniture.py: FURNITURE_EDGE_BAND (top/bottom 12% of
+# the page height) and FRAME_GROUP_TOLERANCE (2pt, the grouping tolerance
+# used here to decide whether two pages' bboxes are the same frame; see that
+# module for why the later matching tolerance is 3pt).
 LINE_PATTERN_MIN_PAGE_FRACTION = 0.60
 FRAME_TABLE_MIN_AREA_FRACTION = 0.60
 FRAME_TABLE_MIN_PAGE_FRACTION = 0.50
-FRAME_TABLE_BBOX_TOLERANCE = 2.0  # pt -- see lib/figures.py's own copy of this
-# constant (3.0pt there) for why the two values differ: this one is the
-# GROUPING tolerance used here to decide whether two pages' bboxes are "the
-# same" frame occurrence in the first place; lib/figures.py's looser copy is
-# a separate MATCHING tolerance, comparing a freshly-queried bbox against an
-# already-averaged frame_tables/frame_drawings entry (which, being an
-# average across every matched page, drifts a little further from any single
-# page's raw bbox than two raw per-page bboxes drift from each other) --
-# not aligned on purpose, not an oversight.
 REPEATED_IMAGE_MIN_PAGE_FRACTION = 0.50
 
 # Task A5b fix round 1 (controller finding 1): a document with fewer than
@@ -128,14 +122,11 @@ def _find_repeated_lines(document) -> tuple[list[dict], dict]:
                 y_top_frac = y0 / height
                 y_bottom_frac = y1 / height
 
-                if y_bottom_frac <= FURNITURE_EDGE_BAND:
-                    edge = "top"
-                elif y_top_frac >= 1 - FURNITURE_EDGE_BAND:
-                    edge = "bottom"
-                else:
+                edge = furniture_lib.furniture_edge(y0, y1, height)
+                if edge is None:
                     continue
 
-                masked = re.sub(r"\d+", "#", text)
+                masked = furniture_lib.mask_digits(text)
                 key = (masked, edge)
                 entry = occurrences.setdefault(
                     key, {"pages": {}, "y_mins": [], "y_maxs": []}
@@ -193,11 +184,7 @@ def _find_frame_tables(pdf_path: Path, page_count: int) -> list[dict]:
                     continue
 
                 group = next(
-                    (
-                        g
-                        for g in groups
-                        if all(abs(a - b) <= FRAME_TABLE_BBOX_TOLERANCE for a, b in zip(g["bboxes"][0], bbox))
-                    ),
+                    (g for g in groups if furniture_lib.bbox_matches(g["bboxes"][0], bbox, furniture_lib.FRAME_GROUP_TOLERANCE)),
                     None,
                 )
                 if group is None:
@@ -223,7 +210,7 @@ def _find_frame_tables(pdf_path: Path, page_count: int) -> list[dict]:
 def _find_frame_drawings(document) -> list[dict]:
     """Single vector drawings (`page.get_drawings()`) whose bbox covers more
     than FRAME_TABLE_MIN_AREA_FRACTION of the page area, repeating at
-    (approximately, within FRAME_TABLE_BBOX_TOLERANCE) the same bbox on at
+    (approximately, within FRAME_GROUP_TOLERANCE) the same bbox on at
     least FRAME_TABLE_MIN_PAGE_FRACTION of pages AND at least
     FRAME_MIN_PAGE_COUNT distinct pages (both gates must hold). Mirrors
     `_find_frame_tables`'s grouping shape exactly, over a different item
@@ -245,11 +232,7 @@ def _find_frame_drawings(document) -> list[dict]:
             bbox = [rect.x0, rect.y0, rect.x1, rect.y1]
 
             group = next(
-                (
-                    g
-                    for g in groups
-                    if all(abs(a - b) <= FRAME_TABLE_BBOX_TOLERANCE for a, b in zip(g["bboxes"][0], bbox))
-                ),
+                (g for g in groups if furniture_lib.bbox_matches(g["bboxes"][0], bbox, furniture_lib.FRAME_GROUP_TOLERANCE)),
                 None,
             )
             if group is None:

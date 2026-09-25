@@ -4,13 +4,13 @@
 bitmap element. See SKILL.md."""
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 import elements as elements_lib  # noqa: E402
 import figures as figures_lib  # noqa: E402
+import furniture as furniture_lib  # noqa: E402
 import paths  # noqa: E402
 
 import fitz  # PyMuPDF
@@ -19,44 +19,8 @@ from PIL import Image
 
 VECTOR_REGION_DPI = 200  # Task A5: region crops render sharper than the old whole-page 150dpi default
 
-# Furniture removal (Task A2) -- reads triage.json["furniture"]. See
-# extract-text/scripts/extract_text.py for the matching constant/helper
-# (independent copy -- these two scripts don't share code today).
-FRAME_TABLE_BBOX_TOLERANCE = 3.0  # pt
-
-EMPTY_FURNITURE = {"line_patterns": [], "frame_tables": [], "frame_drawings": [], "image_xrefs": []}
-
-
-def load_furniture(doc: str) -> dict:
-    """triage.json["furniture"], or an empty/no-op default if triage hasn't
-    run for this document, predates furniture detection, or (like
-    image-triage's output) never has the field at all."""
-    triage_path = paths.triage_json(doc)
-    if not triage_path.exists():
-        return dict(EMPTY_FURNITURE)
-    triage = json.loads(triage_path.read_text())
-    return triage.get("furniture", dict(EMPTY_FURNITURE))
-
-
-def is_frame_table(bbox, frame_tables: list[dict]) -> bool:
-    """True if `bbox` (a pdfplumber table bbox) matches one of
-    triage.json["furniture"]["frame_tables"] within FRAME_TABLE_BBOX_TOLERANCE."""
-    return any(
-        all(abs(a - b) <= FRAME_TABLE_BBOX_TOLERANCE for a, b in zip(bbox, ft["bbox"]))
-        for ft in frame_tables
-    )
-
-
-def load_page_roles(doc: str) -> dict[int, str]:
-    """{page_number: role} for every page triage.py marked with a non-default
-    role (currently only "toc") -- empty dict if triage hasn't run for this
-    document (independent copy of extract_text.py's helper, matching the
-    existing convention that these two scripts don't share code)."""
-    triage_path = paths.triage_json(doc)
-    if not triage_path.exists():
-        return {}
-    triage = json.loads(triage_path.read_text())
-    return {p["page_number"]: p["role"] for p in triage.get("pages", []) if p.get("role")}
+# Furniture removal (Task A2) reads triage.json["furniture"]. The loaders
+# and the frame matching rule are in lib/furniture.py.
 
 
 def extract_image_document(input_path: Path, assets_dir: Path) -> list[dict]:
@@ -129,7 +93,7 @@ def page_has_table(pdf_path: Path, page_number: int, frame_tables: list[dict] | 
     frame_tables = frame_tables or []
     with pdfplumber.open(pdf_path) as pl_doc:
         tables = pl_doc.pages[page_number - 1].find_tables()
-        return any(not is_frame_table(t.bbox, frame_tables) for t in tables)
+        return any(not furniture_lib.matches_any_frame(t.bbox, frame_tables) for t in tables)
 
 
 def extract_vector_regions(
@@ -199,11 +163,11 @@ def main() -> None:
         print(f"page 1: {len(image_elements)} image element(s)")
         return
 
-    furniture = load_furniture(args.doc)
+    furniture = furniture_lib.load_furniture(args.doc)
     frame_tables = furniture.get("frame_tables", [])
     frame_drawings = furniture.get("frame_drawings", [])
     furniture_xrefs = set(furniture.get("image_xrefs", []))
-    page_roles = load_page_roles(args.doc)
+    page_roles = furniture_lib.load_page_roles(args.doc)
 
     pdf_path = input_path
     fitz_doc = fitz.open(pdf_path)
