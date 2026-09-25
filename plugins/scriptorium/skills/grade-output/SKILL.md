@@ -68,7 +68,7 @@ pass/fail decision.
 | `output_file_exists` | the assembled output is missing or near-empty (format-aware: single file for `md`/`html`, `index.md` + section files for `okf`) |
 | `furniture_absent` | a heading/paragraph/list_item, table cell, image `figure_text` or `caption`, or a line of any `.md`/`.html` file under `output/<doc>/`, has digit-masked text equal to a `triage.json` furniture `line_patterns` entry; or a `table` element's bbox matches a `frame_tables` entry (3pt). A digit-only pattern (no letters, e.g. `#` for a bare page-number footer) matches an element only when its bbox is in the top/bottom 12% furniture band of its PDF page, and is not checked in the output files. Passes trivially with no furniture. Furniture images are not checked: no element records its source xref |
 | `toc_headings_match` | a `toc.json` entry has no `heading` with the same normalized text (`lib/toc.py`'s `normalize_toc_text`) within ±1 page, or the heading's level differs from the entry's `level`; or a heading matches no entry. Passes trivially when `toc.json` has no entries |
-| `figures_complete` | an `image` element has no non-empty `caption`, no non-empty `figure_text` and no `no_visible_text: true` flag (`describe_image.py --no-visible-text`), or no non-empty `description` |
+| `figures_complete` | an `image` element has no non-empty `caption`, no non-empty `figure_text` and no `no_visible_text: true` flag (`describe_image.py --no-visible-text`; counts for pdf and image documents only), or no non-empty `description` |
 
 The three Task A9 checks also carry a `pages` list (the pages to act on)
 and structured details: `offenders` (`furniture_absent`); `missing`,

@@ -64,6 +64,11 @@ checked the render. It exists so that grade-output's figures_complete gate
 can accept such an image without an agent-written caption (`caption` is
 only the printed caption). Refused when the element already has a caption
 or figure_text, or together with `--caption`/`--figure-text`.
+
+Fix round 2: `--no-visible-text` is also refused unless the document's
+input format (paths.detect_input_format) is pdf or image -- the formats
+whose caption is verbatim-only. For pptx/docx/xlsx/html the agent writes
+`--caption` instead.
 """
 
 import argparse
@@ -80,6 +85,9 @@ import paths  # noqa: E402
 # mermaid_image.py's exact keyword validation instead of duplicating it.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mermaid_image  # noqa: E402
+
+# Same set as grade-output/scripts/gates.py's NO_VISIBLE_TEXT_FORMATS.
+NO_VISIBLE_TEXT_FORMATS = {"pdf", "image"}
 
 
 def main() -> None:
@@ -115,6 +123,16 @@ def main() -> None:
     if args.no_visible_text and (args.caption is not None or args.figure_text is not None):
         print("error: --no-visible-text cannot be combined with --caption or --figure-text", file=sys.stderr)
         sys.exit(1)
+
+    if args.no_visible_text:
+        input_format = paths.detect_input_format(args.doc)
+        if input_format not in NO_VISIBLE_TEXT_FORMATS:
+            print(
+                f"error: --no-visible-text is only for pdf and image documents (this one is {input_format!r}); "
+                "for pptx/docx/xlsx/html write the caption with --caption",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     if args.caption is not None:
         print(

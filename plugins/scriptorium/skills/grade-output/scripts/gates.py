@@ -50,6 +50,11 @@ TOC_PAGE_TOLERANCE = 1
 
 EMPTY_FURNITURE = {"line_patterns": [], "frame_tables": [], "frame_drawings": [], "image_xrefs": []}
 
+# Task A9 fix round 2: the input formats whose image `caption` is only the
+# printed caption the script extracts. Only these may use the
+# no_visible_text flag; for pptx/docx/xlsx/html the agent writes --caption.
+NO_VISIBLE_TEXT_FORMATS = {"pdf", "image"}
+
 
 def check_page_count_match(doc_data: dict, true_page_count: int) -> dict:
     got = len(doc_data["pages"])
@@ -342,7 +347,7 @@ def check_toc_headings_match(doc_data: dict, toc_entries: list[dict]) -> dict:
     }
 
 
-def check_figures_complete(doc_data: dict) -> dict:
+def check_figures_complete(doc_data: dict, input_format: str | None = None) -> dict:
     """Task A9: every `image` element has a non-empty `caption` or a
     non-empty `figure_text`, AND a non-empty `description`.
 
@@ -351,6 +356,10 @@ def check_figures_complete(doc_data: dict) -> dict:
     (describe_image.py --no-visible-text, set by the agent after it checked
     the render). The agent never writes a caption for such an image --
     `caption` is only the printed caption the script extracts.
+
+    Fix round 2: the flag counts only when `input_format` is in
+    NO_VISIBLE_TEXT_FORMATS (pdf, image). For pptx/docx/xlsx/html, or an
+    unknown format, the agent writes `--caption`, so the flag is ignored.
 
     Ordering: the extractor agent writes `description` (and, when the
     scripts found no caption and no figure_text, one of them) with
@@ -365,7 +374,8 @@ def check_figures_complete(doc_data: dict) -> dict:
                 continue
             missing = []
             has_text = (el.get("caption") or "").strip() or (el.get("figure_text") or "").strip()
-            if not has_text and el.get("no_visible_text") is not True:
+            flag_counts = input_format in NO_VISIBLE_TEXT_FORMATS and el.get("no_visible_text") is True
+            if not has_text and not flag_counts:
                 missing.append("caption or figure_text")
             if not (el.get("description") or "").strip():
                 missing.append("description")
@@ -477,7 +487,7 @@ def main() -> None:
             _pdf_page_heights(input_path) if input_format == "pdf" else {},
         ),
         check_toc_headings_match(doc_data, _load_json(paths.toc_json(args.doc)).get("entries") or []),
-        check_figures_complete(doc_data),
+        check_figures_complete(doc_data, input_format),
     ]
 
     # Task A5b: large_region_excluded is a WARNING, not one of the checks

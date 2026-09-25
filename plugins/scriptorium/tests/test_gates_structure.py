@@ -8,6 +8,7 @@ bottom run the real pipeline on furniture_sample.pdf and on sample.pdf.
 
 import json
 import shutil
+from pathlib import Path
 
 import fitz  # PyMuPDF
 import pytest
@@ -314,13 +315,27 @@ class TestFiguresComplete:
 
     def test_passes_with_no_visible_text_flag_and_description(self):
         pages = {3: _page(3, [_image(no_visible_text=True, description="A plain square icon.")])}
-        assert gates.check_figures_complete(_doc_data(pages))["passed"] is True
+        assert gates.check_figures_complete(_doc_data(pages), "pdf")["passed"] is True
+        assert gates.check_figures_complete(_doc_data(pages), "image")["passed"] is True
 
     def test_fails_with_no_visible_text_flag_and_no_description(self):
         pages = {3: _page(3, [_image(no_visible_text=True)])}
-        result = gates.check_figures_complete(_doc_data(pages))
+        result = gates.check_figures_complete(_doc_data(pages), "pdf")
         assert result["passed"] is False
         assert result["incomplete"] == [{"page": 3, "asset": "assets/page3_vector1.png", "missing": ["description"]}]
+
+    # Fix round 2: the flag counts only for pdf and image documents, where
+    # caption is verbatim-only. Other formats' agents write --caption.
+
+    def test_flag_does_not_count_for_a_docx_image(self):
+        pages = {1: _page(1, [_image(no_visible_text=True, description="A plain square icon.")])}
+        result = gates.check_figures_complete(_doc_data(pages), "docx")
+        assert result["passed"] is False
+        assert result["incomplete"][0]["missing"] == ["caption or figure_text"]
+
+    def test_flag_does_not_count_when_the_format_is_unknown(self):
+        pages = {1: _page(1, [_image(no_visible_text=True, description="A plain square icon.")])}
+        assert gates.check_figures_complete(_doc_data(pages))["passed"] is False
 
     def test_fails_with_no_caption_no_figure_text_and_no_flag(self):
         pages = {3: _page(3, [_image(description="A plain square icon.", no_visible_text=False)])}
@@ -347,7 +362,10 @@ class TestFiguresComplete:
 
 
 class TestDescribeImageNoVisibleText:
-    def _seed(self, **fields) -> None:
+    def _seed(self, ext: str = "pdf", **fields) -> None:
+        # describe_image.py reads the source format from input/<doc>.<ext>
+        # (paths.detect_input_format); the file content does not matter.
+        (Path("input") / f"doc.{ext}").write_bytes(b"synthetic")
         shard_path = paths.shard_path("doc", 1, "image")
         elements_lib.write_shard(shard_path, 1, [{"type": "image", "kind": "bitmap", "asset": "assets/a.png", "bbox": [0, 0, 1, 1], **fields}])
 
@@ -383,6 +401,20 @@ class TestDescribeImageNoVisibleText:
         result = self._run(tmp_project, "--no-visible-text")
         assert result.returncode == 1
         assert "no_visible_text" not in self._element()
+
+    def test_sets_the_flag_for_an_image_document(self, tmp_project):
+        self._seed(ext="png")
+        assert self._run(tmp_project, "--no-visible-text").returncode == 0
+        assert self._element()["no_visible_text"] is True
+
+    @pytest.mark.parametrize("ext", ["pptx", "docx", "xlsx", "html"])
+    def test_refuses_for_a_format_whose_agent_writes_captions(self, tmp_project, ext):
+        self._seed(ext=ext)
+        result = self._run(tmp_project, "--no-visible-text")
+        assert result.returncode == 1
+        assert "--caption" in result.stderr
+        el = self._element()
+        assert "no_visible_text" not in el and "description" not in el
 
     def test_refuses_together_with_caption_or_figure_text_arguments(self, tmp_project):
         self._seed()
