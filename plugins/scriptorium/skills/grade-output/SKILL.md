@@ -66,6 +66,22 @@ pass/fail decision.
 | `image_refs_resolve` | an `image` element's `asset` path doesn't exist on disk |
 | `ocr_confidence_floor` | a tier-`ocr` page's `ocr_confidence` < 0.5 |
 | `output_file_exists` | the assembled output is missing or near-empty (format-aware: single file for `md`/`html`, `index.md` + section files for `okf`) |
+| `furniture_absent` | a heading/paragraph/list_item, table cell, image `figure_text` or `caption`, or a line of any `.md`/`.html` file under `output/<doc>/`, has digit-masked text equal to a `triage.json` furniture `line_patterns` entry; or a `table` element's bbox matches a `frame_tables` entry (3pt). Passes trivially with no furniture. Furniture images are not checked: no element records its source xref |
+| `toc_headings_match` | a `toc.json` entry has no `heading` with the same normalized text (`lib/toc.py`'s `normalize_toc_text`) within ±1 page, or the heading's level differs from the entry's `level`; or a heading matches no entry. Passes trivially when `toc.json` has no entries |
+| `figures_complete` | an `image` element has no non-empty `caption` and no non-empty `figure_text`, or no non-empty `description` |
+
+The three Task A9 checks also carry a `pages` list (the pages to act on)
+and structured details: `offenders` (`furniture_absent`); `missing`,
+`page_mismatch`, `level_mismatch`, `extra` (`toc_headings_match`);
+`incomplete` (`figures_complete`). `commands/extract.md`'s Decide step
+reads them: `figures_complete` sets `recheck_images` on its pages;
+`furniture_absent`/`toc_headings_match` send the document to a human.
+
+`figures_complete` depends on order: the extractor agent writes
+`description` (and a `caption` or `figure_text` when the scripts found
+none) with `describe_image.py` in `commands/extract.md` step 2, and
+`gates.py` runs in step 3. Run straight after the extract scripts, with
+no describe step, the check fails on purpose.
 
 `gates-report.json` also carries a top-level `warnings` list (Task A5b),
 separate from `checks` — see below.

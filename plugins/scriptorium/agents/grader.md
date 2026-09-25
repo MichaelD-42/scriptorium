@@ -56,7 +56,12 @@ the assembled output's format/location.
    (including any `missing_image` from step 2 above). Specific issues
    ("page 5: dropped_text — the second paragraph is missing") are what
    makes the next retry effective; vague ones ("looks off") aren't
-   retained feedback, they're noise.
+   retained feedback, they're noise. Read the rubric's "Correct by
+   design" list first: removed page furniture, an empty `skipped: toc`
+   page, lists, and paragraphs joined across a page break are not
+   issues. For a figure with `figure_text`, check the labels and values
+   against the rendered page; tag `bad_caption` when they are wrong or
+   incomplete.
 4. Write one grade shard per page with `write_grade_shard.py` — **never**
    try to compute or write the whole document's merged grade report
    yourself; that's arithmetic over every batch's shards, done by a

@@ -34,7 +34,24 @@ Markdown/HTML body when applying the criteria below.
    the page have a corresponding `image` element with a non-empty,
    accurate caption? If that `image` element also has a `mermaid` block,
    does it faithfully represent the diagram's nodes, edges, and labels (not
-   just "some diagram exists")?
+   just "some diagram exists")? If it has `figure_text`, compare it with
+   the figure on the page: the labels and values must be verbatim and
+   complete. Wrong or missing `figure_text` is `bad_caption`.
+
+## Correct by design — not issues
+
+- **Page furniture removed** — a running header, footer, title block, logo
+  or page frame that is absent from the output is correct, not
+  `dropped_text`.
+- **TOC pages** — a `role: toc` page whose merged page has
+  `skipped: "toc"` and no elements is correct, not `dropped_text`. The
+  TOC's structure lives in the headings.
+- **Lists** — list items rendered as a Markdown/HTML list (with indent for
+  nested levels) are correct, not `wrong_reading_order`.
+- **Joined paragraphs** — a paragraph cut by a page break is joined into
+  one element on the first page (`pages: [n, n+1]`) and is absent from
+  page `n+1`. That is correct, not `dropped_text` on `n+1` and not
+  `duplicated_text`.
 
 ## Scoring
 

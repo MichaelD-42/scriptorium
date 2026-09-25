@@ -180,8 +180,25 @@ subagent output.
 - **`overall_passed: false`**:
   - `attempt += 1`. `attempt >= max_attempts` → `status: "needs-human"`,
     record the grade-report path, next document.
-  - Otherwise, for each page with issues in `rubric_verdict.per_page`,
-    escalate into `escalated_pages` (keyed by page number) — this is
+  - **Gate failures** (`grade-report.json["gates"]["checks"]`, each with
+    `passed: false`). The original five checks are document-level only:
+    they name no pages, and this step does not map them to pages. The
+    three Task A9 structure checks each carry a `pages` list:
+    - `furniture_absent` or `toc_headings_match` failed →
+      `status: "needs-human"` **immediately**, and record the check's
+      `detail` and `pages` in the queue entry. These checks stay
+      document-level: their input is deterministic script output
+      (furniture removal in `extract-text`, TOC-driven heading levels), so
+      a retry at the same tier gives the same result, and a tier bump
+      makes it worse — `ocr`/`vision` do no furniture removal and no
+      TOC-driven heading levels. This is the same logic as the
+      `docx`/`xlsx`/`html` content-defect rule below.
+    - `figures_complete` failed → for each page in its `pages`, keep the
+      body tier and set `recheck_images: true` (the same flag as
+      `missing_image`/`bad_caption` below), with the check's `detail` as
+      `reason`. This retries normally for every format.
+  - Unless the document is now `needs-human`, also, for each page with
+    issues in `rubric_verdict.per_page`, escalate into `escalated_pages` (keyed by page number) — this is
     **retained feedback**, not a blind re-run:
     - **`pdf`/`pptx`**: `dropped_text` / `hallucinated_text` /
       `wrong_reading_order` / `duplicated_text` / `wrong_heading_level` /
@@ -205,7 +222,8 @@ subagent output.
       attempt without ever being able to fix anything. This is the same
       logic as the "already at vision" rule above, just starting from
       attempt 0 instead of the top of the ladder.
-    - `missing_image` / `bad_caption` (any format) / `bad_mermaid`
+    - `missing_image` / `bad_caption` (any format; for `pdf`/`image` this
+      also covers a wrong or incomplete `figure_text`) / `bad_mermaid`
       (`pdf`/`pptx`/`image` only — `text_mode_grade.py` can't judge diagram
       fidelity, so `docx`/`xlsx`/`html` never emit it) → keep the page's body tier
       as-is, set `recheck_images: true` so the next `extractor` batch
