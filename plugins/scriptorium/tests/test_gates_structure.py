@@ -12,6 +12,7 @@ import shutil
 import fitz  # PyMuPDF
 import pytest
 
+import elements as elements_lib
 import paths
 from conftest import EXAMPLES_ROOT, describe_all_images, load_script, run_script
 
@@ -135,6 +136,45 @@ class TestFurnitureAbsent:
         result = gates.check_furniture_absent(_doc_data(_clean_pages()), FURNITURE, tmp_path)
         assert result["passed"] is False
         assert result["offenders"][0]["where"] == "01-introduction/01.00-introduction.md line 1"
+
+    # Fix round 1 (review finding 2): a digit-only pattern (a footer that is
+    # just the page number) matches an element only inside a furniture
+    # band, and never in the assembled output.
+
+    BARE_NUMBER_FURNITURE = {
+        "line_patterns": [{"masked": "#", "edge": "bottom", "y_min": 760.0, "y_max": 770.0, "page_count": 3}],
+        "frame_tables": [], "frame_drawings": [], "image_xrefs": [],
+    }
+    PAGE_HEIGHTS = {1: 792.0, 2: 792.0}
+
+    def test_bare_number_table_cell_in_the_body_passes(self, tmp_path):
+        pages = _clean_pages()
+        pages[2]["elements"][0]["rows"].append(["Quantity", "3"])  # table bbox is mid-page
+        pages[1]["elements"].append({"type": "paragraph", "text": "12", "bbox": [72.0, 300.0, 90.0, 312.0]})
+        _write_md(tmp_path, "| Quantity | 3 |\n\n12\n")
+        result = gates.check_furniture_absent(_doc_data(pages), self.BARE_NUMBER_FURNITURE, tmp_path, self.PAGE_HEIGHTS)
+        assert result["passed"] is True, result["detail"]
+
+    def test_bare_number_footer_left_inside_the_band_fails(self, tmp_path):
+        pages = _clean_pages()
+        pages[1]["elements"].append({"type": "paragraph", "text": "1", "bbox": [300.0, 760.0, 306.0, 770.0]})
+        result = gates.check_furniture_absent(_doc_data(pages), self.BARE_NUMBER_FURNITURE, tmp_path, self.PAGE_HEIGHTS)
+        assert result["passed"] is False
+        assert result["offenders"] == [{"page": 1, "where": "paragraph", "text": "1"}]
+
+    def test_bare_number_without_page_geometry_is_not_flagged(self, tmp_path):
+        # No page height (a non-PDF input) means the band rule cannot be
+        # applied, so a digit-only pattern never matches.
+        pages = _clean_pages()
+        pages[1]["elements"].append({"type": "paragraph", "text": "1", "bbox": [300.0, 760.0, 306.0, 770.0]})
+        result = gates.check_furniture_absent(_doc_data(pages), self.BARE_NUMBER_FURNITURE, tmp_path)
+        assert result["passed"] is True
+
+    def test_a_pattern_with_letters_still_matches_anywhere(self, tmp_path):
+        pages = _clean_pages()
+        pages[1]["elements"].append({"type": "paragraph", "text": "page 1 (3)", "bbox": [72.0, 300.0, 200.0, 312.0]})
+        result = gates.check_furniture_absent(_doc_data(pages), FURNITURE, tmp_path, self.PAGE_HEIGHTS)
+        assert result["passed"] is False
 
     def test_digit_masking_does_not_match_other_text(self, tmp_path):
         pages = _clean_pages()
@@ -269,6 +309,25 @@ class TestFiguresComplete:
         assert result["passed"] is False
         assert result["incomplete"] == [{"page": 3, "asset": "assets/page3_vector1.png", "missing": ["description"]}]
 
+    # Fix round 1 (review finding 1): an explicit, recorded flag replaces an
+    # agent-written caption for an image with no visible text.
+
+    def test_passes_with_no_visible_text_flag_and_description(self):
+        pages = {3: _page(3, [_image(no_visible_text=True, description="A plain square icon.")])}
+        assert gates.check_figures_complete(_doc_data(pages))["passed"] is True
+
+    def test_fails_with_no_visible_text_flag_and_no_description(self):
+        pages = {3: _page(3, [_image(no_visible_text=True)])}
+        result = gates.check_figures_complete(_doc_data(pages))
+        assert result["passed"] is False
+        assert result["incomplete"] == [{"page": 3, "asset": "assets/page3_vector1.png", "missing": ["description"]}]
+
+    def test_fails_with_no_caption_no_figure_text_and_no_flag(self):
+        pages = {3: _page(3, [_image(description="A plain square icon.", no_visible_text=False)])}
+        result = gates.check_figures_complete(_doc_data(pages))
+        assert result["passed"] is False
+        assert result["incomplete"][0]["missing"] == ["caption or figure_text"]
+
     def test_reports_both_missing_fields_and_every_incomplete_image(self):
         pages = {
             2: _page(2, [_image(asset="assets/a.png")]),
@@ -280,6 +339,56 @@ class TestFiguresComplete:
             {"page": 3, "asset": "assets/b.png", "missing": ["description"]},
         ]
         assert result["pages"] == [2, 3]
+
+
+# ---------------------------------------------------------------------------
+# describe_image.py --no-visible-text (fix round 1, finding 1)
+# ---------------------------------------------------------------------------
+
+
+class TestDescribeImageNoVisibleText:
+    def _seed(self, **fields) -> None:
+        shard_path = paths.shard_path("doc", 1, "image")
+        elements_lib.write_shard(shard_path, 1, [{"type": "image", "kind": "bitmap", "asset": "assets/a.png", "bbox": [0, 0, 1, 1], **fields}])
+
+    def _run(self, tmp_project, *extra):
+        return run_script(
+            "extract-images/scripts/describe_image.py",
+            "--doc", "doc", "--page", "1", "--asset", "assets/a.png", "--description", "A plain square icon.", *extra,
+            cwd=tmp_project,
+        )
+
+    def _element(self) -> dict:
+        return json.loads(paths.shard_path("doc", 1, "image").read_text())["elements"][0]
+
+    def test_sets_the_flag(self, tmp_project):
+        self._seed()
+        result = self._run(tmp_project, "--no-visible-text")
+        assert result.returncode == 0, result.stderr
+        el = self._element()
+        assert el["no_visible_text"] is True
+        assert el["description"] == "A plain square icon."
+        assert "caption" not in el
+
+    def test_refuses_when_a_caption_exists(self, tmp_project):
+        self._seed(caption="Figure 1: Flow")
+        result = self._run(tmp_project, "--no-visible-text")
+        assert result.returncode == 1
+        assert "no-visible-text" in result.stderr
+        el = self._element()
+        assert "no_visible_text" not in el and "description" not in el
+
+    def test_refuses_when_figure_text_exists(self, tmp_project):
+        self._seed(figure_text="Start")
+        result = self._run(tmp_project, "--no-visible-text")
+        assert result.returncode == 1
+        assert "no_visible_text" not in self._element()
+
+    def test_refuses_together_with_caption_or_figure_text_arguments(self, tmp_project):
+        self._seed()
+        assert self._run(tmp_project, "--no-visible-text", "--figure-text", "Start").returncode == 1
+        assert self._run(tmp_project, "--no-visible-text", "--caption", "Logo").returncode == 1
+        assert "no_visible_text" not in self._element()
 
 
 # ---------------------------------------------------------------------------
@@ -373,8 +482,19 @@ class TestFurnitureSampleEndToEnd:
         assert triage["furniture"]["line_patterns"]
         assert json.loads(paths.toc_json(furniture_doc).read_text())["entries"]
 
+        # The page-4 icon has no printed caption and no text: it carries the
+        # recorded no_visible_text flag, never an agent-written caption.
+        icon = json.loads(paths.shard_path(furniture_doc, 4, "image").read_text())["elements"]
+        icon = [el for el in icon if el.get("kind") == "bitmap"]
+        assert len(icon) == 1
+        assert icon[0]["no_visible_text"] is True
+        assert "caption" not in icon[0]
+
         for fmt in ("md", "md-tree"):
             _run_ok("assemble-output/scripts/assemble.py", "--doc", furniture_doc, "--format", fmt, cwd=tmp_project)
+        md = (paths.output_dir(furniture_doc) / f"{furniture_doc}.md").read_text(encoding="utf-8")
+        assert "no_visible_text" not in md
+        assert "Synthetic test caption" not in md
         report = json.loads(_run_ok("grade-output/scripts/gates.py", "--doc", furniture_doc, "--format", "md", cwd=tmp_project))
         checks = {c["name"]: c for c in report["checks"]}
         for name in ("furniture_absent", "toc_headings_match", "figures_complete"):

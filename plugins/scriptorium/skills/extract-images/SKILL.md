@@ -138,6 +138,12 @@ For an image document, `--pages` is always `1` — there's only ever page 1.
     refuses (exits 1) to overwrite an element that already has a non-empty
     `figure_text`, since that precondition is deterministic and
     code-checkable, unlike the other agent-judgment fields.
+  - `--no-visible-text` (Task A9 fix round 1) sets `"no_visible_text":
+    true`: the agent checked the render and the image has no printed
+    caption and no visible text. It is refused (exit 1) when the element
+    has a caption or figure_text, or together with `--caption`/
+    `--figure-text`. It is not rendered in the output; the description
+    already renders inside the interpretation markers.
 
   `mermaid_image.py` (below) still exists standalone too, for a
   stdin-based, `describe_image.py`-independent call.

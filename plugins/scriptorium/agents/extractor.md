@@ -99,13 +99,15 @@ same idea as xlsx's missing charts below.
 For a `pdf`/`image`-document image element, `caption` is already filled in
 for you — `extract-images` sets it deterministically (a nearby "Figure n:"/
 "Table n" text-layer line, verbatim, or absent if there's no such line
-nearby). You never write `caption` yourself for these when the script
-set one. One exception: `grade-output`'s `figures_complete` gate needs a
-non-empty `caption` or `figure_text` on every image. If an element has
-neither after extraction, transcribe the image's visible text with
-`--figure-text`; if the image has no visible text at all, pass a short,
-factual `--caption` (what it is, e.g. "Company logo", never invented
-detail). For a `pptx`/`docx`/`xlsx`/`html`
+nearby). You never write `caption` yourself for these: `caption` is only
+the printed caption the script extracts. `grade-output`'s
+`figures_complete` gate needs a `caption`, a `figure_text`, or the
+recorded `no_visible_text` flag on every image. If an element has no
+caption and no figure_text after extraction, look at the rendered crop
+first. If it shows text, transcribe it with `--figure-text`. Only if it
+shows no text at all, pass `--no-visible-text` (with your
+`--description`) — `describe_image.py` refuses the flag on an element
+that has a caption or figure_text. For a `pptx`/`docx`/`xlsx`/`html`
 image element there's no such script-side detection, so `caption` is still
 yours to set — pass `--caption` to `describe_image.py` as before.
 

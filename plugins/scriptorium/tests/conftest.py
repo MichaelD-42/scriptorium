@@ -64,8 +64,9 @@ def run_script(relpath: str, *args: str, cwd: Path) -> subprocess.CompletedProce
 def describe_all_images(doc: str, cwd: Path) -> None:
     """Simulate the extractor agent's describe step (agents/extractor.md)
     for a pipeline test: give every image element in every image shard a
-    `description` via describe_image.py, plus a `caption` when the element
-    has neither a caption nor figure_text. An element that already has a
+    `description` via describe_image.py, plus the recorded
+    `--no-visible-text` flag when the element has neither a caption nor
+    figure_text (never an invented caption). An element that already has a
     description is left as it is. In the real loop the agent writes these
     fields after extraction and before merge.py, so gates.py's
     `figures_complete` check (Task A9) sees them. Run this after the
@@ -84,7 +85,7 @@ def describe_all_images(doc: str, cwd: Path) -> None:
                 "--description", f"Synthetic test description of {el['asset']}.",
             ]
             if not (el.get("caption") or "").strip() and not (el.get("figure_text") or "").strip():
-                args += ["--caption", "Synthetic test caption"]
+                args += ["--no-visible-text"]
             result = run_script("extract-images/scripts/describe_image.py", *args, cwd=cwd)
             assert result.returncode == 0, result.stderr
 

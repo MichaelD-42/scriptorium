@@ -38,6 +38,12 @@ LARGE_REGION_EXCLUDED_BENIGN_REASONS = {"frame_drawing", "tiny"}
 # matching tolerance extract_text.py uses when it drops frame tables.
 FRAME_TABLE_BBOX_TOLERANCE = 3.0
 
+# Task A9 fix round 1: the top/bottom fraction of the page that counts as
+# a furniture band -- the same value and rule as pdf-triage's and
+# extract_text.py's FURNITURE_EDGE_BAND / in_furniture_band. triage.json
+# records no band field, so this copy applies the same rule.
+FURNITURE_EDGE_BAND = 0.12
+
 # Task A9: a TOC entry's heading may land one page away from the printed
 # page number (a heading at the very top of a page, a page-number offset).
 TOC_PAGE_TOLERANCE = 1
@@ -171,11 +177,27 @@ def _output_line_candidates(line: str) -> list[str]:
     return result
 
 
+def _is_digit_only_pattern(masked: str) -> bool:
+    """A masked furniture pattern with no letters, e.g. "#" or "# / #" (a
+    footer that is only the page number)."""
+    return not re.search(r"[^\W\d_]", masked)
+
+
+def _in_furniture_band(bbox, page_height: float | None) -> bool:
+    """Same rule as extract_text.py's in_furniture_band: the bbox lies in
+    the top or bottom FURNITURE_EDGE_BAND of the page. False when the bbox
+    or the page height is unknown."""
+    if not page_height or not bbox or len(bbox) != 4:
+        return False
+    top_frac, bottom_frac = bbox[1] / page_height, bbox[3] / page_height
+    return bottom_frac <= FURNITURE_EDGE_BAND or top_frac >= 1 - FURNITURE_EDGE_BAND
+
+
 def _bbox_matches(a: list[float], b: list[float], tolerance: float) -> bool:
     return len(a) == 4 and len(b) == 4 and all(abs(x - y) <= tolerance for x, y in zip(a, b))
 
 
-def check_furniture_absent(doc_data: dict, furniture: dict, output_dir: Path) -> dict:
+def check_furniture_absent(doc_data: dict, furniture: dict, output_dir: Path, page_heights: dict[int, float] | None = None) -> dict:
     """Task A9: no page furniture (pdf-triage's `triage.json["furniture"]`)
     survived into the merged elements or the assembled output.
 
@@ -190,33 +212,47 @@ def check_furniture_absent(doc_data: dict, furniture: dict, output_dir: Path) ->
       xref on an image element, so gates.py cannot tell which asset came
       from a furniture xref. extract-images skips those xrefs itself.
 
+    Digit-only patterns (fix round 1): a pattern with no letters, e.g.
+    "#" for a footer that is only the page number, also matches any bare
+    number in the body (a table cell "3", a quantity). So a digit-only
+    pattern matches an element only when the element's bbox lies in a
+    furniture band of its page (`page_heights`, from the PDF), and it is
+    never checked in the assembled output, where a bare number tells
+    nothing. With no page height (non-PDF input) it never matches.
+
     Passes trivially when the document has no furniture (no line patterns
     and no frame tables -- e.g. every non-PDF format, or no triage.json)."""
-    masked_patterns = {p["masked"] for p in furniture.get("line_patterns", [])}
+    all_patterns = {p["masked"] for p in furniture.get("line_patterns", [])}
+    masked_patterns = {m for m in all_patterns if not _is_digit_only_pattern(m)}
+    digit_only_patterns = all_patterns - masked_patterns
+    page_heights = page_heights or {}
     frame_bboxes = [f["bbox"] for f in furniture.get("frame_tables", [])]
     offenders = []
 
     def add(page, where, text):
         offenders.append({"page": page, "where": where, "text": text})
 
-    if masked_patterns or frame_bboxes:
+    if all_patterns or frame_bboxes:
         for page in doc_data["pages"].values():
             page_number = page.get("page_number")
             for el in page.get("elements", []):
                 el_type = el.get("type")
+                patterns = masked_patterns
+                if digit_only_patterns and _in_furniture_band(el.get("bbox"), page_heights.get(page_number)):
+                    patterns = all_patterns
                 if el_type in ("heading", "paragraph", "list_item"):
-                    for hit in _furniture_hits(el.get("text") or "", masked_patterns):
+                    for hit in _furniture_hits(el.get("text") or "", patterns):
                         add(page_number, el_type, hit)
                 elif el_type == "table":
                     for row in el.get("rows", []):
                         for cell in row:
-                            for hit in _furniture_hits(str(cell or ""), masked_patterns):
+                            for hit in _furniture_hits(str(cell or ""), patterns):
                                 add(page_number, "table cell", hit)
                     if any(_bbox_matches(list(el.get("bbox") or []), fb, FRAME_TABLE_BBOX_TOLERANCE) for fb in frame_bboxes):
                         add(page_number, "frame table", f"table bbox {el.get('bbox')}")
                 elif el_type == "image":
                     for field in ("figure_text", "caption"):
-                        for hit in _furniture_hits(el.get(field) or "", masked_patterns):
+                        for hit in _furniture_hits(el.get(field) or "", patterns):
                             add(page_number, f"image {field}", hit)
 
     if masked_patterns and output_dir.exists():
@@ -229,7 +265,7 @@ def check_furniture_absent(doc_data: dict, furniture: dict, output_dir: Path) ->
                         break
 
     pages = sorted({o["page"] for o in offenders if o["page"] is not None})
-    if not masked_patterns and not frame_bboxes:
+    if not all_patterns and not frame_bboxes:
         detail = "no furniture detected for this document"
     elif offenders:
         detail = "furniture left in the output: " + "; ".join(
@@ -310,6 +346,12 @@ def check_figures_complete(doc_data: dict) -> dict:
     """Task A9: every `image` element has a non-empty `caption` or a
     non-empty `figure_text`, AND a non-empty `description`.
 
+    Fix round 1: an image with no printed caption and no visible text passes
+    the first half only with the recorded flag `no_visible_text: true`
+    (describe_image.py --no-visible-text, set by the agent after it checked
+    the render). The agent never writes a caption for such an image --
+    `caption` is only the printed caption the script extracts.
+
     Ordering: the extractor agent writes `description` (and, when the
     scripts found no caption and no figure_text, one of them) with
     describe_image.py in commands/extract.md step 2. merge.py, assemble.py
@@ -322,7 +364,8 @@ def check_figures_complete(doc_data: dict) -> dict:
             if el.get("type") != "image":
                 continue
             missing = []
-            if not (el.get("caption") or "").strip() and not (el.get("figure_text") or "").strip():
+            has_text = (el.get("caption") or "").strip() or (el.get("figure_text") or "").strip()
+            if not has_text and el.get("no_visible_text") is not True:
                 missing.append("caption or figure_text")
             if not (el.get("description") or "").strip():
                 missing.append("description")
@@ -331,13 +374,22 @@ def check_figures_complete(doc_data: dict) -> dict:
     pages = sorted({i["page"] for i in incomplete})
     detail = (
         "incomplete images: " + "; ".join(f"page {i['page']} {i['asset']}: missing {', '.join(i['missing'])}" for i in incomplete)
-        if incomplete else "every image has a caption or figure_text, and a description"
+        if incomplete else "every image has a caption, figure_text or no_visible_text, and a description"
     )
     return {"name": "figures_complete", "passed": not incomplete, "detail": detail, "pages": pages, "incomplete": incomplete}
 
 
 def _load_json(path: Path) -> dict:
     return json.loads(path.read_text()) if path.exists() else {}
+
+
+def _pdf_page_heights(input_path: Path) -> dict[int, float]:
+    """{page_number: height in points} for a PDF input -- the geometry
+    check_furniture_absent needs for its furniture-band rule."""
+    import fitz  # PyMuPDF
+
+    with fitz.open(input_path) as doc:
+        return {i: page.rect.height for i, page in enumerate(doc, start=1)}
 
 
 def _pdf_page_areas(input_path: Path) -> dict[int, float]:
@@ -422,6 +474,7 @@ def main() -> None:
             doc_data,
             _load_json(paths.triage_json(args.doc)).get("furniture") or EMPTY_FURNITURE,
             paths.output_dir(args.doc),
+            _pdf_page_heights(input_path) if input_format == "pdf" else {},
         ),
         check_toc_headings_match(doc_data, _load_json(paths.toc_json(args.doc)).get("entries") or []),
         check_figures_complete(doc_data),

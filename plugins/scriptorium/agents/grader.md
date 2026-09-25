@@ -61,7 +61,9 @@ the assembled output's format/location.
    page, lists, and paragraphs joined across a page break are not
    issues. For a figure with `figure_text`, check the labels and values
    against the rendered page; tag `bad_caption` when they are wrong or
-   incomplete.
+   incomplete. For a figure with `no_visible_text: true` (in
+   `elements.json`; the flag is not rendered), confirm on the page that
+   it really has no text; tag `bad_caption` if it has.
 4. Write one grade shard per page with `write_grade_shard.py` — **never**
    try to compute or write the whole document's merged grade report
    yourself; that's arithmetic over every batch's shards, done by a

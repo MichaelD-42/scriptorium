@@ -57,6 +57,13 @@ the script has to trust the agent on -- so `--figure-text` is refused
 invalid `--data-table` JSON or `--mermaid`) when the target element
 already carries a non-empty `figure_text`, rather than silently
 overwriting real, deterministically-extracted text with a vision guess.
+
+`--no-visible-text` (Task A9 fix round 1) records `no_visible_text: true`
+for an image with no printed caption and no visible text, after the agent
+checked the render. It exists so that grade-output's figures_complete gate
+can accept such an image without an agent-written caption (`caption` is
+only the printed caption). Refused when the element already has a caption
+or figure_text, or together with `--caption`/`--figure-text`.
 """
 
 import argparse
@@ -85,6 +92,10 @@ def main() -> None:
     parser.add_argument("--mermaid", default=None, help="mermaid diagram source (same keyword validation as mermaid_image.py)")
     parser.add_argument("--caption", default=None, help="deprecated backward-compat alias -- see module docstring")
     parser.add_argument("--figure-text", dest="figure_text", default=None, help="vision transcription -- only when the script-side figure_text came back null/absent (see module docstring)")
+    parser.add_argument(
+        "--no-visible-text", dest="no_visible_text", action="store_true",
+        help="record that the image has no printed caption and no visible text (checked on the render) -- refused when it has a caption or figure_text",
+    )
     args = parser.parse_args()
 
     parsed_table = None
@@ -100,6 +111,10 @@ def main() -> None:
         if error:
             print(f"error: {error}", file=sys.stderr)
             sys.exit(1)
+
+    if args.no_visible_text and (args.caption is not None or args.figure_text is not None):
+        print("error: --no-visible-text cannot be combined with --caption or --figure-text", file=sys.stderr)
+        sys.exit(1)
 
     if args.caption is not None:
         print(
@@ -135,7 +150,18 @@ def main() -> None:
                     file=sys.stderr,
                 )
                 sys.exit(1)
+            if args.no_visible_text and ((el.get("caption") or "").strip() or (el.get("figure_text") or "").strip()):
+                # Task A9 fix round 1: the flag says "no printed caption and
+                # no visible text". An element that has either is not that.
+                print(
+                    f"error: {args.asset} already has a caption or figure_text -- "
+                    "refusing --no-visible-text",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
             el["description"] = args.description
+            if args.no_visible_text:
+                el["no_visible_text"] = True
             if parsed_table is not None:
                 el["data_table"] = parsed_table
             if args.mermaid is not None:

@@ -36,7 +36,9 @@ Markdown/HTML body when applying the criteria below.
    does it faithfully represent the diagram's nodes, edges, and labels (not
    just "some diagram exists")? If it has `figure_text`, compare it with
    the figure on the page: the labels and values must be verbatim and
-   complete. Wrong or missing `figure_text` is `bad_caption`.
+   complete. Wrong or missing `figure_text` is `bad_caption`. If it has
+   `no_visible_text: true`, confirm the figure really shows no text; if it
+   does, that is `bad_caption`.
 
 ## Correct by design — not issues
 
