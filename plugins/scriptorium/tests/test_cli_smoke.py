@@ -12,7 +12,7 @@ import json
 import pytest
 
 import paths
-from conftest import run_script
+from conftest import describe_all_images, run_script
 
 
 def _run_ok(relpath: str, *args: str, cwd) -> str:
@@ -37,6 +37,8 @@ class TestPdfPipeline:
         _run_ok("extract-text/scripts/extract_text.py", "--doc", pdf_doc, "--pages", ",".join(map(str, text_pages)), cwd=tmp_project)
         _run_ok("ocr-page/scripts/ocr.py", "--doc", pdf_doc, "--pages", "5", cwd=tmp_project)
         _run_ok("extract-images/scripts/extract_images.py", "--doc", pdf_doc, "--pages", "1,2,3,4,5", cwd=tmp_project)
+        # Task A9: the extractor agent's describe step, before merge.
+        describe_all_images(pdf_doc, tmp_project)
         _run_ok("assemble-output/scripts/merge.py", "--doc", pdf_doc, cwd=tmp_project)
 
         _run_ok("assemble-output/scripts/assemble.py", "--doc", pdf_doc, "--format", "reqif", cwd=tmp_project)
@@ -62,6 +64,8 @@ class TestPptxPipeline:
         pages = ",".join(str(p) for p in range(1, triage["page_count"] + 1))
 
         _run_ok("pptx-extract/scripts/extract_pptx.py", "--doc", pptx_doc, "--pages", pages, cwd=tmp_project)
+        # Task A9: the extractor agent's describe step, before merge.
+        describe_all_images(pptx_doc, tmp_project)
         _run_ok("assemble-output/scripts/merge.py", "--doc", pptx_doc, cwd=tmp_project)
         _run_ok("assemble-output/scripts/assemble.py", "--doc", pptx_doc, "--format", "md", cwd=tmp_project)
 
@@ -86,6 +90,8 @@ class TestDocxPipeline:
         assert triage["page_count"] == 2
 
         _run_ok("docx-extract/scripts/extract_docx.py", "--doc", docx_doc, "--pages", "1,2", cwd=tmp_project)
+        # Task A9: the extractor agent's describe step, before merge.
+        describe_all_images(docx_doc, tmp_project)
         _run_ok("assemble-output/scripts/merge.py", "--doc", docx_doc, cwd=tmp_project)
         _run_ok("assemble-output/scripts/assemble.py", "--doc", docx_doc, "--format", "md", cwd=tmp_project)
 
@@ -115,6 +121,8 @@ class TestHtmlPipeline:
     def test_triage_through_gates_and_text_mode_grade(self, html_doc, tmp_project):
         _run_ok("html-triage/scripts/triage.py", "--doc", html_doc, cwd=tmp_project)
         _run_ok("html-extract/scripts/extract_html.py", "--doc", html_doc, "--pages", "1", cwd=tmp_project)
+        # Task A9: the extractor agent's describe step, before merge.
+        describe_all_images(html_doc, tmp_project)
         _run_ok("assemble-output/scripts/merge.py", "--doc", html_doc, cwd=tmp_project)
         _run_ok("assemble-output/scripts/assemble.py", "--doc", html_doc, "--format", "md", cwd=tmp_project)
 
@@ -142,6 +150,8 @@ class TestImagePipeline:
 
         _run_ok("extract-images/scripts/extract_images.py", "--doc", png_doc, "--pages", "1", cwd=tmp_project)
         _run_ok("ocr-page/scripts/ocr.py", "--doc", png_doc, "--pages", "1", cwd=tmp_project)
+        # Task A9: the extractor agent's describe step, before merge.
+        describe_all_images(png_doc, tmp_project)
         _run_ok("assemble-output/scripts/merge.py", "--doc", png_doc, cwd=tmp_project)
         _run_ok("assemble-output/scripts/assemble.py", "--doc", png_doc, "--format", "md", cwd=tmp_project)
 

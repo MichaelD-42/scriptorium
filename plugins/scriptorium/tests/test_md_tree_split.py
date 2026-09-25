@@ -38,7 +38,7 @@ import pytest
 import yaml
 
 import paths
-from conftest import EXAMPLES_ROOT, load_script, run_script
+from conftest import EXAMPLES_ROOT, describe_all_images, load_script, run_script
 
 assemble = load_script("assemble-output/scripts/assemble.py", "assemble_module_a8")
 
@@ -538,6 +538,10 @@ class TestFurnitureSampleMdTree:
         """Full regression check that adding md-tree didn't disturb the
         other formats' behavior for the same document."""
         self._extract(furniture_doc, tmp_project)
+        # Task A9: the extractor agent's describe step, then re-merge, so
+        # gates.py's figures_complete check sees the descriptions.
+        describe_all_images(furniture_doc, tmp_project)
+        _run_ok("assemble-output/scripts/merge.py", "--doc", furniture_doc, cwd=tmp_project)
 
         for fmt in ("md", "html", "okf", "reqif"):
             out = _run_ok("assemble-output/scripts/assemble.py", "--doc", furniture_doc, "--format", fmt, cwd=tmp_project)

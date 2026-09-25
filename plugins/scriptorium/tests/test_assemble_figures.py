@@ -31,7 +31,7 @@ import pytest
 
 import elements as elements_lib
 import paths
-from conftest import EXAMPLES_ROOT, load_script, run_script
+from conftest import EXAMPLES_ROOT, describe_all_images, load_script, run_script
 
 assemble = load_script("assemble-output/scripts/assemble.py", "assemble_module_a7")
 describe_image = load_script("extract-images/scripts/describe_image.py", "describe_image_module_a7")
@@ -238,5 +238,12 @@ class TestFurnitureSampleEndToEnd:
         assert "| Step | Duration |" in span
         assert "```mermaid\nflowchart TD\n  A --> B\n```" in span
 
+        # Task A9: the other images need the describe step too, or
+        # gates.py's figures_complete check fails. It runs after the
+        # Markdown checks above so that the diagram is still the first
+        # described image; the diagram keeps its own description.
+        describe_all_images(furniture_doc, tmp_project)
+        _run_ok("assemble-output/scripts/merge.py", "--doc", furniture_doc, cwd=tmp_project)
+        _run_ok("assemble-output/scripts/assemble.py", "--doc", furniture_doc, "--format", "md", cwd=tmp_project)
         gates_out = _run_ok("grade-output/scripts/gates.py", "--doc", furniture_doc, "--format", "md", cwd=tmp_project)
         assert json.loads(gates_out)["passed"] is True

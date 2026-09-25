@@ -7,6 +7,7 @@ belongs in rubric.md instead, applied by the calling agent.
 
 import argparse
 import json
+import re
 import sys
 import zipfile
 from pathlib import Path
@@ -15,6 +16,7 @@ from xml.etree import ElementTree as ET
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 import elements as elements_lib  # noqa: E402
 import paths  # noqa: E402
+import toc as toc_lib  # noqa: E402
 
 OCR_CONFIDENCE_FLOOR = 0.5
 MIN_OUTPUT_BYTES = 20
@@ -30,6 +32,17 @@ MIN_OUTPUT_BYTES = 20
 # figure, so those are the ones worth a human's attention.
 LARGE_REGION_EXCLUDED_AREA_FRACTION = 0.2
 LARGE_REGION_EXCLUDED_BENIGN_REASONS = {"frame_drawing", "tiny"}
+
+# Task A9: a `table` element whose bbox is within this many points of a
+# triage `frame_tables` entry is the page frame, not a real table. Same
+# matching tolerance extract_text.py uses when it drops frame tables.
+FRAME_TABLE_BBOX_TOLERANCE = 3.0
+
+# Task A9: a TOC entry's heading may land one page away from the printed
+# page number (a heading at the very top of a page, a page-number offset).
+TOC_PAGE_TOLERANCE = 1
+
+EMPTY_FURNITURE = {"line_patterns": [], "frame_tables": [], "frame_drawings": [], "image_xrefs": []}
 
 
 def check_page_count_match(doc_data: dict, true_page_count: int) -> dict:
@@ -127,6 +140,206 @@ def check_large_region_excluded(doc_data: dict, page_areas: dict[int, float]) ->
     return warnings
 
 
+def _mask_digits(text: str) -> str:
+    """The same digit mask pdf-triage uses for `line_patterns` (every run of
+    digits becomes one "#")."""
+    return re.sub(r"\d+", "#", text)
+
+
+def _furniture_hits(text: str, masked_patterns: set[str]) -> list[str]:
+    """Every line of `text` (and the whole text) whose stripped,
+    digit-masked form equals a furniture pattern."""
+    hits = []
+    for candidate in [text] + text.splitlines():
+        stripped = candidate.strip()
+        if stripped and _mask_digits(stripped) in masked_patterns and stripped not in hits:
+            hits.append(stripped)
+    return hits
+
+
+def _output_line_candidates(line: str) -> list[str]:
+    """The text pieces of one assembled-output line: the line with HTML tags
+    removed, and each Markdown table cell, each with leading Markdown
+    markers (#, -, *, >) stripped."""
+    plain = re.sub(r"<[^>]+>", " ", line)
+    pieces = [plain] + (plain.split("|") if "|" in plain else [])
+    result = []
+    for piece in pieces:
+        cleaned = re.sub(r"^[\s#>*-]+", "", piece).strip()
+        if cleaned:
+            result.append(cleaned)
+    return result
+
+
+def _bbox_matches(a: list[float], b: list[float], tolerance: float) -> bool:
+    return len(a) == 4 and len(b) == 4 and all(abs(x - y) <= tolerance for x, y in zip(a, b))
+
+
+def check_furniture_absent(doc_data: dict, furniture: dict, output_dir: Path) -> dict:
+    """Task A9: no page furniture (pdf-triage's `triage.json["furniture"]`)
+    survived into the merged elements or the assembled output.
+
+    - Text: no heading/paragraph/list_item text, table cell, image
+      `figure_text` or `caption` has a line whose digit-masked text equals
+      a `line_patterns` entry.
+    - Tables: no `table` element's bbox matches a `frame_tables` entry.
+    - Assembled output: no line of any .md/.html file under the doc's
+      output dir (md, md-tree, okf, html) matches a `line_patterns` entry.
+      These offenders have `page: None` -- an output file names no page.
+    - Furniture images: NOT checked. No extractor records the source image
+      xref on an image element, so gates.py cannot tell which asset came
+      from a furniture xref. extract-images skips those xrefs itself.
+
+    Passes trivially when the document has no furniture (no line patterns
+    and no frame tables -- e.g. every non-PDF format, or no triage.json)."""
+    masked_patterns = {p["masked"] for p in furniture.get("line_patterns", [])}
+    frame_bboxes = [f["bbox"] for f in furniture.get("frame_tables", [])]
+    offenders = []
+
+    def add(page, where, text):
+        offenders.append({"page": page, "where": where, "text": text})
+
+    if masked_patterns or frame_bboxes:
+        for page in doc_data["pages"].values():
+            page_number = page.get("page_number")
+            for el in page.get("elements", []):
+                el_type = el.get("type")
+                if el_type in ("heading", "paragraph", "list_item"):
+                    for hit in _furniture_hits(el.get("text") or "", masked_patterns):
+                        add(page_number, el_type, hit)
+                elif el_type == "table":
+                    for row in el.get("rows", []):
+                        for cell in row:
+                            for hit in _furniture_hits(str(cell or ""), masked_patterns):
+                                add(page_number, "table cell", hit)
+                    if any(_bbox_matches(list(el.get("bbox") or []), fb, FRAME_TABLE_BBOX_TOLERANCE) for fb in frame_bboxes):
+                        add(page_number, "frame table", f"table bbox {el.get('bbox')}")
+                elif el_type == "image":
+                    for field in ("figure_text", "caption"):
+                        for hit in _furniture_hits(el.get(field) or "", masked_patterns):
+                            add(page_number, f"image {field}", hit)
+
+    if masked_patterns and output_dir.exists():
+        for out_file in sorted(list(output_dir.rglob("*.md")) + list(output_dir.rglob("*.html"))):
+            rel = out_file.relative_to(output_dir).as_posix()
+            for line_number, line in enumerate(out_file.read_text(encoding="utf-8").splitlines(), start=1):
+                for candidate in _output_line_candidates(line):
+                    if _mask_digits(candidate) in masked_patterns:
+                        add(None, f"{rel} line {line_number}", candidate)
+                        break
+
+    pages = sorted({o["page"] for o in offenders if o["page"] is not None})
+    if not masked_patterns and not frame_bboxes:
+        detail = "no furniture detected for this document"
+    elif offenders:
+        detail = "furniture left in the output: " + "; ".join(
+            f"{'page ' + str(o['page']) if o['page'] is not None else 'output'} ({o['where']}): {o['text']!r}"
+            for o in offenders
+        )
+    else:
+        detail = "no furniture line or frame table in the elements or the assembled output"
+    return {"name": "furniture_absent", "passed": not offenders, "detail": detail, "pages": pages, "offenders": offenders}
+
+
+def check_toc_headings_match(doc_data: dict, toc_entries: list[dict]) -> dict:
+    """Task A9: the TOC (`toc.json["entries"]`) and the body headings agree.
+
+    Every TOC entry must appear as a `heading` element whose normalized
+    text (lib/toc.py's `normalize_toc_text`, the same match extract-text
+    uses) equals the entry's "<number> <title>" text, on a page within
+    TOC_PAGE_TOLERANCE of the entry's `page`, at the entry's `level`
+    (toc.json's dot-depth level, which is what extract-text assigns). One
+    heading satisfies one entry only. Every heading that no entry uses is
+    reported as `extra` -- extract-text's TOC-driven rule should make none.
+
+    Passes trivially when toc.json has no entries (no TOC, or not a PDF):
+    heading levels then come from extract-text's size-rank fallback, and
+    there is nothing to compare against."""
+    empty = {"missing": [], "page_mismatch": [], "level_mismatch": [], "extra": []}
+    if not toc_entries:
+        return {"name": "toc_headings_match", "passed": True, "detail": "no TOC entries -- nothing to check", "pages": [], **empty}
+
+    headings = []
+    for page in doc_data["pages"].values():
+        for el in page.get("elements", []):
+            if el.get("type") == "heading":
+                text = el.get("text") or ""
+                headings.append({
+                    "page": page.get("page_number"), "level": el.get("level"), "text": text,
+                    "norm": toc_lib.normalize_toc_text(text), "used": False,
+                })
+    headings.sort(key=lambda h: h["page"] or 0)
+
+    missing, page_mismatch, level_mismatch = [], [], []
+    for entry in toc_entries:
+        expected = toc_lib.normalize_toc_text(toc_lib.toc_entry_heading_text(entry))
+        candidates = [h for h in headings if not h["used"] and h["norm"] == expected]
+        if not candidates:
+            missing.append({k: entry.get(k) for k in ("number", "title", "page", "level")})
+            continue
+        closest = min(candidates, key=lambda h: abs(h["page"] - entry["page"]))
+        closest["used"] = True
+        if abs(closest["page"] - entry["page"]) > TOC_PAGE_TOLERANCE:
+            page_mismatch.append({"text": closest["text"], "toc_page": entry["page"], "heading_page": closest["page"]})
+        elif closest["level"] != entry["level"]:
+            level_mismatch.append({"text": closest["text"], "page": closest["page"], "toc_level": entry["level"], "heading_level": closest["level"]})
+
+    extra = [{"text": h["text"], "page": h["page"], "level": h["level"]} for h in headings if not h["used"]]
+
+    pages = {m["page"] for m in missing} | {m["page"] for m in level_mismatch} | {m["page"] for m in extra}
+    for m in page_mismatch:
+        pages |= {m["toc_page"], m["heading_page"]}
+
+    problems = []
+    if missing:
+        problems.append("missing: " + ", ".join(f"{toc_lib.toc_entry_heading_text(m)!r} (page {m['page']})" for m in missing))
+    if page_mismatch:
+        problems.append("page off by more than 1: " + ", ".join(f"{m['text']!r} (TOC page {m['toc_page']}, heading page {m['heading_page']})" for m in page_mismatch))
+    if level_mismatch:
+        problems.append("level mismatch: " + ", ".join(f"{m['text']!r} (TOC level {m['toc_level']}, heading level {m['heading_level']})" for m in level_mismatch))
+    if extra:
+        problems.append("not in the TOC: " + ", ".join(f"{m['text']!r} (page {m['page']})" for m in extra))
+    detail = "; ".join(problems) if problems else f"all {len(toc_entries)} TOC entries match a heading"
+    return {
+        "name": "toc_headings_match", "passed": not problems, "detail": detail, "pages": sorted(pages),
+        "missing": missing, "page_mismatch": page_mismatch, "level_mismatch": level_mismatch, "extra": extra,
+    }
+
+
+def check_figures_complete(doc_data: dict) -> dict:
+    """Task A9: every `image` element has a non-empty `caption` or a
+    non-empty `figure_text`, AND a non-empty `description`.
+
+    Ordering: the extractor agent writes `description` (and, when the
+    scripts found no caption and no figure_text, one of them) with
+    describe_image.py in commands/extract.md step 2. merge.py, assemble.py
+    and gates.py run after that, in step 3, so this check sees the agent's
+    fields. If gates.py runs straight after the extract scripts, with no
+    describe step, this check fails -- on purpose."""
+    incomplete = []
+    for page in sorted(doc_data["pages"].values(), key=lambda p: p.get("page_number") or 0):
+        for el in page.get("elements", []):
+            if el.get("type") != "image":
+                continue
+            missing = []
+            if not (el.get("caption") or "").strip() and not (el.get("figure_text") or "").strip():
+                missing.append("caption or figure_text")
+            if not (el.get("description") or "").strip():
+                missing.append("description")
+            if missing:
+                incomplete.append({"page": page.get("page_number"), "asset": el.get("asset"), "missing": missing})
+    pages = sorted({i["page"] for i in incomplete})
+    detail = (
+        "incomplete images: " + "; ".join(f"page {i['page']} {i['asset']}: missing {', '.join(i['missing'])}" for i in incomplete)
+        if incomplete else "every image has a caption or figure_text, and a description"
+    )
+    return {"name": "figures_complete", "passed": not incomplete, "detail": detail, "pages": pages, "incomplete": incomplete}
+
+
+def _load_json(path: Path) -> dict:
+    return json.loads(path.read_text()) if path.exists() else {}
+
+
 def _pdf_page_areas(input_path: Path) -> dict[int, float]:
     """{page_number: width*height in points^2} for a PDF input -- the
     geometry check_large_region_excluded needs to turn an excluded region's
@@ -203,6 +416,15 @@ def main() -> None:
         check_image_refs_resolve(doc_data, paths.output_dir(args.doc)),
         check_ocr_confidence_floor(doc_data),
         check_output_file_exists(args.doc, args.format),
+        # Task A9 structure checks. No triage.json / toc.json (non-PDF
+        # formats never write toc.json) means no furniture / no TOC: pass.
+        check_furniture_absent(
+            doc_data,
+            _load_json(paths.triage_json(args.doc)).get("furniture") or EMPTY_FURNITURE,
+            paths.output_dir(args.doc),
+        ),
+        check_toc_headings_match(doc_data, _load_json(paths.toc_json(args.doc)).get("entries") or []),
+        check_figures_complete(doc_data),
     ]
 
     # Task A5b: large_region_excluded is a WARNING, not one of the checks
