@@ -36,6 +36,7 @@ _EMPTY_FURNITURE = {
     "line_patterns": [],
     "frame_tables": [],
     "frame_drawings": [],
+    "repeated_drawings": [],
     "image_xrefs": [],
 }
 

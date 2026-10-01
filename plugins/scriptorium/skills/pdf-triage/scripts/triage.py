@@ -3,7 +3,9 @@
 document into a loop size (tight|loose). See SKILL.md for the schema."""
 
 import argparse
+import itertools
 import json
+import math
 import statistics
 import sys
 from pathlib import Path
@@ -255,6 +257,78 @@ def _find_frame_drawings(document) -> list[dict]:
     return frame_drawings
 
 
+def _find_repeated_drawings(document, body_pages: set[int] | None = None) -> list[dict]:
+    """Every vector drawing (`page.get_drawings()`), of any size and any
+    fill/stroke type, whose rect repeats (within FRAME_GROUP_TOLERANCE, same
+    drawing type) on at least FRAME_TABLE_MIN_PAGE_FRACTION of the body
+    pages AND on at least FRAME_MIN_PAGE_COUNT body pages.
+
+    This finds a page frame that is drawn from many separate parts: border
+    lines, title-block rules, a filled inner rect. Each part is small or
+    thin, so `_find_frame_drawings` (one large drawing) misses most of them.
+    Left in, the parts touch each other and the page content, and
+    `cluster_drawings()` joins everything into one page-sized cluster.
+    Repetition, not size, is the signal: a real figure does not sit at the
+    same position on half the pages.
+
+    `body_pages` is the set of page numbers to count (every page that is
+    not a printed TOC page); None means every page. Near-identical rects
+    are grouped into one entry, so the list has one entry per distinct
+    repeated part, not one per occurrence. Each entry is
+    `{"bbox", "type", "page_count"}`; `bbox` is the average over all
+    occurrences."""
+    tolerance = furniture_lib.FRAME_GROUP_TOLERANCE
+    if body_pages is None:
+        body_pages = set(range(1, document.page_count + 1))
+    if not body_pages:
+        return []
+
+    groups: list[dict] = []  # [{"type", "bboxes": [...], "pages": set()}]
+    # Grid index over the rounded-down coordinates (cell size = tolerance),
+    # so each lookup checks only the neighbouring cells, not every group.
+    index: dict[tuple, list[dict]] = {}
+
+    def cell(bbox) -> tuple:
+        return tuple(math.floor(v / tolerance) for v in bbox)
+
+    for page_number, page in enumerate(document, start=1):
+        if page_number not in body_pages:
+            continue
+        for d in page.get_drawings():
+            rect = d["rect"]
+            bbox = [rect.x0, rect.y0, rect.x1, rect.y1]
+            dtype = d.get("type")
+            base = cell(bbox)
+            group = None
+            for offset in itertools.product((-1, 0, 1), repeat=4):
+                key = (dtype, *(c + o for c, o in zip(base, offset)))
+                group = next(
+                    (g for g in index.get(key, []) if furniture_lib.bbox_matches(g["bboxes"][0], bbox, tolerance)),
+                    None,
+                )
+                if group is not None:
+                    break
+            if group is None:
+                group = {"type": dtype, "bboxes": [], "pages": set()}
+                groups.append(group)
+                index.setdefault((dtype, *base), []).append(group)
+            group["bboxes"].append(bbox)
+            group["pages"].add(page_number)
+
+    repeated = []
+    for group in groups:
+        matched_page_count = len(group["pages"])
+        if (
+            matched_page_count >= FRAME_MIN_PAGE_COUNT
+            and matched_page_count / len(body_pages) >= FRAME_TABLE_MIN_PAGE_FRACTION
+        ):
+            n = len(group["bboxes"])
+            avg_bbox = [round(sum(b[i] for b in group["bboxes"]) / n, 2) for i in range(4)]
+            repeated.append({"bbox": avg_bbox, "type": group["type"], "page_count": matched_page_count})
+    repeated.sort(key=lambda r: (r["bbox"][1], r["bbox"][0], r["bbox"][3], r["bbox"][2]))
+    return repeated
+
+
 def _find_repeated_images(document) -> list[int]:
     """Image xrefs (PyMuPDF's `page.get_images(full=True)`) present on at
     least REPEATED_IMAGE_MIN_PAGE_FRACTION of pages."""
@@ -289,19 +363,23 @@ def _furniture_text_for_first_page(line_occurrences: dict) -> str | None:
     return "\n".join(text for text, _y in first_page_lines)
 
 
-def detect_furniture(document, pdf_path: Path) -> tuple[dict, str | None]:
+def detect_furniture(document, pdf_path: Path, body_pages: set[int] | None = None) -> tuple[dict, str | None]:
     """Runs once per document (not per page): finds repeated header/footer
-    lines, repeated full-page-covering tables, and repeated images. Returns
+    lines, repeated full-page-covering tables and drawings, repeated
+    drawings of any size (counted over `body_pages`, see
+    `_find_repeated_drawings`), and repeated images. Returns
     `(furniture, furniture_text)` for folding into triage.json."""
     line_patterns, line_occurrences = _find_repeated_lines(document)
     frame_tables = _find_frame_tables(pdf_path, document.page_count)
     frame_drawings = _find_frame_drawings(document)
+    repeated_drawings = _find_repeated_drawings(document, body_pages)
     image_xrefs = _find_repeated_images(document)
 
     furniture = {
         "line_patterns": line_patterns,
         "frame_tables": frame_tables,
         "frame_drawings": frame_drawings,
+        "repeated_drawings": repeated_drawings,
         "image_xrefs": image_xrefs,
     }
     furniture_text = _furniture_text_for_first_page(line_occurrences)
@@ -324,8 +402,9 @@ def main() -> None:
         classification = classify_page(page)
         pages.append({"page_number": i, **classification})
     body_size = document_body_size(document)
-    furniture, furniture_text = detect_furniture(document, pdf_path)
     toc_entries, toc_pages = toc_lib.detect_toc(document)
+    body_pages = {p["page_number"] for p in pages} - set(toc_pages)
+    furniture, furniture_text = detect_furniture(document, pdf_path, body_pages)
     document.close()
 
     for page in pages:

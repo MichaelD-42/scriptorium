@@ -44,6 +44,9 @@ the same JSON to stdout.
     "frame_drawings": [
       {"bbox": [24.0, 24.0, 588.0, 768.0], "page_count": 11}
     ],
+    "repeated_drawings": [
+      {"bbox": [24.0, 24.0, 588.0, 768.0], "type": "s", "page_count": 11}
+    ],
     "image_xrefs": [4]
   },
   "furniture_text": "Doc No. SYN-FUR-0001\nRev. B\npage 1 (11)"
@@ -122,6 +125,16 @@ no printed TOC found.
     (not size alone) to tell a real page-frame border apart from a
     genuinely large one-off figure before clustering a page's vector
     drawings into figure regions — see `extract-images`'s SKILL.md.
+  - `repeated_drawings` (fix wave B1): every vector drawing, of any size
+    and any fill/stroke type (`type`: PyMuPDF's `"s"`, `"f"` or `"fs"`),
+    whose rect repeats (within 2pt, same type) on at least 50% of the body
+    pages (every page that is not `role: "toc"`) and on at least 3 pages.
+    This finds a page frame drawn from many separate parts — border lines,
+    title-block rules, a filled inner panel — that no single large drawing
+    covers. Near-identical rects are grouped, so the list has one entry per
+    distinct repeated part (`bbox` is the average), not one per page.
+    `extract-images`/`extract-text` remove every matching drawing before
+    clustering.
   - `image_xrefs`: PyMuPDF image xrefs present on at least 50% of pages —
     typically a repeated logo.
 - `furniture_text`: the verbatim (unmasked) text of the matched furniture

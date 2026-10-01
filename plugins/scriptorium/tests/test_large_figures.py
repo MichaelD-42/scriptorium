@@ -571,15 +571,19 @@ class TestFrameMinPageCountFixRound1:
         vectors = [e for e in shard["elements"] if e["kind"] == "vector"]
         assert len(vectors) == 1
 
-    def test_large_filled_drawing_repeated_on_three_pages_not_treated_as_frame(self, tmp_project):
+    def test_large_filled_drawing_repeated_on_three_pages_is_removed_and_recorded(self, tmp_project):
         """A large FILLED drawing repeated identically on every page of a
-        3-page document DOES clear triage's repetition gates (fraction and
+        3-page document clears triage's repetition gates (fraction and
         FRAME_MIN_PAGE_COUNT alike -- triage doesn't look at fill), so it
-        legitimately lands in frame_drawings. But lib/figures.py's
-        pre-filter additionally requires stroke-only (_is_stroke_only)
-        before actually excluding a matching drawing from clustering -- a
-        filled shape is left alone, so it must still surface as a real
-        region on each page, not vanish as reason=frame_drawing."""
+        lands in frame_drawings.
+
+        Fix wave B1 (ruling): repetition is the only signal, whatever the
+        fill. A real page frame can be a filled rect, and the old
+        stroke-only check let it join every drawing on the page into one
+        page-sized cluster. So this drawing is now removed before
+        clustering. It is never silent: each page records it in
+        excluded_regions with reason frame_drawing. (Before B1 this test
+        asserted the opposite, that the filled drawing survived.)"""
         self._build_doc(tmp_project, "filled_repeated", npages=3, fig_page=1, filled=True)
         triage = _run_triage("filled_repeated", tmp_project)
         frame_drawings = triage["furniture"]["frame_drawings"]
@@ -590,9 +594,9 @@ class TestFrameMinPageCountFixRound1:
         for page_number in (1, 2, 3):
             shard = json.loads(paths.shard_path("filled_repeated", page_number, "image").read_text())
             vectors = [e for e in shard["elements"] if e["kind"] == "vector"]
-            assert len(vectors) == 1, f"page {page_number}: filled repeated drawing must NOT be excluded as a frame -- shard: {shard}"
-            assert not any(r["reason"] == "frame_drawing" for r in shard["excluded_regions"]), (
-                f"page {page_number}: {shard['excluded_regions']}"
+            assert vectors == [], f"page {page_number}: a repeated drawing must not become a figure -- shard: {shard}"
+            assert any(r["reason"] == "frame_drawing" for r in shard["excluded_regions"]), (
+                f"page {page_number}: the removal must be recorded -- {shard['excluded_regions']}"
             )
 
     def test_frame_table_sample_still_detects_its_frame(self, tmp_project):
@@ -611,10 +615,16 @@ class TestFrameMinPageCountFixRound1:
 
 
 class TestFrameDrawingPreFilterRequiresStrokeAndEdge:
-    """Direct unit tests against detect_figure_regions_with_exclusions,
-    isolating each of the two extra signals fix round 1 added (stroke-only,
-    edge proximity) from a hand-built frame_drawings list -- a bbox match
-    alone must never be sufficient on its own."""
+    """Direct unit tests against detect_figure_regions_with_exclusions with
+    a hand-built frame_drawings list.
+
+    A5b fix round 1 required two extra signals besides the bbox match
+    (stroke-only, edge proximity). Fix wave B1 (ruling) removed both: a
+    frame_drawings match is now enough, whatever the fill and wherever the
+    drawing sits, because triage only lists a drawing that repeats on at
+    least half the pages and on at least FRAME_MIN_PAGE_COUNT pages. The
+    first two tests below asserted the opposite before B1. Each test still
+    checks that the removal is recorded in excluded_regions."""
 
     def _frame_bbox(self) -> list[float]:
         width, height = 606.0, 560.0
@@ -622,7 +632,7 @@ class TestFrameDrawingPreFilterRequiresStrokeAndEdge:
         y0 = (PAGE_HEIGHT - height) / 2
         return [x0, y0, x0 + width, y0 + height]
 
-    def test_filled_match_is_not_excluded_even_touching_the_edge(self, tmp_path):
+    def test_filled_match_is_excluded_and_recorded(self, tmp_path):
         bbox = self._frame_bbox()
 
         def draw(page):
@@ -633,12 +643,12 @@ class TestFrameDrawingPreFilterRequiresStrokeAndEdge:
             regions, excluded = figures_lib.detect_figure_regions_with_exclusions(
                 page, 1, tmp_path / "filled.pdf", frame_tables=[], frame_drawings=[{"bbox": bbox}],
             )
-            assert len(regions) == 1
-            assert not any(r["reason"] == "frame_drawing" for r in excluded)
+            assert regions == []
+            assert any(r["reason"] == "frame_drawing" for r in excluded)
         finally:
             doc.close()
 
-    def test_stroke_only_match_not_touching_the_edge_is_not_excluded(self, tmp_path):
+    def test_match_not_touching_the_edge_is_excluded_and_recorded(self, tmp_path):
         # Centered, well clear of every page edge (>10% margin on all sides).
         width, height = 300.0, 200.0
         x0 = (PAGE_WIDTH - width) / 2
@@ -654,15 +664,14 @@ class TestFrameDrawingPreFilterRequiresStrokeAndEdge:
             regions, excluded = figures_lib.detect_figure_regions_with_exclusions(
                 page, 1, tmp_path / "midpage.pdf", frame_tables=[], frame_drawings=[{"bbox": bbox}],
             )
-            assert len(regions) == 1
-            assert not any(r["reason"] == "frame_drawing" for r in excluded)
+            assert regions == []
+            assert any(r["reason"] == "frame_drawing" for r in excluded)
         finally:
             doc.close()
 
     def test_stroke_only_and_edge_touching_match_is_excluded(self, tmp_path):
-        """Sanity check on the gate itself: with BOTH extra signals present
-        (as well as the bbox match), the drawing is still excluded -- fix
-        round 1 narrows the pre-filter, it doesn't disable it."""
+        """A stroke-only, edge-touching match (the plain page-frame shape)
+        is excluded, as it was before B1."""
         bbox = self._frame_bbox()
 
         def draw(page):

@@ -837,6 +837,7 @@ def main() -> None:
     furniture = furniture_lib.load_furniture(args.doc)
     frame_tables = furniture.get("frame_tables", [])
     frame_drawings = furniture.get("frame_drawings", [])
+    repeated_drawings = furniture.get("repeated_drawings", [])
     furniture_masked = {p["masked"] for p in furniture.get("line_patterns", [])}
     furniture_xrefs = set(furniture.get("image_xrefs", []))
     page_roles = furniture_lib.load_page_roles(args.doc)
@@ -887,7 +888,9 @@ def main() -> None:
         # detects them (same shared helper, so the two scripts can never
         # disagree about where a page's figures are) -- their text-layer
         # lines belong to figure_text, not to a paragraph/heading element.
-        figure_regions = figures_lib.detect_figure_regions(page, page_number, pdf_path, frame_tables, frame_drawings)
+        figure_regions = figures_lib.detect_figure_regions(
+            page, page_number, pdf_path, frame_tables, frame_drawings, repeated_drawings=repeated_drawings,
+        )
 
         # Task A6: caption lines -- one find_caption_line() search per
         # image bbox on the page (every vector region above, plus every

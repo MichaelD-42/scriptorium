@@ -108,6 +108,7 @@ class TestNoFurnitureFalsePositiveOnShortSample:
     def test_sample_pdf_has_no_detected_furniture(self, pdf_doc, tmp_project):
         triage = _run_triage(pdf_doc, tmp_project)
         assert triage["furniture"] == {
-            "line_patterns": [], "frame_tables": [], "frame_drawings": [], "image_xrefs": [],
+            "line_patterns": [], "frame_tables": [], "frame_drawings": [], "repeated_drawings": [],
+            "image_xrefs": [],
         }
         assert triage["furniture_text"] is None

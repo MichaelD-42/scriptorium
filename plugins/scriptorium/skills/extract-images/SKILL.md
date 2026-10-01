@@ -21,6 +21,15 @@ Handles both image kinds a PDF can contain:
     *repetition* across the document, not by size, so a large one-off real
     figure is never mistaken for furniture and dropped before clustering
     even sees it);
+  - it's a single drawing matching `triage.json["furniture"]
+    ["repeated_drawings"]` (fix wave B1 — any drawing, of any size and
+    fill, that repeats on at least half the body pages: the separate parts
+    of a page frame or title block). Without this, those parts join every
+    other drawing on the page into one page-sized cluster. These two
+    removals use repetition only (no stroke-only or page-edge check any
+    more): a real page frame can be a filled panel, and a real figure drawn
+    inside a repeated box still clusters from its own, non-repeated
+    drawings;
   - *more than half* its own area lies inside the furniture edge band
     (Task A5b tightened this from "any overlap at all", so a tall real
     figure that only grazes the band survives);
@@ -88,13 +97,15 @@ For an image document, `--pages` is always `1` — there's only ever page 1.
   `triage.json`/`furniture` section => no filtering, same output as before.
 - **`excluded_regions` (Task A5b, "no silent drops")**: the page's image
   shard also carries `excluded_regions: [{"bbox": [...], "reason":
-  "frame_drawing"|"tiny"|"furniture_band"|"table_overlap"}]` — every
-  candidate a filter dropped on this page, always present (an empty list
+  "frame_drawing"|"repeated_drawing"|"tiny"|"furniture_band"|
+  "table_overlap"}]` — every candidate a filter dropped on this page (the
+  page's `repeated_drawings` matches give ONE `repeated_drawing` entry with
+  their union bbox and a `count`, not one entry per line), always present (an empty list
   when nothing was dropped), so a large region that a filter removes is
   never simply invisible. `merge.py` passes it through to the merged page
   dict the same way `skipped` already does. `grade-output`'s
   `large_region_excluded` gate flags (as a warning, not a hard failure) any
-  entry here whose reason isn't `frame_drawing`/`tiny` and whose area is
+  entry here whose reason isn't `frame_drawing`/`repeated_drawing`/`tiny` and whose area is
   more than 20% of the page — see `grade-output`'s SKILL.md.
 - If `work/<doc>/triage.json` marks a given page `"role": "toc"`
   (`pdf-triage`'s printed-TOC-page detection), that page's shard is written
