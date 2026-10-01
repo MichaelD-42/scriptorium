@@ -74,6 +74,13 @@ Detection pipeline, per page:
 3. Each padded candidate is dropped if it:
    - is "tiny" -- smaller than `MIN_CLUSTER_AREA_FRACTION` of the page
      area, almost certainly a stray rule/line rather than a real figure;
+   - is a "text_box" (fix wave I1) -- its drawings form exactly one
+     axis-aligned rectangle (one `re` item, or at most
+     `TEXT_BOX_MAX_LINE_ITEMS` axis-aligned lines, no curves) and at least
+     one text-layer line lies inside it. A boxed requirement paragraph or a
+     shaded ID row is body text, not a figure; excluding the cluster keeps
+     its lines in the body. A multi-item figure (a flow diagram, a bar
+     chart) is never a text box;
    - has *more than half its own area* inside the top/bottom furniture edge
      band (reuses the same `FURNITURE_EDGE_BAND` convention
      `lib/furniture.py`'s `in_furniture_band` and `extract_text.py`'s `furniture_filtered_lines`
@@ -154,6 +161,15 @@ MIN_CLUSTER_AREA_FRACTION = 0.01
 # risked under-excluding a table that should never become a figure.
 TABLE_OVERLAP_THRESHOLD = 0.3
 LINE_OVERLAP_THRESHOLD = 0.5
+
+# Fix wave I1: a cluster is a text box when its drawings form one
+# axis-aligned rectangle -- one `re` item (stroked, filled or both; the same
+# rect drawn twice still counts as one), or at most this many axis-aligned
+# `l` items (a box drawn as 4 separate sides) -- and it holds at least one
+# text-layer line. A line counts as axis-aligned when its two ends differ by
+# at most TEXT_BOX_AXIS_TOLERANCE in x or in y.
+TEXT_BOX_MAX_LINE_ITEMS = 4
+TEXT_BOX_AXIS_TOLERANCE = 0.5  # pt
 
 # Task A6: a caption line's text pattern -- "Figure 1: ...", "Fig. 2 ...",
 # "Table 3: ..." (case-insensitive, optional trailing period/colon after the
@@ -239,6 +255,56 @@ def _overlaps_any_table(bbox, table_bboxes: list[list[float]]) -> bool:
     )
 
 
+def _drawings_in_cluster(cluster_rect, drawings: list[dict]) -> list[dict]:
+    """The drawings whose own rect lies inside `cluster_rect` (1pt slack):
+    `cluster_drawings()` returns only the cluster rects, not which drawings
+    formed each one."""
+    slack = 1.0
+    return [
+        d for d in drawings
+        if d["rect"].x0 >= cluster_rect.x0 - slack and d["rect"].y0 >= cluster_rect.y0 - slack
+        and d["rect"].x1 <= cluster_rect.x1 + slack and d["rect"].y1 <= cluster_rect.y1 + slack
+    ]
+
+
+def _forms_one_rectangle(drawings: list[dict]) -> bool:
+    """True when every path item of `drawings` together draws exactly one
+    axis-aligned rectangle: one distinct `re` (or rectangular `qu`) item,
+    or 1..TEXT_BOX_MAX_LINE_ITEMS axis-aligned `l` items, and nothing else
+    (no curve, no diagonal line, no second rectangle). See
+    TEXT_BOX_MAX_LINE_ITEMS."""
+    rects = []
+    line_count = 0
+    for d in drawings:
+        for item in d.get("items", []):
+            op = item[0]
+            if op == "re":
+                rects.append(list(item[1]))
+            elif op == "qu" and item[1].is_rectangular:
+                rects.append(list(item[1].rect))
+            elif op == "l":
+                p1, p2 = item[1], item[2]
+                if abs(p1.x - p2.x) > TEXT_BOX_AXIS_TOLERANCE and abs(p1.y - p2.y) > TEXT_BOX_AXIS_TOLERANCE:
+                    return False
+                line_count += 1
+            else:
+                return False
+    if rects:
+        return line_count == 0 and all(furniture_lib.bbox_matches(r, rects[0]) for r in rects)
+    return 1 <= line_count <= TEXT_BOX_MAX_LINE_ITEMS
+
+
+def _is_text_box(cluster_rect, drawings: list[dict], page_lines: list[dict]) -> bool:
+    """Fix wave I1: see TEXT_BOX_MAX_LINE_ITEMS. `page_lines` is the page's
+    `_page_lines()` scan; a line counts as inside when it is majority-inside
+    the unpadded cluster rect (`line_in_region`)."""
+    members = _drawings_in_cluster(cluster_rect, drawings)
+    if not members or not _forms_one_rectangle(members):
+        return False
+    raw_bbox = [cluster_rect.x0, cluster_rect.y0, cluster_rect.x1, cluster_rect.y1]
+    return any(line_in_region(line["bbox"], raw_bbox) for line in page_lines)
+
+
 def line_in_region(line_bbox, region_bbox, threshold: float = LINE_OVERLAP_THRESHOLD) -> bool:
     """True if `line_bbox` (a text line's own bbox) is majority-inside
     `region_bbox` -- the single overlap test both extract_text.py (to drop
@@ -262,7 +328,7 @@ def detect_figure_regions_with_exclusions(
 
     `excluded_regions`: Task A5b -- every drawing/cluster a filter removed,
     `[{"bbox": [...], "reason": "frame_drawing"|"repeated_drawing"|"tiny"|
-    "furniture_band"|"table_overlap"}]`, sorted the same way. The page's
+    "text_box"|"furniture_band"|"table_overlap"}]`, sorted the same way. The page's
     repeated drawings give one summary entry (union bbox plus `count`), not
     one entry per line. This is the "no silent drops"
     record: `extract_images.py` writes it into the page's image shard so a
@@ -303,6 +369,7 @@ def detect_figure_regions_with_exclusions(
 
     clusters = page.cluster_drawings(drawings=significant)
     table_bboxes = real_table_bboxes(pdf_path, page_number, frame_tables)
+    page_lines = _page_lines(page)
 
     regions = []
     for rect in clusters:
@@ -315,6 +382,9 @@ def detect_figure_regions_with_exclusions(
         area = max(0.0, bbox[2] - bbox[0]) * max(0.0, bbox[3] - bbox[1])
         if area / page_area < MIN_CLUSTER_AREA_FRACTION:
             excluded_regions.append({"bbox": bbox, "reason": "tiny"})
+            continue
+        if _is_text_box(rect, significant, page_lines):
+            excluded_regions.append({"bbox": bbox, "reason": "text_box"})
             continue
         if _furniture_band_overlap_fraction(bbox, page_height) > FURNITURE_BAND_AREA_THRESHOLD:
             excluded_regions.append({"bbox": bbox, "reason": "furniture_band"})

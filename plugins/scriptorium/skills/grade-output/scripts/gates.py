@@ -28,13 +28,14 @@ MIN_OUTPUT_BYTES = 20
 # flagged here if it's more than this fraction of its page's area AND its
 # reason isn't one of the expected/benign ones (a repeated page frame, the
 # page's repeated drawings summary, or a stray sliver too small to matter).
-# "frame_drawing"/"repeated_drawing"/"tiny" are excluded on purpose (a
-# "repeated_drawing" summary's union bbox is often page-sized, because it
-# spans the frame parts); "furniture_band"/"table_overlap" are exactly the two
+# "frame_drawing"/"repeated_drawing"/"tiny"/"text_box" are excluded on
+# purpose (a "repeated_drawing" summary's union bbox is often page-sized,
+# because it spans the frame parts; a "text_box" keeps its text as body
+# text, so nothing is lost); "furniture_band"/"table_overlap" are exactly the two
 # rules the brief calls out as capable of excluding a genuinely large real
 # figure, so those are the ones worth a human's attention.
 LARGE_REGION_EXCLUDED_AREA_FRACTION = 0.2
-LARGE_REGION_EXCLUDED_BENIGN_REASONS = {"frame_drawing", "repeated_drawing", "tiny"}
+LARGE_REGION_EXCLUDED_BENIGN_REASONS = {"frame_drawing", "repeated_drawing", "tiny", "text_box"}
 
 # Task A9: a `table` element whose bbox is within
 # furniture_lib.FRAME_MATCH_TOLERANCE of a triage `frame_tables` entry is the

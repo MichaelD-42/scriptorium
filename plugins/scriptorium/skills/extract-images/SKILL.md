@@ -30,6 +30,11 @@ Handles both image kinds a PDF can contain:
     more): a real page frame can be a filled panel, and a real figure drawn
     inside a repeated box still clusters from its own, non-repeated
     drawings;
+  - it's a text box (fix wave I1): its drawings form exactly one
+    axis-aligned rectangle (one `re` item, or at most 4 axis-aligned
+    lines, no curves) with at least one text-layer line inside — a boxed
+    paragraph or a shaded ID row. Its text stays body text in
+    `extract-text`; nothing is cropped;
   - *more than half* its own area lies inside the furniture edge band
     (Task A5b tightened this from "any overlap at all", so a tall real
     figure that only grazes the band survives);
@@ -97,7 +102,7 @@ For an image document, `--pages` is always `1` — there's only ever page 1.
   `triage.json`/`furniture` section => no filtering, same output as before.
 - **`excluded_regions` (Task A5b, "no silent drops")**: the page's image
   shard also carries `excluded_regions: [{"bbox": [...], "reason":
-  "frame_drawing"|"repeated_drawing"|"tiny"|"furniture_band"|
+  "frame_drawing"|"repeated_drawing"|"tiny"|"text_box"|"furniture_band"|
   "table_overlap"}]` — every candidate a filter dropped on this page (the
   page's `repeated_drawings` matches give ONE `repeated_drawing` entry with
   their union bbox and a `count`, not one entry per line), always present (an empty list
@@ -105,7 +110,7 @@ For an image document, `--pages` is always `1` — there's only ever page 1.
   never simply invisible. `merge.py` passes it through to the merged page
   dict the same way `skipped` already does. `grade-output`'s
   `large_region_excluded` gate flags (as a warning, not a hard failure) any
-  entry here whose reason isn't `frame_drawing`/`repeated_drawing`/`tiny` and whose area is
+  entry here whose reason isn't `frame_drawing`/`repeated_drawing`/`tiny`/`text_box` and whose area is
   more than 20% of the page — see `grade-output`'s SKILL.md.
 - If `work/<doc>/triage.json` marks a given page `"role": "toc"`
   (`pdf-triage`'s printed-TOC-page detection), that page's shard is written
