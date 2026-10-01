@@ -402,7 +402,7 @@ def main() -> None:
         classification = classify_page(page)
         pages.append({"page_number": i, **classification})
     body_size = document_body_size(document)
-    toc_entries, toc_pages = toc_lib.detect_toc(document)
+    toc_entries, toc_pages, toc_unparsed = toc_lib.detect_toc_with_unparsed(document)
     body_pages = {p["page_number"] for p in pages} - set(toc_pages)
     furniture, furniture_text = detect_furniture(document, pdf_path, body_pages)
     document.close()
@@ -429,7 +429,9 @@ def main() -> None:
 
     toc_out_path = paths.toc_json(args.doc)
     toc_out_path.parent.mkdir(parents=True, exist_ok=True)
-    toc_out_path.write_text(json.dumps({"doc": args.doc, "entries": toc_entries}, indent=2))
+    toc_out_path.write_text(
+        json.dumps({"doc": args.doc, "entries": toc_entries, "unparsed": toc_unparsed}, indent=2)
+    )
 
 
 if __name__ == "__main__":

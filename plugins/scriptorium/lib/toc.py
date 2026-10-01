@@ -26,8 +26,14 @@ Two strategies, tried in order, against a `fitz.Document`:
 `(entries, toc_pages)`, where `toc_pages` is the list of 1-indexed page
 numbers identified as printed TOC pages (always `[]` when the outline path
 was used, since outline entries don't correspond to any particular rendered
-page). `get_toc(document)` is a thin convenience wrapper for callers that
-only want the entries list.
+page). `detect_toc_with_unparsed(document)` returns the same plus
+`unparsed`: every dot-leader line on a TOC page that gave no entry (fix
+wave I2), so a lost entry is visible instead of silent. `get_toc(document)`
+is a thin convenience wrapper for callers that only want the entries list.
+
+Fix wave I2 also accepts a short last TOC page (see
+CONTINUATION_MIN_QUALIFYING_LINES) and joins a title that wraps onto
+further lines (see WRAP_MAX_LINES).
 
 `normalize_toc_text(text)` and `toc_entry_heading_text(entry)` (Task A4) are
 the shared normalization this module's "does this printed text match this
@@ -85,6 +91,21 @@ NUMBER_PREFIX_RE = re.compile(r"^(\d+(?:\.\d+)*)\s+(.+)$")
 # for the RFQ-sized specification documents this toolkit targets.
 TOC_SEARCH_MAX_PAGES = 20
 
+# Fix wave I2: the last page of a printed TOC often holds only a few
+# entries. A page with fewer than MIN_QUALIFYING_LINES leader lines is
+# still a TOC page when it directly follows a detected TOC page, has at
+# least CONTINUATION_MIN_QUALIFYING_LINES leader lines, and its leader lines
+# plus number-only lines are at least CONTINUATION_MIN_LINE_FRACTION of its
+# non-empty lines. The first TOC page still needs MIN_QUALIFYING_LINES, so
+# the A3 guard against a dot-leader pricing table starting a TOC is kept.
+CONTINUATION_MIN_QUALIFYING_LINES = 3
+CONTINUATION_MIN_LINE_FRACTION = 0.30
+
+# Fix wave I2: a TOC title can wrap. After a number-only line, or a numbered
+# title line with no leader, up to this many further lines without a leader
+# are joined to the title, until a leader line closes the entry.
+WRAP_MAX_LINES = 3
+
 
 def _level_from_number(number: str) -> int:
     """"1" -> 1, "1.2" -> 2, "1.2.3" -> 3, ... -- dot-depth, no hardcoded cap."""
@@ -116,6 +137,15 @@ def _qualifying_line_count(lines: list[str]) -> int:
     return sum(1 for line in lines if DOT_LEADER_RE.search(line))
 
 
+def _is_continuation_page(lines: list[str], qualifying: int) -> bool:
+    """See CONTINUATION_MIN_QUALIFYING_LINES. Only called for the page
+    directly after a detected TOC page."""
+    if qualifying < CONTINUATION_MIN_QUALIFYING_LINES or not lines:
+        return False
+    number_only = sum(1 for line in lines if NUMBER_ONLY_RE.match(line))
+    return (qualifying + number_only) / len(lines) >= CONTINUATION_MIN_LINE_FRACTION
+
+
 def find_printed_toc_pages(document) -> list[int]:
     """The contiguous run of pages, scanning from the start of the document
     and bounded to the first TOC_SEARCH_MAX_PAGES pages, whose dot-leader
@@ -123,23 +153,74 @@ def find_printed_toc_pages(document) -> list[int]:
     page are skipped (a title/cover page); the run stops at the first page
     after that point that doesn't qualify -- a TOC is always near the front
     and contiguous, never resuming after a gap, and a qualifying-looking page
-    outside the front-of-document bound is never treated as one."""
+    outside the front-of-document bound is never treated as one. Once the
+    run has started, a page directly after a TOC page also qualifies as a
+    continuation page (fix wave I2, see CONTINUATION_MIN_QUALIFYING_LINES)."""
     toc_pages = []
     started = False
     search_limit = min(document.page_count, TOC_SEARCH_MAX_PAGES)
     for page_number in range(1, search_limit + 1):
         page = document[page_number - 1]
-        qualifies = _qualifying_line_count(_page_lines(page)) >= MIN_QUALIFYING_LINES
-        if qualifies:
+        lines = _page_lines(page)
+        qualifying = _qualifying_line_count(lines)
+        if qualifying >= MIN_QUALIFYING_LINES:
             started = True
+            toc_pages.append(page_number)
+        elif started and _is_continuation_page(lines, qualifying):
             toc_pages.append(page_number)
         elif started:
             break
     return toc_pages
 
 
-def _parse_toc_page_lines(lines: list[str]) -> list[dict]:
-    entries = []
+def _entry(number: str, title: str, target_page: int) -> dict:
+    return {"number": number, "title": title, "page": target_page, "level": _level_from_number(number)}
+
+
+def _starts_entry(line: str) -> bool:
+    """True when `line` opens a TOC entry of its own: a bare number, or a
+    numbered title (with or without a leader)."""
+    return bool(NUMBER_ONLY_RE.match(line) or NUMBER_PREFIX_RE.match(line))
+
+
+def _close_wrapped_entry(lines: list[str], i: int, number: str, title_parts: list[str]) -> tuple[dict, int] | None:
+    """Fix wave I2: the entry that `lines[i]` opens (a number-only line, or
+    a numbered title with no leader), closed by a leader line within the
+    next WRAP_MAX_LINES + 1 lines. Lines in between must have no leader and
+    must not open an entry of their own; they are joined to the title. The
+    closing leader line must not carry its own number. Returns
+    `(entry, next_index)`, or None when no leader line closes the entry."""
+    parts = list(title_parts)
+    j = i + 1
+    while j < len(lines) and j - i <= WRAP_MAX_LINES + 1:
+        line = lines[j]
+        leader = TITLE_LEADER_PAGE_RE.match(line)
+        if leader:
+            left = leader.group(1).strip()
+            if _split_leading_number(left)[0] is not None:
+                return None  # the next entry, not this one's closing line
+            parts.append(left)
+            title = " ".join(p for p in parts if p)
+            return _entry(number, title, int(leader.group(2))), j + 1
+        if _starts_entry(line) or j - i > WRAP_MAX_LINES:
+            return None
+        parts.append(line.strip())
+        j += 1
+    return None
+
+
+def parse_toc_page_lines(lines: list[str]) -> tuple[list[dict], list[str]]:
+    """`(entries, unparsed)` for one printed TOC page's lines. An entry is
+    one of:
+    - a numbered title with a leader on one line ("1 Introduction .... 4");
+    - a number-only line, then the title with the leader ("2" / "Scope ....
+      5"), with up to WRAP_MAX_LINES wrapped title lines in between;
+    - a numbered title with no leader, then up to WRAP_MAX_LINES further
+      wrapped lines and the line with the leader.
+    `unparsed` (fix wave I2) is every dot-leader line that gave no entry,
+    verbatim -- for example a leader line with no section number."""
+    entries: list[dict] = []
+    unparsed: list[str] = []
     i = 0
     while i < len(lines):
         line = lines[i]
@@ -149,43 +230,70 @@ def _parse_toc_page_lines(lines: list[str]) -> list[dict]:
             left, target_page = full_match.group(1).strip(), int(full_match.group(2))
             number, title = _split_leading_number(left)
             if number is not None:
-                entries.append({"number": number, "title": title, "page": target_page, "level": _level_from_number(number)})
+                entries.append(_entry(number, title, target_page))
+            else:
+                unparsed.append(line)
             i += 1
             continue
 
         number_match = NUMBER_ONLY_RE.match(line)
-        if number_match and i + 1 < len(lines):
-            next_match = TITLE_LEADER_PAGE_RE.match(lines[i + 1])
-            if next_match:
-                number = number_match.group(1)
-                title, target_page = next_match.group(1).strip(), int(next_match.group(2))
-                entries.append({"number": number, "title": title, "page": target_page, "level": _level_from_number(number)})
-                i += 2
+        prefix_match = None if number_match else NUMBER_PREFIX_RE.match(line)
+        if number_match or prefix_match:
+            if number_match:
+                closed = _close_wrapped_entry(lines, i, number_match.group(1), [])
+            else:
+                closed = _close_wrapped_entry(lines, i, prefix_match.group(1), [prefix_match.group(2).strip()])
+            if closed is not None:
+                entry, i = closed
+                entries.append(entry)
                 continue
 
         i += 1
+    return entries, unparsed
+
+
+def _parse_toc_page_lines(lines: list[str]) -> list[dict]:
+    """The entries half of `parse_toc_page_lines`."""
+    entries, _unparsed = parse_toc_page_lines(lines)
     return entries
+
+
+def parse_printed_toc_with_unparsed(document, toc_pages: list[int]) -> tuple[list[dict], list[str]]:
+    entries: list[dict] = []
+    unparsed: list[str] = []
+    for page_number in toc_pages:
+        page_entries, page_unparsed = parse_toc_page_lines(_page_lines(document[page_number - 1]))
+        entries.extend(page_entries)
+        unparsed.extend(page_unparsed)
+    return entries, unparsed
 
 
 def parse_printed_toc(document, toc_pages: list[int]) -> list[dict]:
-    entries = []
-    for page_number in toc_pages:
-        entries.extend(_parse_toc_page_lines(_page_lines(document[page_number - 1])))
+    entries, _unparsed = parse_printed_toc_with_unparsed(document, toc_pages)
     return entries
 
 
-def detect_toc(document) -> tuple[list[dict], list[int]]:
-    """Returns `(entries, toc_pages)`. Tries the PDF outline first; falls
-    back to printed-TOC-page detection only if the outline is empty.
-    `toc_pages` is always `[]` for the outline path."""
+def detect_toc_with_unparsed(document) -> tuple[list[dict], list[int], list[str]]:
+    """Returns `(entries, toc_pages, unparsed)`. Tries the PDF outline
+    first; falls back to printed-TOC-page detection only if the outline is
+    empty. `toc_pages` and `unparsed` are always `[]` for the outline
+    path."""
     outline_entries = toc_from_outline(document)
     if outline_entries:
-        return outline_entries, []
+        return outline_entries, [], []
 
     toc_pages = find_printed_toc_pages(document)
     if not toc_pages:
-        return [], []
-    return parse_printed_toc(document, toc_pages), toc_pages
+        return [], [], []
+    entries, unparsed = parse_printed_toc_with_unparsed(document, toc_pages)
+    return entries, toc_pages, unparsed
+
+
+def detect_toc(document) -> tuple[list[dict], list[int]]:
+    """Returns `(entries, toc_pages)`: `detect_toc_with_unparsed` without
+    the unparsed lines."""
+    entries, toc_pages, _unparsed = detect_toc_with_unparsed(document)
+    return entries, toc_pages
 
 
 def get_toc(document) -> list[dict]:

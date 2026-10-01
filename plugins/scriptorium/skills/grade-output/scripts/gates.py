@@ -258,7 +258,7 @@ def check_furniture_absent(doc_data: dict, furniture: dict, output_dir: Path, pa
     return {"name": "furniture_absent", "passed": not offenders, "detail": detail, "pages": pages, "offenders": offenders}
 
 
-def check_toc_headings_match(doc_data: dict, toc_entries: list[dict]) -> dict:
+def check_toc_headings_match(doc_data: dict, toc_entries: list[dict], unparsed: list[str] | None = None) -> dict:
     """Task A9: the TOC (`toc.json["entries"]`) and the body headings agree.
 
     Every TOC entry must appear as a `heading` element whose normalized
@@ -269,11 +269,18 @@ def check_toc_headings_match(doc_data: dict, toc_entries: list[dict]) -> dict:
     heading satisfies one entry only. Every heading that no entry uses is
     reported as `extra` -- extract-text's TOC-driven rule should make none.
 
-    Passes trivially when toc.json has no entries (no TOC, or not a PDF):
-    heading levels then come from extract-text's size-rank fallback, and
-    there is nothing to compare against."""
-    empty = {"missing": [], "page_mismatch": [], "level_mismatch": [], "extra": []}
-    if not toc_entries:
+    Fix wave I2: `unparsed` is toc.json's `unparsed` list -- dot-leader
+    lines on a printed TOC page that gave no entry. Each one may be a lost
+    entry whose heading then became a paragraph, which the comparison above
+    cannot see. So the check fails while `unparsed` is not empty, and lists
+    those lines.
+
+    Passes trivially when toc.json has no entries and no unparsed lines (no
+    TOC, or not a PDF): heading levels then come from extract-text's
+    size-rank fallback, and there is nothing to compare against."""
+    unparsed = list(unparsed or [])
+    empty = {"missing": [], "page_mismatch": [], "level_mismatch": [], "extra": [], "unparsed": unparsed}
+    if not toc_entries and not unparsed:
         return {"name": "toc_headings_match", "passed": True, "detail": "no TOC entries -- nothing to check", "pages": [], **empty}
 
     headings = []
@@ -316,10 +323,13 @@ def check_toc_headings_match(doc_data: dict, toc_entries: list[dict]) -> dict:
         problems.append("level mismatch: " + ", ".join(f"{m['text']!r} (TOC level {m['toc_level']}, heading level {m['heading_level']})" for m in level_mismatch))
     if extra:
         problems.append("not in the TOC: " + ", ".join(f"{m['text']!r} (page {m['page']})" for m in extra))
+    if unparsed:
+        problems.append("TOC lines not parsed into an entry: " + ", ".join(repr(line) for line in unparsed))
     detail = "; ".join(problems) if problems else f"all {len(toc_entries)} TOC entries match a heading"
     return {
         "name": "toc_headings_match", "passed": not problems, "detail": detail, "pages": sorted(pages),
         "missing": missing, "page_mismatch": page_mismatch, "level_mismatch": level_mismatch, "extra": extra,
+        "unparsed": unparsed,
     }
 
 
@@ -476,7 +486,11 @@ def main() -> None:
             paths.output_dir(args.doc),
             _pdf_page_heights(input_path) if input_format == "pdf" else {},
         ),
-        check_toc_headings_match(doc_data, _load_json(paths.toc_json(args.doc)).get("entries") or []),
+        check_toc_headings_match(
+            doc_data,
+            _load_json(paths.toc_json(args.doc)).get("entries") or [],
+            _load_json(paths.toc_json(args.doc)).get("unparsed") or [],
+        ),
         check_figures_complete(doc_data, input_format),
     ]
 
