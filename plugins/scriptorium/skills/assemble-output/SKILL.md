@@ -21,7 +21,8 @@ The one place all three extraction tiers converge. Three scripts:
    `n`'s last non-image element is a `paragraph`/`list_item` whose text
    does NOT end in `. ! ? : ;`, and page `n+1`'s first non-image element is
    a plain `paragraph` (never a heading/table/new list item) starting
-   within ~3pt of the same left x, the two are joined into ONE element:
+   within ~3pt of the same left x (for a `list_item`, its `text_x`: where
+   its text starts after the marker, fix wave I3), the two are joined into ONE element:
    the second element's text is appended to the first with a single space
    (verbatim — no de-hyphenation, no other character changes), the first
    gains `"pages": [n, n+1]` (additive, absent everywhere else) and stays

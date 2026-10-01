@@ -680,6 +680,40 @@ def merge_list_and_paragraph_blocks(
     return elements
 
 
+def list_item_text_x(item: dict, words: list[tuple]) -> float:
+    """Fix wave I3: the x where a `list_item`'s text starts, after its
+    marker -- read from the page's words (`page.get_text("words")`) on the
+    item's first visual line, so the same rule covers every marker shape
+    (a glyph block plus a text block, a glyph line plus a text line in one
+    block, or "marker text" inline on one line). The first word is the
+    marker when its text equals the item's marker, or when it is a single
+    non-alphanumeric character at the marker's x; the next word then gives
+    the text x. When the first word already lies right of the marker's x
+    (the glyph is not a word of its own), that word gives it. Falls back to
+    `bbox[0]` when the words do not show it.
+
+    `lib/elements.py`'s page-break join compares the next page's first
+    paragraph with this value. It is not used to absorb continuation
+    blocks within a page: that bound stays as the A4b rulings set it."""
+    x0, y0, x1, _y1 = item["bbox"]
+    first_line = sorted(
+        (w for w in words if y0 - 1 <= w[1] <= y0 + 2 * LIST_MARKER_Y_TOLERANCE and x0 - 1 <= w[0] <= x1),
+        key=lambda w: w[0],
+    )
+    if not first_line:
+        return x0
+    first = first_line[0]
+    marker = item.get("marker") or ""
+    is_marker_word = (marker and first[4] == marker) or (
+        len(first[4]) == 1 and not first[4].isalnum() and abs(first[0] - x0) <= LIST_MARKER_X_TOLERANCE
+    )
+    if is_marker_word:
+        return first_line[1][0] if len(first_line) > 1 else x0
+    if first[0] > x0 + LIST_MARKER_X_TOLERANCE:
+        return first[0]
+    return x0
+
+
 def document_heading_size_ranks(fitz_doc, body_size: float, furniture_masked: set[str]) -> dict[float, int]:
     """Fallback-path (no TOC) heading-level ranking: every DISTINCT font
     size used by a fallback-candidate bold block anywhere in the document
@@ -925,6 +959,11 @@ def main() -> None:
         page_elements = merge_list_and_paragraph_blocks(
             filtered_blocks, body_size, toc_lookup, heading_size_ranks, list_level_lookup,
         )
+        list_items = [el for el in page_elements if el["type"] == "list_item"]
+        if list_items:
+            words = page.get_text("words")
+            for item in list_items:
+                item["text_x"] = list_item_text_x(item, words)
 
         for table in tables:
             page_elements.append({"type": "table", "rows": table["rows"], "bbox": list(table["bbox"])})

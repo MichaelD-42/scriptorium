@@ -85,7 +85,10 @@ document.
   numeral like `i)`/`ii)`) followed by whitespace and more real text on
   the same line becomes a `list_item` instead of a `paragraph`:
   `{"type": "list_item", "marker": <verbatim marker>, "level": <int>,
-  "text": <text without the marker>, "bbox": [...]}`. A TOC-matched (or
+  "text": <text without the marker>, "bbox": [...], "text_x": <float>}`.
+  `text_x` (fix wave I3) is the x where the item's text starts, after the
+  marker, read from the page's words; the merge-time page-break join
+  compares the next page's first paragraph with it. A TOC-matched (or
   fallback-ranked) heading always wins — the heading check runs first, so
   numbered-heading text is never misread as an enumerator marker. A lone
   marker/number with nothing after it on the same line (e.g. a table

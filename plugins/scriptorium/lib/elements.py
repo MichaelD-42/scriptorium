@@ -161,15 +161,12 @@ def apply_page_break_joins(pages: dict[int, dict]) -> None:
     and the brief's own wording ("for each page n and n+1") is pairwise,
     not transitive.
 
-    Judgment call: when the joining (page n) element is a `list_item`
-    rather than a `paragraph`, its "text x0" for the x-tolerance check is
-    approximated as its own `bbox[0]` (the marker's x), since this pipeline
-    doesn't track a separate "where does the text after the marker start"
-    x for list items (see `extract_text.py`'s
-    `merge_list_and_paragraph_blocks` docstring for the same approximation
-    made there). Untested against real extracted geometry -- no fixture in
-    this repo has a list item cut across a page break -- flagged, not
-    silently assumed correct."""
+    Fix wave I3: when the joining (page n) element is a `list_item`, the
+    x-tolerance check uses its `text_x` (where its text starts, after the
+    marker; written by `extract_text.py`'s `list_item_text_x`), because a
+    continuation line is printed at the text indent, not at the marker.
+    An element without `text_x` (a paragraph, or a list item from an older
+    shard) uses `bbox[0]`, as before."""
     page_numbers = sorted(pages)
     for n in page_numbers:
         n_next = n + 1
@@ -190,7 +187,7 @@ def apply_page_break_joins(pages: dict[int, dict]) -> None:
             continue
         if "bbox" not in prev_el or "bbox" not in next_el:
             continue  # defensive: real elements always carry bbox (Task A2); a hand-built fixture without one just never joins
-        if abs(next_el["bbox"][0] - prev_el["bbox"][0]) > JOIN_X_TOLERANCE:
+        if abs(next_el["bbox"][0] - prev_el.get("text_x", prev_el["bbox"][0])) > JOIN_X_TOLERANCE:
             continue
 
         prev_el["text"] = prev_el["text"] + " " + next_el["text"]
