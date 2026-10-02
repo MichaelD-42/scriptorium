@@ -217,6 +217,13 @@ def is_figure_caption(text: str) -> bool:
 # same as this module's other constants.
 CAPTION_SEARCH_DISTANCE = 60.0
 
+# How far inside an image element's bbox edge a caption line may start
+# (follow-up R2, probe 2): a vector region's bbox is the drawing padded by
+# REGION_PADDING, so a caption printed 5-10 pt below the drawing starts
+# inside the padded bbox. The line must still not be majority-inside the
+# bbox (line_in_region), or it is figure text.
+CAPTION_EDGE_SLACK = REGION_PADDING
+
 
 def real_table_bboxes(pdf_path: Path, page_number: int, frame_tables: list[dict] | None = None) -> list[list[float]]:
     """Real (non-frame) table bboxes on this page, queried fresh via
@@ -552,21 +559,42 @@ def find_caption_line(page, bbox: list[float], distance: float = CAPTION_SEARCH_
     match first, then above the same way. `None` if nothing in range
     matches -- the caller leaves `caption` absent rather than guessing, so
     a false match never overwrites a genuinely uncaptioned figure with
-    unrelated nearby text."""
-    return _nearest_caption_line(_page_lines(page), bbox, distance, CAPTION_PATTERN.match)
+    unrelated nearby text.
+
+    A caption line may start up to CAPTION_EDGE_SLACK inside `bbox`'s edge,
+    as long as it is not majority-inside `bbox` (then it is figure text).
+    A vector region's bbox is padded by REGION_PADDING, so a caption printed
+    closer than that to the drawing reaches into the padding."""
+    return _nearest_caption_line(
+        _page_lines(page), bbox, distance, CAPTION_PATTERN.match, edge_slack=CAPTION_EDGE_SLACK
+    )
 
 
-def _nearest_caption_line(lines: list[dict], bbox: list[float], distance: float, is_caption) -> dict | None:
+def _nearest_caption_line(
+    lines: list[dict], bbox: list[float], distance: float, is_caption, edge_slack: float = 0.0
+) -> dict | None:
     """find_caption_line's search over an already-scanned line list: the
     nearest line below `bbox` (then above it) within `distance` points that
-    overlaps it horizontally and for which `is_caption(text)` is true."""
+    overlaps it horizontally and for which `is_caption(text)` is true. With
+    `edge_slack`, a line may start that far inside the edge, but never
+    majority-inside `bbox`."""
     x0, y0, x1, y1 = bbox
+
+    def outside(line) -> bool:
+        return not edge_slack or not line_in_region(line["bbox"], bbox)
+
     below = sorted(
-        (l for l in lines if y1 <= l["bbox"][1] <= y1 + distance and _x_overlaps(bbox, l["bbox"])),
+        (
+            l for l in lines
+            if y1 - edge_slack <= l["bbox"][1] <= y1 + distance and _x_overlaps(bbox, l["bbox"]) and outside(l)
+        ),
         key=lambda l: l["bbox"][1],
     )
     above = sorted(
-        (l for l in lines if y0 - distance <= l["bbox"][3] <= y0 and _x_overlaps(bbox, l["bbox"])),
+        (
+            l for l in lines
+            if y0 - distance <= l["bbox"][3] <= y0 + edge_slack and _x_overlaps(bbox, l["bbox"]) and outside(l)
+        ),
         key=lambda l: -l["bbox"][3],
     )
     for line in below + above:

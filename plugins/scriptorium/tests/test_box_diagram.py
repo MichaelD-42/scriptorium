@@ -35,7 +35,7 @@ def _row(page, y: float = 200, caption: str | None = ROW_CAPTION) -> None:
         page.draw_rect(fitz.Rect(x, y, x + 120, y + 40), width=1)
         page.insert_text((x + 10, y + 24), label, fontsize=9)
     if caption:
-        page.insert_text((72, y + 66), caption, fontsize=10)
+        page.insert_text((72, y + 58), caption, fontsize=10)
 
 
 def _stack(page, y: float = 400, caption: str | None = STACK_CAPTION) -> None:
@@ -45,7 +45,7 @@ def _stack(page, y: float = 400, caption: str | None = STACK_CAPTION) -> None:
         page.draw_rect(fitz.Rect(72, by, 372, by + 30), width=1)
         page.insert_text((82, by + 19), label, fontsize=9)
     if caption:
-        page.insert_text((72, y + 128), caption, fontsize=10)
+        page.insert_text((72, y + 120), caption, fontsize=10)
 
 
 def _flow(page, y: float = 600) -> None:
