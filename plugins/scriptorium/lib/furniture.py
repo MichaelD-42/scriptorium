@@ -87,6 +87,24 @@ def in_furniture_band(bbox, page_height: float | None) -> bool:
     return furniture_edge(bbox[1], bbox[3], page_height) is not None
 
 
+# Two furniture rules, on purpose not the same (follow-up R3):
+# - extract_text (`furniture_filtered_lines`) removes a line only when its
+#   BLOCK lies in the furniture band AND the line matches any pattern. It
+#   has the exact text-layer geometry, so it can be strict: a body line that
+#   happens to equal a title-block label is kept.
+# - The merge-time filter for `ocr`/`vision` bodies (`lib/elements.py`) and
+#   the `furniture_absent` gate both use `patterns_for_element` below: a
+#   letter-bearing pattern matches ANYWHERE, a digit-only pattern only inside
+#   the band. The merge filter must use the gate's rule, so that an escalated
+#   page passes the gate; and an OCR or vision element often has no bbox, so
+#   a band test alone could not remove its title block.
+# Two effects follow. A digit-only footer line in an OCR or vision body (no
+# bbox) is never removed, and the gate cannot flag it either, so the two
+# stay consistent. A mid-page body line that equals a letter-bearing
+# furniture line is removed on an `ocr`/`vision` page but kept on a `text`
+# page.
+
+
 def patterns_for_element(all_patterns: set[str], bbox, page_height: float | None) -> set[str]:
     """The band plus pattern rule: the masked line patterns that may match
     one element's text.

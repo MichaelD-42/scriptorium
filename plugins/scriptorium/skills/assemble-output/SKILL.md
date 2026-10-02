@@ -28,6 +28,16 @@ The one place all three extraction tiers converge. Three scripts:
    element that is empty afterwards is dropped. The page records the count
    as `furniture_lines_removed` (absent when zero). `text` bodies are not
    touched.
+   This rule is not the one `extract-text` uses, on purpose. `extract-text`
+   removes a line only when its block lies in the band and the line matches
+   any pattern; it has the exact text-layer geometry, so it can be strict.
+   The merge filter uses the gate's rule, so that an escalated page passes
+   `furniture_absent`, and because an `ocr` or `vision` element often has no
+   bbox to test against the band. Two effects: a digit-only footer line in
+   an `ocr`/`vision` body with no bbox is never removed (and the gate cannot
+   flag it either); and a mid-page body line that equals a letter-bearing
+   furniture line is removed on an `ocr`/`vision` page but kept on a `text`
+   page. The note in `lib/furniture.py` says the same.
    **Page-break joins (Task A4b)**: after combining, `lib/elements.py`'s
    `merge_shards()` walks every adjacent page pair once, ascending. If page
    `n`'s last non-image element is a `paragraph`/`list_item` whose text
