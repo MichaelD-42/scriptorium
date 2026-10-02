@@ -242,6 +242,26 @@ def is_fallback_heading_candidate(text: str, is_bold_block: bool, max_size: floa
 # tests all agree on exactly which characters count.
 LIST_BULLET_GLYPHS = "·•▪–-"
 
+# Follow-up R7: Word's default bullet chain is "·" (Symbol) at level 1, "o"
+# (Courier New) at level 2 and "§" (Wingdings U+00A7, drawn as a square) at
+# level 3. "o" and "§" are also ordinary text (a letter; a "§ 4.2" section
+# reference), so they are LONE-ONLY markers: they count only in the
+# separate-glyph shapes (the glyph as its own block, or as its own line of a
+# block, with the item text at a larger x on the same visual line). As the
+# first token of a text span (`parse_list_marker`) they never count. Like
+# the other glyphs they render as "-", and level clustering includes them.
+LIST_LONE_BULLET_GLYPHS = "o§"
+
+
+def is_lone_bullet(text: str) -> bool:
+    """True when `text`, stripped, is exactly one bullet glyph that may
+    stand alone as a marker: any of LIST_BULLET_GLYPHS or
+    LIST_LONE_BULLET_GLYPHS. The separate-glyph shapes use this; the inline
+    shape (`parse_list_marker`) uses LIST_BULLET_GLYPHS only."""
+    stripped = text.strip()
+    return len(stripped) == 1 and (stripped in LIST_BULLET_GLYPHS or stripped in LIST_LONE_BULLET_GLYPHS)
+
+
 # Enumerator marker shapes: "1)" / "1.", "(1)", "a)", "(a)", short roman
 # numerals like "i)"/"ii)" (1-4 roman-numeral characters -- "short" per the
 # brief). Order doesn't affect correctness here: every alternative that can
@@ -348,7 +368,7 @@ def _block_marker_start(kept_lines: list[dict], i: int) -> tuple[str, str, dict,
     line). `None` if `kept_lines[i]` doesn't start an item either way."""
     line = kept_lines[i]
     stripped = line["text"].strip()
-    if len(stripped) == 1 and stripped in LIST_BULLET_GLYPHS and i + 1 < len(kept_lines):
+    if is_lone_bullet(stripped) and i + 1 < len(kept_lines):
         next_line = kept_lines[i + 1]
         same_line = abs(next_line["bbox"][1] - line["bbox"][1]) <= LIST_MARKER_Y_TOLERANCE
         further_right = next_line["bbox"][0] > line["bbox"][0]
@@ -512,8 +532,7 @@ def document_list_marker_levels(
                         j += start[4]  # lines_consumed (index 4 -- text_x is now index 3)
                     else:
                         j += 1
-            elif len(kept_lines) == 1 and first_line["text"].strip() in LIST_BULLET_GLYPHS \
-                    and len(first_line["text"].strip()) == 1:
+            elif len(kept_lines) == 1 and is_lone_bullet(first_line["text"]):
                 # Separate-glyph-block candidate: a whole block that is
                 # nothing but one bullet-glyph character, paired with the
                 # NEXT top-level block (merge_list_and_paragraph_blocks's
@@ -543,7 +562,8 @@ def merge_list_and_paragraph_blocks(
     own, looking only at the single block it was given:
 
     1. A bullet-glyph block (exactly one character, one of
-       LIST_BULLET_GLYPHS, nothing else) immediately followed by a block
+       LIST_BULLET_GLYPHS or LIST_LONE_BULLET_GLYPHS -- `is_lone_bullet`,
+       nothing else) immediately followed by a block
        that starts on the same visual line (`LIST_MARKER_Y_TOLERANCE`) at a
        larger x -- the marker glyph and its text are two separate PyMuPDF
        blocks whenever the glyph is drawn at a distinctly larger font size
@@ -589,8 +609,7 @@ def merge_list_and_paragraph_blocks(
 
         if (
             len(kept_lines) == 1
-            and len(stripped_first) == 1
-            and stripped_first in LIST_BULLET_GLYPHS
+            and is_lone_bullet(stripped_first)
             and i + 1 < n
         ):
             next_block, next_kept_lines = blocks_and_lines[i + 1]

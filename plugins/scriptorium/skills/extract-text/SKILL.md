@@ -100,7 +100,14 @@ document.
   A bullet drawn as its own glyph-sized block next to a separate text
   block on the same visual line (the marker glyph is drawn at a distinctly
   larger font size than its text, so PyMuPDF splits them into two blocks)
-  is merged into one `list_item` too. `level` is the marker's x-position's
+  is merged into one `list_item` too. Follow-up R7: Word's level-2 and
+  level-3 bullets, `o` (Courier New) and `§` (Wingdings U+00A7), are
+  lone-only markers (`LIST_LONE_BULLET_GLYPHS`): they count only in
+  these separate-glyph shapes (the glyph as its own block, or as its own
+  line of a block, with the text at a larger x on the same visual line),
+  never as the first token of a text line, so `o something` and
+  `§ 4.2 ...` stay paragraphs. They render as `-` like the other glyphs.
+  `level` is the marker's x-position's
   1-based rank among every distinct marker x-position (clustered within
   ~3pt) found anywhere in the document — computed once, document-wide,
   same cross-batch-consistency reason as the fallback heading-size

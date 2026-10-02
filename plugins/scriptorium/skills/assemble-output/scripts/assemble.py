@@ -101,7 +101,8 @@ def render_list_item_markdown(el: dict) -> str:
     a `list_item`: `"  " * (level - 1)` (2 spaces per indent level below
     the first) + the rendered marker + a space + `text`. A bullet-glyph
     marker (a single character -- see `extract_text.py`'s
-    LIST_BULLET_GLYPHS) always renders as a plain ASCII `-`, regardless of
+    LIST_BULLET_GLYPHS and LIST_LONE_BULLET_GLYPHS) always renders as a
+    plain ASCII `-`, regardless of
     which glyph was actually printed; an enumerator marker (more than one
     character, e.g. `"1)"`, `"a)"`, `"(1)"`) renders verbatim, exactly as
     extracted. See SKILL.md's element -> output mapping table -- a later
