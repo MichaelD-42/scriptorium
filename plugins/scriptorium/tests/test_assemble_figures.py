@@ -134,6 +134,18 @@ class TestMarkdownNoInterpretationFieldsAtAllYieldsNoMarkers:
         assert END not in md
 
 
+# Fix wave M4: the browser folds the newlines of figure_text into one line
+# unless the blockquote keeps them.
+BLOCKQUOTE_OPEN = '<blockquote style="white-space: pre-line">'
+
+
+class TestHtmlFigureTextKeepsLineBreaks:
+    def test_blockquote_preserves_newlines(self):
+        el = {"type": "image", "asset": "assets/c.png", "figure_text": "Label A\nLabel B"}
+        html = assemble.to_html({"doc": "d", "pages": {1: {"page_number": 1, "elements": [el]}}})
+        assert BLOCKQUOTE_OPEN + "Label A\nLabel B</blockquote>" in html
+
+
 class TestHtmlImageRendering:
     def _doc_data(self, el: dict) -> dict:
         return {"doc": "d", "pages": {1: {"page_number": 1, "elements": [el]}}}
@@ -144,7 +156,7 @@ class TestHtmlImageRendering:
 
         img_pos = html.index('<img src="assets/a.png"')
         figcaption_pos = html.index("<figcaption>Figure 1: Process Diagram</figcaption>")
-        blockquote_pos = html.index("<blockquote>Step 1\nStep 2</blockquote>")
+        blockquote_pos = html.index(BLOCKQUOTE_OPEN + "Step 1\nStep 2</blockquote>")
         start_pos = html.index(START)
         desc_pos = html.index("<p>A three-step process flow.</p>")
         mermaid_pos = html.index('<pre class="mermaid">')

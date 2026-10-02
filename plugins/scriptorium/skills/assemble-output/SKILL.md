@@ -75,7 +75,7 @@ the "ReqIF format" section below.
 | `paragraph` | plain text, blank-line separated | `<p>` | `SPEC-OBJECT` with a `ReqIF.Text` XHTML value (`<xhtml:p>`) |
 | `list_item` | see "List items" below | one shared `<ul>` per run of consecutive `list_item`s, each `<li class="level-N">` | `SPEC-OBJECT` with a `ReqIF.Text` XHTML value (`<xhtml:p>`) holding the same rendered marker+text line as Markdown |
 | `table` | pipe table | `<table>` | `SPEC-OBJECT` with a `ReqIF.Text` XHTML value (`<xhtml:table>`) |
-| `image` | `![alt](assets/...)`, then `caption` verbatim, then `figure_text` as a blockquote, then any of `description`/`data_table`/`mermaid` wrapped in `<!-- scriptorium:interpretation -->` markers | `<img src="assets/..." alt="...">`, `<figcaption>`, a `<blockquote>` for `figure_text`, then the same three fields inside an HTML-comment marker pair | `SPEC-OBJECT` with a `ReqIF.Text` XHTML value (`<xhtml:object data="assets/...">caption</xhtml:object>`, plus an `<xhtml:pre>` of the mermaid source if the element has one) |
+| `image` | `![alt](assets/...)`, then `caption` verbatim, then `figure_text` as a blockquote, then any of `description`/`data_table`/`mermaid` wrapped in `<!-- scriptorium:interpretation -->` markers | `<img src="assets/..." alt="...">`, `<figcaption>`, a `<blockquote style="white-space: pre-line">` for `figure_text` (so its line breaks show), then the same three fields inside an HTML-comment marker pair | `SPEC-OBJECT` with a `ReqIF.Text` XHTML value (`<xhtml:object data="assets/...">caption</xhtml:object>`, plus an `<xhtml:pre>` of the mermaid source if the element has one) |
 
 ### List items (Task A4b)
 
@@ -252,8 +252,10 @@ contract. The slug rule:
   `"3d-printing"` — intentional, not a bug, because it must match the
   consumer's rule exactly.
 - Otherwise, slugify the full heading text: lowercase, every run of
-  non-alphanumeric characters replaced with a single `-`, leading/trailing
-  `-` stripped, falling back to the literal `"section"` if that's empty.
+  anything outside ASCII a-z and 0-9 replaced with a single `-` (so
+  `"Übersicht"` gives `"bersicht"` and `"Maße"` gives `"ma-e"`),
+  leading/trailing `-` stripped, falling back to the literal `"section"`
+  if that's empty.
 
 **Any drift in this rule breaks the consumer's links into md-tree
 files.** `slugify_heading` in `assemble.py` is unit-tested against fixed

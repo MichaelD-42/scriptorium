@@ -154,6 +154,43 @@ class TestOutlineTocTakesPriority:
         assert toc_pages == []
 
 
+class TestOutlineStillMarksPrintedTocPages:
+    """Fix wave M6: a PDF with an outline AND a printed TOC page. The
+    entries come from the outline, but the printed TOC page must still be
+    found, so triage marks it `role: "toc"` and the extractors skip it
+    instead of turning it into junk paragraphs."""
+
+    def _make_pdf(self, tmp_path: Path) -> Path:
+        toc_lines = [f"{i} Section {i:02d} .......... {i + 2}" for i in range(1, 17)]
+        out_path = _build_inline_pdf(
+            tmp_path,
+            "outline_and_printed_toc.pdf",
+            [["Cover page"], toc_lines, ["1 Section 01"], ["2 Section 02"]],
+        )
+        document = fitz.open(out_path)
+        document.set_toc([[1, "1 Section 01", 3], [1, "2 Section 02", 4]])
+        final_path = tmp_path / "with_outline.pdf"
+        document.save(final_path)
+        document.close()
+        return final_path
+
+    def test_entries_from_outline_and_toc_page_found(self, tmp_path):
+        with fitz.open(self._make_pdf(tmp_path)) as document:
+            entries, toc_pages, unparsed = toc.detect_toc_with_unparsed(document)
+        assert [e["title"] for e in entries] == ["Section 01", "Section 02"]
+        assert toc_pages == [2]
+        assert unparsed == []
+
+    def test_triage_marks_the_printed_toc_page(self, tmp_path, tmp_project):
+        pdf_path = self._make_pdf(tmp_path)
+        shutil.copyfile(pdf_path, tmp_project / "input" / "outlined.pdf")
+        result = run_script("pdf-triage/scripts/triage.py", "--doc", "outlined", cwd=tmp_project)
+        assert result.returncode == 0, result.stderr
+        triage = json.loads(paths.triage_json("outlined").read_text())
+        roles = {p["page_number"]: p.get("role") for p in triage["pages"]}
+        assert roles == {1: None, 2: "toc", 3: None, 4: None}
+
+
 def _build_inline_pdf(tmp_path: Path, name: str, pages_lines: list[list[str]]) -> Path:
     """A tiny inline-built PDF (via PyMuPDF's own text-insertion API, same
     "safer choice" pattern as TestOutlineTocTakesPriority's outline-only PDF)

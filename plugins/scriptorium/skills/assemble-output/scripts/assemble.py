@@ -277,8 +277,9 @@ def slugify_heading(text: str) -> str:
     word-boundary check after the digit groups, and this reproduces that
     exactly, not a stricter version of it). No
     leading number -> slugify the full text: lowercase, every run of
-    non-alphanumeric characters replaced with a single "-", leading/
-    trailing "-" stripped, "section" if empty."""
+    anything outside ASCII a-z and 0-9 replaced with a single "-" (so
+    "Übersicht" gives "bersicht"), leading/trailing "-" stripped,
+    "section" if empty."""
     match = LEADING_NUMBER_RE.match(text)
     if match:
         return match.group(1).replace(".", "-")

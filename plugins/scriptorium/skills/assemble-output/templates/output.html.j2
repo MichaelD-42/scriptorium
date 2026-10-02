@@ -40,7 +40,7 @@
 <figure>
   <img src="{{ el.asset }}" alt="{{ el.description or el.caption or '' }}">
   {% if el.caption %}<figcaption>{{ el.caption }}</figcaption>{% endif %}
-  {% if el.figure_text %}<blockquote>{{ el.figure_text }}</blockquote>{% endif %}
+  {% if el.figure_text %}<blockquote style="white-space: pre-line">{{ el.figure_text }}</blockquote>{% endif %}
   {% if el.description or el.data_table or el.mermaid %}
   <!-- scriptorium:interpretation -->
   {% if el.description %}<p>{{ el.description }}</p>{% endif %}

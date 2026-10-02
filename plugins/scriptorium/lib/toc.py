@@ -24,9 +24,10 @@ Two strategies, tried in order, against a `fitz.Document`:
 
 `detect_toc(document)` is the main entry point: returns
 `(entries, toc_pages)`, where `toc_pages` is the list of 1-indexed page
-numbers identified as printed TOC pages (always `[]` when the outline path
-was used, since outline entries don't correspond to any particular rendered
-page). `detect_toc_with_unparsed(document)` returns the same plus
+numbers identified as printed TOC pages. The printed-page scan runs on both
+paths (fix wave M6): with an outline, the entries come from the outline,
+but a printed TOC page is still found, so triage marks it `role: "toc"` and
+the extractors skip it. `detect_toc_with_unparsed(document)` returns the same plus
 `unparsed`: every dot-leader line on a TOC page that gave no entry (fix
 wave I2), so a lost entry is visible instead of silent. `get_toc(document)`
 is a thin convenience wrapper for callers that only want the entries list.
@@ -274,15 +275,17 @@ def parse_printed_toc(document, toc_pages: list[int]) -> list[dict]:
 
 
 def detect_toc_with_unparsed(document) -> tuple[list[dict], list[int], list[str]]:
-    """Returns `(entries, toc_pages, unparsed)`. Tries the PDF outline
-    first; falls back to printed-TOC-page detection only if the outline is
-    empty. `toc_pages` and `unparsed` are always `[]` for the outline
-    path."""
+    """Returns `(entries, toc_pages, unparsed)`. The entries come from
+    the PDF outline when it has any, else from the printed TOC pages.
+    `toc_pages` comes from the printed-page scan on both paths (fix wave
+    M6), so a printed TOC in an outlined PDF is still skipped. `unparsed`
+    is always `[]` for the outline path: the printed lines are not the
+    source of the entries there."""
+    toc_pages = find_printed_toc_pages(document)
     outline_entries = toc_from_outline(document)
     if outline_entries:
-        return outline_entries, [], []
+        return outline_entries, toc_pages, []
 
-    toc_pages = find_printed_toc_pages(document)
     if not toc_pages:
         return [], [], []
     entries, unparsed = parse_printed_toc_with_unparsed(document, toc_pages)

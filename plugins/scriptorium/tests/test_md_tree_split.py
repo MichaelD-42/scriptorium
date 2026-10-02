@@ -86,6 +86,11 @@ class TestSlugifyHeading:
         assert assemble.slugify_heading("...") == "section"
         assert assemble.slugify_heading("") == "section"
 
+    def test_characters_outside_ascii_a_z_0_9_are_separators(self):
+        # Fix wave M3: the rule is ASCII-only, after lowercasing.
+        assert assemble.slugify_heading("Übersicht") == "bersicht"
+        assert assemble.slugify_heading("Maße") == "ma-e"
+
     def test_non_alnum_runs_collapse_to_single_dash(self):
         assert assemble.slugify_heading("Foo & Bar / Baz!") == "foo-bar-baz"
 

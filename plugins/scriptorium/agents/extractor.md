@@ -31,6 +31,14 @@ triage's document-wide `body_size` if the format has one, and — if any page
 needs OCR — a `--lang` value (and, only when set, a `--tessdata-dir` value)
 already resolved by the environment-setup step.
 
+On a retry you may also get **`recheck_images`** pages, each with the
+grader's `reason`. For such a page the body tier stays as it is. Redo the
+image step only: run `extract-images` again for a `pdf`/`image` page (for
+`pptx`/`docx`/`xlsx`/`html`, run the format's extract skill again; its
+body output is deterministic, so only the image shard changes in effect),
+then redo the caption, `figure_text`, description and mermaid work for
+that page with the `reason` in mind.
+
 ## Your job, per page in your batch
 
 **Body extraction — `pdf` documents:**
@@ -148,11 +156,13 @@ Reconstruct only what's actually visible; if the diagram is too complex,
 dense, or ambiguous to represent faithfully as mermaid, skip it and rely
 on the description alone rather than inventing structure that isn't there.
 
-**`figure_text`** (`pdf` vector-region elements only): also script-set,
-from the region's own text layer, whenever it has one — box labels, axis
-labels, and the like, newline-joined. You only ever fill `figure_text`
-yourself via vision, and only when it comes back null/absent (no text
-layer at all — e.g. a pure-raster chart with no underlying text): read the
+**`figure_text`** (`pdf` and `image` elements): for a `pdf` vector region
+the script sets it from the region's own text layer, whenever it has one —
+box labels, axis labels, and the like, newline-joined. A bitmap has no text
+layer, so its `figure_text` is always empty after extraction. You only ever
+fill `figure_text` yourself via vision, and only when it comes back
+null/absent (a bitmap, or a vector region with no text layer at all — e.g.
+a pure-raster chart with no underlying text): read the
 rendered crop, transcribe the visible text faithfully (this is
 transcription, not interpretation — say so plainly if something's
 illegible rather than inventing a plausible guess, same rule as OCR

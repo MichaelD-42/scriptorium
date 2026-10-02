@@ -113,8 +113,11 @@ group** (multiple Agent tool calls together — this is what makes it
 parallel, not sequential calls across turns). Give each its doc name, its
 `input_format`, its page list, the tier for each of its pages (from triage,
 or the escalated tier), triage's `body_size` if the format has one (pass
-through to every `extract-text` call as `--body-size`), and
-`--lang`/`--tessdata-dir` if relevant. Wait for all of them.
+through to every `extract-text` call as `--body-size`),
+`--lang`/`--tessdata-dir` if relevant, and on a retry every page of the
+group whose `escalated_pages` entry has `recheck_images: true`, with its
+`reason` (the extractor then redoes only that page's image step). Wait for
+all of them.
 
 This is race-free by construction: each `extractor` only ever writes shard
 files for its own pages (`work/<doc>/shards/page{N}.*.json`), so batches

@@ -78,8 +78,10 @@ Also writes `work/<doc-name>/toc.json`:
 1. **PDF outline** (`document.get_toc()`) — used directly if the document
    has one. A leading `"<number> "` in the outline title is split into
    `number`; otherwise `number` is `null`. `level` is the outline's own
-   level. No page in `pages[]` is marked `role: "toc"` for this path —
-   outline entries don't correspond to a rendered TOC page.
+   level. The printed TOC page scan (step 2) still runs, but only to find
+   the TOC pages: every page it finds is marked `role: "toc"`, so the
+   extractors skip it (fix wave M6). Its lines are not parsed into
+   entries for this path.
 2. **Printed TOC page detection** (fallback) — pages near the front of the
    document with enough dot-leader lines ("Title .......... 4") are treated
    as a printed TOC and parsed, handling both "number and title on one
