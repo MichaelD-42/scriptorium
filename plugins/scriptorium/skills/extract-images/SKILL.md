@@ -46,7 +46,9 @@ Handles both image kinds a PDF can contain:
     table is a grid table (follow-up R11: more than 60% of its cells
     empty, or more than 40% when the cluster has curves or
     non-axis-aligned lines). Then the cluster is a figure, the table is
-    recorded as `grid_table` and `extract-text` emits no table for it; or
+    recorded as `grid_table` and `extract-text` emits no table for it. A
+    cluster that covers more than 60% of the page (or of the content rect)
+    never uses this rule (follow-up R16): a page-sized form stays a table; or
   - it's too small to be more than a stray line.
 
   This is what catches a diagram or chart sitting on an otherwise

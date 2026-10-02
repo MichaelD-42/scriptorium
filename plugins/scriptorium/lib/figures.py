@@ -99,6 +99,9 @@ Detection pipeline, per page:
      Follow-up R11: not when every overlapping table is a grid table
      (`is_grid_table`: mostly empty cells, a chart's grid). Then the
      cluster is a figure and each such table is recorded as "grid_table".
+     Follow-up R16: a cluster that covers more than
+     GRID_TABLE_MAX_CLUSTER_FRACTION of the page (or content rect) never
+     uses the grid-table rule; a page-sized form stays a table.
 
 Task A5b: every candidate this pipeline drops -- a pre-filtered frame
 drawing, the page's repeated drawings, or an excluded cluster -- is also
@@ -179,6 +182,12 @@ LINE_OVERLAP_THRESHOLD = 0.5
 # and extract_text emits no table for it.
 GRID_TABLE_EMPTY_FRACTION = 0.60
 GRID_TABLE_EMPTY_FRACTION_WITH_CURVES = 0.40
+
+# Follow-up R16: the grid-table rule is skipped for a cluster that covers
+# more than this fraction of the page area (or of the content rect, when
+# there is one). A page-sized ruled form or cover page with sparse cells is
+# a table, not a chart; the cluster is excluded as table_overlap.
+GRID_TABLE_MAX_CLUSTER_FRACTION = 0.60
 
 # Follow-up R12: a table detected inside the content rect that covers more
 # than this fraction of it (and matches it within FRAME_MATCH_TOLERANCE) is
@@ -549,6 +558,9 @@ def detect_figure_regions_with_exclusions(
     clusters = page.cluster_drawings(drawings=significant)
     tables = page_tables(pdf_path, page_number, frame_tables, content_rect)
     page_lines = _page_lines(page)
+    reference_area = page_area
+    if content_rect:
+        reference_area = max(1e-6, (content_rect[2] - content_rect[0]) * (content_rect[3] - content_rect[1]))
 
     def padded(raw) -> list[float]:
         return [
@@ -567,9 +579,12 @@ def detect_figure_regions_with_exclusions(
         overlapping = [t for t in tables if _overlaps_table(bbox, t["bbox"])]
         if overlapping:
             # Follow-up R11: a chart's grid read as a table does not hide
-            # the chart. Only when every overlapping table is a grid table.
+            # the chart. Only when every overlapping table is a grid table,
+            # and (R16) the cluster is not page-sized.
             curves = _has_curves_or_diagonals(members or [])
-            if not all(is_grid_table(t, curves) for t in overlapping):
+            area = max(0.0, bbox[2] - bbox[0]) * max(0.0, bbox[3] - bbox[1])
+            page_sized = area / reference_area > GRID_TABLE_MAX_CLUSTER_FRACTION
+            if page_sized or not all(is_grid_table(t, curves) for t in overlapping):
                 excluded_regions.append({"bbox": bbox, "reason": "table_overlap"})
                 return
             for t in overlapping:
