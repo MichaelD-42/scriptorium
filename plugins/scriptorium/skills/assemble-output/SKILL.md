@@ -25,7 +25,8 @@ The one place all three extraction tiers converge. Three scripts:
    `triage.json["furniture"]["line_patterns"]`, with `lib/furniture.py`'s
    band plus pattern rule (the rule `grade-output`'s `furniture_absent`
    checks): a letter-bearing pattern matches anywhere; a digit-only pattern
-   matches only when the element's bbox lies in the furniture band. An
+   matches only when the element's bbox lies in the furniture band
+   (`band_limits`, with triage's `content_rect` when there is one). An
    element that is empty afterwards is dropped. The page records the count
    as `furniture_lines_removed` (absent when zero). `text` bodies are not
    touched.

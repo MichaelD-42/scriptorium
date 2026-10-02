@@ -99,7 +99,7 @@ def classify_page(page) -> dict:
     }
 
 
-def _find_repeated_lines(document) -> tuple[list[dict], dict]:
+def _find_repeated_lines(document, content_rect: list[float] | None = None) -> tuple[list[dict], dict]:
     """Text lines whose furniture key (`furniture_lib.furniture_key`: no
     whitespace, digit runs as "#") repeats, at the same document edge, on at
     least LINE_PATTERN_MIN_PAGE_FRACTION of pages.
@@ -125,7 +125,7 @@ def _find_repeated_lines(document) -> tuple[list[dict], dict]:
                 y_top_frac = y0 / height
                 y_bottom_frac = y1 / height
 
-                edge = furniture_lib.furniture_edge(y0, y1, height)
+                edge = furniture_lib.furniture_edge(y0, y1, height, content_rect)
                 if edge is None:
                     continue
 
@@ -372,11 +372,23 @@ def detect_furniture(document, pdf_path: Path, body_pages: set[int] | None = Non
     drawings of any size (counted over `body_pages`, see
     `_find_repeated_drawings`), and repeated images. Returns
     `(furniture, furniture_text)` for folding into triage.json."""
-    line_patterns, line_occurrences = _find_repeated_lines(document)
     frame_tables = _find_frame_tables(pdf_path, document.page_count)
     frame_drawings = _find_frame_drawings(document)
     repeated_drawings = _find_repeated_drawings(document, body_pages)
     image_xrefs = _find_repeated_images(document)
+    # Follow-up R10: a repeated inner frame rect moves the bands to the page
+    # area outside it, so the line search runs after the drawing search.
+    first = document[0].rect if document.page_count else None
+    content_rect = (
+        furniture_lib.find_content_rect(
+            frame_drawings, repeated_drawings,
+            len(body_pages) if body_pages is not None else document.page_count,
+            first.width, first.height,
+        )
+        if first is not None
+        else None
+    )
+    line_patterns, line_occurrences = _find_repeated_lines(document, content_rect)
 
     furniture = {
         "line_patterns": line_patterns,
@@ -384,6 +396,7 @@ def detect_furniture(document, pdf_path: Path, body_pages: set[int] | None = Non
         "frame_drawings": frame_drawings,
         "repeated_drawings": repeated_drawings,
         "image_xrefs": image_xrefs,
+        "content_rect": content_rect,
     }
     furniture_text = _furniture_text_for_first_page(line_occurrences)
     return furniture, furniture_text

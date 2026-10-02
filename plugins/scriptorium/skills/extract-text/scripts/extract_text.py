@@ -50,7 +50,9 @@ def build_toc_heading_lookup(toc_entries: list[dict]) -> dict[str, int]:
     return lookup
 
 
-def furniture_filtered_lines(block: dict, furniture_masked: set[str], page_height: float) -> list[dict]:
+def furniture_filtered_lines(
+    block: dict, furniture_masked: set[str], page_height: float, content_rect: list[float] | None = None
+) -> list[dict]:
     """The subset of `block["lines"]` that survive furniture filtering.
 
     A line is dropped only if the block sits in a top/bottom edge band
@@ -62,7 +64,7 @@ def furniture_filtered_lines(block: dict, furniture_masked: set[str], page_heigh
     block is only dropped if every one of its lines matches (the caller
     sees an empty list back). A block outside the edge band, or one with no
     matching lines, is returned unchanged."""
-    if not furniture_masked or not furniture_lib.in_furniture_band(block["bbox"], page_height):
+    if not furniture_masked or not furniture_lib.in_furniture_band(block["bbox"], page_height, content_rect):
         return block["lines"]
     return [line for line in block["lines"] if line["masked"] not in furniture_masked]
 
@@ -474,6 +476,7 @@ def document_list_marker_levels(
     toc_lookup: dict[str, int],
     heading_size_ranks: dict[float, int],
     page_roles: dict[int, str],
+    content_rect: list[float] | None = None,
 ) -> list[float]:
     """Document-wide list-marker x-position clusters (Task A4b's "collect
     the distinct marker x-positions ... across the whole document, sort
@@ -514,7 +517,7 @@ def document_list_marker_levels(
         page_height = page.rect.height
         text_blocks, _ = extract_page_text_blocks(page, body_size)
         for block in text_blocks:
-            kept_lines = furniture_filtered_lines(block, furniture_masked, page_height)
+            kept_lines = furniture_filtered_lines(block, furniture_masked, page_height, content_rect)
             if not kept_lines:
                 continue
             first_line = kept_lines[0]
@@ -733,7 +736,9 @@ def list_item_text_x(item: dict, words: list[tuple]) -> float:
     return x0
 
 
-def document_heading_size_ranks(fitz_doc, body_size: float, furniture_masked: set[str]) -> dict[float, int]:
+def document_heading_size_ranks(
+    fitz_doc, body_size: float, furniture_masked: set[str], content_rect: list[float] | None = None
+) -> dict[float, int]:
     """Fallback-path (no TOC) heading-level ranking: every DISTINCT font
     size used by a fallback-candidate bold block anywhere in the document
     (not just the pages this invocation's --pages batch covers), ranked
@@ -765,7 +770,7 @@ def document_heading_size_ranks(fitz_doc, body_size: float, furniture_masked: se
         page_height = page.rect.height
         text_blocks, _ = extract_page_text_blocks(page, body_size)
         for block in text_blocks:
-            kept_lines = furniture_filtered_lines(block, furniture_masked, page_height)
+            kept_lines = furniture_filtered_lines(block, furniture_masked, page_height, content_rect)
             if not kept_lines:
                 continue
             text = " ".join(line["text"] for line in kept_lines)
@@ -892,6 +897,7 @@ def main() -> None:
     frame_drawings = furniture.get("frame_drawings", [])
     repeated_drawings = furniture.get("repeated_drawings", [])
     furniture_masked = {p["masked"] for p in furniture.get("line_patterns", [])}
+    content_rect = furniture_lib.content_rect(furniture)
     furniture_xrefs = set(furniture.get("image_xrefs", []))
     page_roles = furniture_lib.load_page_roles(args.doc)
     toc_lookup = build_toc_heading_lookup(load_toc_entries(args.doc))
@@ -906,7 +912,7 @@ def main() -> None:
     ranking_body_size = args.body_size or 0.0
     if not toc_lookup:
         ranking_body_size = args.body_size if args.body_size else resolve_document_body_size(fitz_doc)
-        heading_size_ranks = document_heading_size_ranks(fitz_doc, ranking_body_size, furniture_masked)
+        heading_size_ranks = document_heading_size_ranks(fitz_doc, ranking_body_size, furniture_masked, content_rect)
 
     # Task A4b: list-marker x-position levels are document-wide too, for the
     # same cross-batch-consistency reason as heading_size_ranks above --
@@ -917,6 +923,7 @@ def main() -> None:
     # above is harmless in that case.
     list_level_lookup = document_list_marker_levels(
         fitz_doc, ranking_body_size, furniture_masked, toc_lookup, heading_size_ranks, page_roles,
+        content_rect=content_rect,
     )
 
     for page_number in page_numbers:
@@ -969,7 +976,7 @@ def main() -> None:
         for block in text_blocks:
             if any(furniture_lib.overlap_ratio(block["bbox"], t["bbox"]) > 0.5 for t in tables):
                 continue
-            kept_lines = furniture_filtered_lines(block, furniture_masked, page_height)
+            kept_lines = furniture_filtered_lines(block, furniture_masked, page_height, content_rect)
             kept_lines = figure_region_filtered_lines(kept_lines, figure_regions)
             kept_lines = caption_filtered_lines(kept_lines, caption_bboxes)
             if kept_lines:

@@ -82,25 +82,89 @@ def is_digit_only_pattern(masked: str) -> bool:
     return not re.search(r"[^\W\d_]", masked)
 
 
-def furniture_edge(y0: float, y1: float, page_height: float) -> str | None:
+# Follow-up R10: a frame rect (`frame_drawings`, or a `repeated_drawings`
+# rect that covers more than this fraction of the page) that repeats on at
+# least REPEATED_DRAWING_MIN_PAGE_FRACTION of the body pages bounds the
+# content area. Triage stores it as `furniture["content_rect"]`, and the
+# bands become the page area outside it (see band_limits).
+CONTENT_RECT_MIN_AREA_FRACTION = 0.60
+
+
+def find_content_rect(
+    frame_drawings: list[dict], repeated_drawings: list[dict], body_page_count: int,
+    page_width: float, page_height: float,
+) -> list[float] | None:
+    """Follow-up R10: the content rect for `furniture["content_rect"]`, or
+    None. Candidates are the `frame_drawings` entries and the
+    `repeated_drawings` rects that cover more than
+    CONTENT_RECT_MIN_AREA_FRACTION of the page; each must repeat on at
+    least REPEATED_DRAWING_MIN_PAGE_FRACTION of the `body_page_count` body
+    pages. Of several, the smallest (innermost) wins."""
+    page_area = page_width * page_height
+    if body_page_count <= 0 or page_area <= 0:
+        return None
+
+    def area(b) -> float:
+        return max(0.0, b[2] - b[0]) * max(0.0, b[3] - b[1])
+
+    candidates = [
+        list(entry["bbox"])
+        for entry in list(frame_drawings or []) + list(repeated_drawings or [])
+        if area(entry["bbox"]) / page_area > CONTENT_RECT_MIN_AREA_FRACTION
+        and entry.get("page_count", 0) / body_page_count >= REPEATED_DRAWING_MIN_PAGE_FRACTION
+    ]
+    if not candidates:
+        return None
+    return min(candidates, key=area)
+
+
+def content_rect(furniture: dict | None) -> list[float] | None:
+    """`furniture["content_rect"]`, or None (no frame, or a triage.json that
+    predates follow-up R10)."""
+    rect = (furniture or {}).get("content_rect")
+    return list(rect) if rect and len(rect) == 4 else None
+
+
+def band_limits(page_height: float, rect: list[float] | None = None) -> tuple[float, float]:
+    """Follow-up R10: `(top_limit, bottom_limit)` in points. A span is in the
+    top band when it ends at or above `top_limit`, and in the bottom band
+    when it starts at or below `bottom_limit`.
+
+    With no content rect, the bands are the fixed FURNITURE_EDGE_BAND (12%)
+    of the page height. With one, they are the page area outside it: above
+    rect.y0 and below rect.y1. A band never becomes smaller than the 12%
+    band, so a rect near the page edge (an outer page border, not an inner
+    content frame) changes nothing. Every stage that tests the band (triage,
+    extract_text, the merge filter, the gates) calls this function."""
+    top = FURNITURE_EDGE_BAND * page_height
+    bottom = (1 - FURNITURE_EDGE_BAND) * page_height
+    if rect and rect[3] <= page_height:
+        top = max(top, rect[1])
+        bottom = min(bottom, rect[3])
+    return top, bottom
+
+
+def furniture_edge(y0: float, y1: float, page_height: float, rect: list[float] | None = None) -> str | None:
     """ "top" when the span y0..y1 lies in the top band, "bottom" when it
-    lies in the bottom band, else None."""
+    lies in the bottom band, else None. `rect` is the content rect
+    (band_limits)."""
     if not page_height or page_height <= 0:
         return None
-    if y1 / page_height <= FURNITURE_EDGE_BAND:
+    top, bottom = band_limits(page_height, rect)
+    if y1 <= top:
         return "top"
-    if y0 / page_height >= 1 - FURNITURE_EDGE_BAND:
+    if y0 >= bottom:
         return "bottom"
     return None
 
 
-def in_furniture_band(bbox, page_height: float | None) -> bool:
+def in_furniture_band(bbox, page_height: float | None, rect: list[float] | None = None) -> bool:
     """True when `bbox` ([x0, y0, x1, y1]) lies in the top or bottom
-    furniture band of the page. False when the bbox or the page height is
-    unknown."""
+    furniture band of the page (band_limits, with the content rect `rect`).
+    False when the bbox or the page height is unknown."""
     if not page_height or page_height <= 0 or not bbox or len(bbox) != 4:
         return False
-    return furniture_edge(bbox[1], bbox[3], page_height) is not None
+    return furniture_edge(bbox[1], bbox[3], page_height, rect) is not None
 
 
 # Two furniture rules, on purpose not the same (follow-up R3):
@@ -121,17 +185,20 @@ def in_furniture_band(bbox, page_height: float | None) -> bool:
 # page.
 
 
-def patterns_for_element(all_patterns: set[str], bbox, page_height: float | None) -> set[str]:
+def patterns_for_element(
+    all_patterns: set[str], bbox, page_height: float | None, rect: list[float] | None = None
+) -> set[str]:
     """The band plus pattern rule: the masked line patterns that may match
     one element's text.
 
     A letter-bearing pattern matches anywhere on the page. A digit-only
     pattern also matches any bare number in the body (a table cell "3", a
     quantity), so it applies only when the element's bbox lies in a
-    furniture band of its page. With no bbox or no page height, only the
-    letter-bearing patterns apply."""
+    furniture band of its page (band_limits, with the content rect
+    `rect`). With no bbox or no page height, only the letter-bearing
+    patterns apply."""
     letter_patterns = {m for m in all_patterns if not is_digit_only_pattern(m)}
-    if letter_patterns != all_patterns and in_furniture_band(bbox, page_height):
+    if letter_patterns != all_patterns and in_furniture_band(bbox, page_height, rect):
         return set(all_patterns)
     return letter_patterns
 

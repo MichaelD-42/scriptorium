@@ -69,7 +69,8 @@ document.
   furniture detection), it's applied before anything else is written: a
   pdfplumber table whose bbox matches a `frame_tables` entry is dropped
   (page frames aren't real tables — never emitted as a `table` element).
-  For text: a block that sits in the top/bottom 12% edge band has each of
+  For text: a block that sits in the furniture band (the top/bottom 12%,
+  or outside triage's `content_rect`, see `band_limits`) has each of
   its **lines** checked individually against `line_patterns` — only the
   matching line(s) are excluded, not the whole block. A block outside the
   edge band, or with no matching lines, is untouched; a block where every

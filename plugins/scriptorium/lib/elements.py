@@ -78,7 +78,7 @@ def read_shard(shard_path: Path) -> dict | None:
 
 
 def remove_furniture_lines(
-    elements: list[dict], all_patterns: set[str], page_height: float | None
+    elements: list[dict], all_patterns: set[str], page_height: float | None, rect: list[float] | None = None
 ) -> tuple[list[dict], int]:
     """Fix wave I5: drop the furniture lines from an `ocr`/`vision` body,
     with lib/furniture.py's band plus pattern rule (the rule gates.py's
@@ -89,7 +89,7 @@ def remove_furniture_lines(
         if el.get("type") not in FURNITURE_TEXT_TYPES or not el.get("text"):
             kept.append(el)
             continue
-        patterns = furniture_lib.patterns_for_element(all_patterns, el.get("bbox"), page_height)
+        patterns = furniture_lib.patterns_for_element(all_patterns, el.get("bbox"), page_height, rect)
         text, count = furniture_lib.strip_furniture_lines(el["text"], patterns)
         removed += count
         if count and not text:
@@ -147,7 +147,7 @@ def merge_shards(
             furniture_removed = 0
             if all_patterns and body_tier in UNFILTERED_BODY_TIERS:
                 body_elements, furniture_removed = remove_furniture_lines(
-                    body_elements, all_patterns, page_heights.get(n)
+                    body_elements, all_patterns, page_heights.get(n), furniture_lib.content_rect(furniture)
                 )
             combined = body_elements + image_elements
             combined.sort(key=lambda e: e.get("bbox", [0, 0, 0, 0])[1])

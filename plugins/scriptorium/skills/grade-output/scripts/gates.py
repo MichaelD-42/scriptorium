@@ -256,7 +256,7 @@ def check_furniture_absent(doc_data: dict, furniture: dict, output_dir: Path, pa
             for el in page.get("elements", []):
                 el_type = el.get("type")
                 patterns = furniture_lib.patterns_for_element(
-                    all_patterns, el.get("bbox"), page_heights.get(page_number)
+                    all_patterns, el.get("bbox"), page_heights.get(page_number), furniture_lib.content_rect(furniture)
                 )
                 if el_type in ("heading", "paragraph", "list_item"):
                     for hit in furniture_lib.furniture_line_hits(el.get("text") or "", patterns):

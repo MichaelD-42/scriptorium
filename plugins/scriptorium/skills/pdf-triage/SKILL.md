@@ -47,7 +47,8 @@ the same JSON to stdout.
     "repeated_drawings": [
       {"bbox": [24.0, 24.0, 588.0, 768.0], "type": "s", "page_count": 11}
     ],
-    "image_xrefs": [4]
+    "image_xrefs": [4],
+    "content_rect": null
   },
   "furniture_text": "Doc No. SYN-FUR-0001\nRev. B\npage 1 (11)"
 }
@@ -127,7 +128,7 @@ no printed TOC found.
 - `furniture`: page furniture detected once, document-wide (not yet
   removed — that is a separate, later step).
   - `line_patterns`: text lines whose furniture key repeats in the top or
-    bottom 12% of the page on at least 60% of pages — running
+    bottom furniture band (see `content_rect`) on at least 60% of pages — running
     headers/footers, doc-number/revision/page-number lines, etc. The key
     (`lib/furniture.py`'s `furniture_key`, stored in `masked`) removes all
     whitespace and then turns every digit run into one `#`, so the
@@ -163,6 +164,18 @@ no printed TOC found.
     clustering.
   - `image_xrefs`: PyMuPDF image xrefs present on at least 50% of pages —
     typically a repeated logo.
+  - `content_rect` (follow-up R10): the inner content frame, or `null`. A
+    `frame_drawings` rect, or a `repeated_drawings` rect covering more
+    than 60% of the page, that repeats on at least 80% of the body pages
+    (the smallest one, when several do). It moves the furniture bands to
+    the page area outside it: the top band ends at its top edge and the
+    bottom band starts at its bottom edge, so a title block drawn below
+    an inner frame is furniture even where it starts above the fixed 12%
+    band. A band is never made smaller than the 12% band, so an outer
+    page border changes nothing. `lib/furniture.py`'s `band_limits` is
+    the one rule; triage, `extract-text`, the merge filter and the gates
+    all use it. Without a content rect the bands are the top and bottom
+    12% of the page.
 - `furniture_text`: the verbatim (unmasked) text of the matched furniture
   lines on the document's first page, top-to-bottom, newline-joined. `null`
   if no line furniture was detected.
