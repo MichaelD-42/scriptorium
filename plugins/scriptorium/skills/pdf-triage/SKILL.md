@@ -167,15 +167,18 @@ no printed TOC found.
   - `content_rect` (follow-up R10): the inner content frame, or `null`. A
     `frame_drawings` rect, or a `repeated_drawings` rect covering more
     than 60% of the page, that repeats on at least 80% of the body pages
-    (the smallest one, when several do). It moves the furniture bands to
+    and that is an INNER rect: on most body pages it has body text inside
+    it and text (the title block) outside it (follow-up R13). An outer
+    page border holds the title block too, so it never qualifies. Of
+    several, the smallest wins. It moves the furniture bands to exactly
     the page area outside it: the top band ends at its top edge and the
-    bottom band starts at its bottom edge, so a title block drawn below
-    an inner frame is furniture even where it starts above the fixed 12%
-    band. A band is never made smaller than the 12% band, so an outer
-    page border changes nothing. `lib/furniture.py`'s `band_limits` is
-    the one rule; triage, `extract-text`, the merge filter and the gates
-    all use it. Without a content rect the bands are the top and bottom
-    12% of the page.
+    bottom band starts at its bottom edge, with no 12% minimum, so a
+    title block drawn below an inner frame is furniture even where it
+    starts above the fixed 12% band, and a table cell near the top of the
+    frame is not. `lib/furniture.py`'s `band_limits` is the one rule;
+    triage, `extract-text`, `lib/figures.py`'s cluster band test, the
+    merge filter and the gates all use it. Without a content rect the
+    bands are the top and bottom 12% of the page.
 - `furniture_text`: the verbatim (unmasked) text of the matched furniture
   lines on the document's first page, top-to-bottom, newline-joined. `null`
   if no line furniture was detected.

@@ -346,9 +346,11 @@ def _matches_repeated_drawing(drawing: dict, bbox, repeated_drawings: list[dict]
     )
 
 
-def _furniture_band_overlap_fraction(bbox, page_height: float) -> float:
+def _furniture_band_overlap_fraction(bbox, page_height: float, content_rect: list[float] | None = None) -> float:
     """Fraction of `bbox`'s own area that lies within the top or bottom
-    FURNITURE_EDGE_BAND of the page (0.0-1.0).
+    furniture band of the page (0.0-1.0): `furniture.band_limits`, the
+    FURNITURE_EDGE_BAND or, follow-up R13, the area outside the content
+    rect.
 
     Task A5b tightened this from a bare *overlap* test (any part of bbox in
     the band at all excluded the whole cluster) to this majority-area test,
@@ -370,9 +372,9 @@ def _furniture_band_overlap_fraction(bbox, page_height: float) -> float:
     area = width * total_height
     if area <= 0:
         return 0.0
-    band_height = FURNITURE_EDGE_BAND * page_height
-    top_overlap = max(0.0, min(y1, band_height) - max(y0, 0.0))
-    bottom_overlap = max(0.0, min(y1, page_height) - max(y0, page_height - band_height))
+    top_limit, bottom_limit = furniture_lib.band_limits(page_height, content_rect)
+    top_overlap = max(0.0, min(y1, top_limit) - max(y0, 0.0))
+    bottom_overlap = max(0.0, min(y1, page_height) - max(y0, bottom_limit))
     return (width * (top_overlap + bottom_overlap)) / area
 
 
@@ -559,7 +561,7 @@ def detect_figure_regions_with_exclusions(
     regions = []
 
     def keep_unless_band_or_table(bbox, members: list[dict] | None = None) -> None:
-        if _furniture_band_overlap_fraction(bbox, page_height) > FURNITURE_BAND_AREA_THRESHOLD:
+        if _furniture_band_overlap_fraction(bbox, page_height, content_rect) > FURNITURE_BAND_AREA_THRESHOLD:
             excluded_regions.append({"bbox": bbox, "reason": "furniture_band"})
             return
         overlapping = [t for t in tables if _overlaps_table(bbox, t["bbox"])]

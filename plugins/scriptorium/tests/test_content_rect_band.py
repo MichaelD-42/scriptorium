@@ -6,8 +6,13 @@ block below it. The title block then starts above the fixed 12% bottom band
 frame rect repeats on at least 80% of the body pages, triage records it as
 `furniture["content_rect"]`, and the bands are the page area outside it:
 top band y < rect.y0, bottom band y > rect.y1. `lib/furniture.py`'s
-`band_limits` is the one helper; it never makes a band smaller than the 12%
-band, so an outer page border does not shrink the bands.
+`band_limits` is the one helper.
+
+Follow-up R13: the bands are exactly the area outside the rect (no 12%
+minimum), and the content rect must be the INNER rect: the qualifying rect
+with body text inside it and text (the title block) outside it on most body
+pages. An outer page border holds the title block too, so it never
+qualifies, and a document with only an outer border keeps the 12% band.
 """
 
 import json
@@ -27,6 +32,8 @@ FRAME = [42.0, 28.0, 558.0, 720.0]  # ends at y 0.855 of the page
 TITLE_LABEL = "Document Title"
 TITLE_VALUE = "Synthetic Project Specification"
 BODY_NEAR_FRAME = "Body line just inside the frame bottom."
+BODY_LINE = [60.0, 110.0, 300.0, 122.0]
+TITLE_LINE = [60.0, 724.0, 200.0, 731.0]
 
 
 def _make_pdf(path: Path, with_frame: bool) -> None:
@@ -81,21 +88,31 @@ class TestBandLimits:
             0.88 * H, 2
         )
 
-    def test_inner_rect_widens_the_bottom_band(self):
-        top, bottom = furniture_lib.band_limits(H, FRAME)
-        assert round(top, 2) == round(0.12 * H, 2)
-        assert bottom == FRAME[3]
-
-    def test_outer_border_never_shrinks_a_band(self):
-        top, bottom = furniture_lib.band_limits(H, [20.0, 20.0, 575.0, 822.0])
-        assert round(top, 2) == round(0.12 * H, 2) and round(bottom, 2) == round(
-            0.88 * H, 2
-        )
+    def test_bands_are_exactly_outside_the_rect(self):
+        assert furniture_lib.band_limits(H, FRAME) == (FRAME[1], FRAME[3])
 
     def test_find_content_rect_needs_eighty_percent_of_body_pages(self):
         frames = [{"bbox": FRAME, "page_count": 4}]
-        assert furniture_lib.find_content_rect(frames, [], 5, W, H) == FRAME
-        assert furniture_lib.find_content_rect(frames, [], 6, W, H) is None
+        lines = {n: [BODY_LINE, TITLE_LINE] for n in range(1, 7)}
+        assert furniture_lib.find_content_rect(frames, [], 5, W, H, lines) == FRAME
+        assert furniture_lib.find_content_rect(frames, [], 6, W, H, lines) is None
+
+    def test_outer_border_with_the_title_block_inside_is_not_the_content_rect(self):
+        outer = [20.0, 20.0, 575.0, 822.0]
+        frames = [{"bbox": outer, "page_count": 5}]
+        lines = {n: [BODY_LINE, TITLE_LINE] for n in range(1, 6)}
+        assert furniture_lib.find_content_rect(frames, [], 5, W, H, lines) is None
+
+    def test_inner_rect_wins_over_the_outer_border(self):
+        outer = [20.0, 20.0, 575.0, 822.0]
+        frames = [{"bbox": outer, "page_count": 5}, {"bbox": FRAME, "page_count": 5}]
+        lines = {n: [BODY_LINE, TITLE_LINE] for n in range(1, 6)}
+        assert furniture_lib.find_content_rect(frames, [], 5, W, H, lines) == FRAME
+
+    def test_digit_only_pattern_does_not_hit_a_cell_near_the_top_inside_the_rect(self):
+        cell = [60.0, 60.0, 80.0, 70.0]  # inside the rect, but in the old 12% band
+        assert not furniture_lib.in_furniture_band(cell, H, FRAME)
+        assert furniture_lib.patterns_for_element({"#", "DocNo#"}, cell, H, FRAME) == {"DocNo#"}
 
 
 class TestWithInnerFrame:
@@ -145,3 +162,25 @@ class TestWithoutFrame:
         assert furniture_lib.furniture_key(TITLE_LABEL) not in keys
         assert "page#(#)" in keys
         assert texts.count(TITLE_LABEL) == PAGES
+
+
+class TestFigureBandUsesTheContentRect:
+    """Follow-up R13: lib/figures.py's cluster band test uses the same
+    band_limits, so a figure near the top of the content rect is kept."""
+
+    def test_figure_near_the_top_inside_the_rect_is_kept(self, tmp_path):
+        import figures as figures_lib
+
+        path = tmp_path / "top_figure.pdf"
+        doc = fitz.open()
+        page = doc.new_page(width=W, height=H)
+        page.draw_rect(fitz.Rect(200, 40, 300, 90), width=1)
+        page.draw_rect(fitz.Rect(330, 40, 430, 90), width=1)
+        page.draw_line((300, 65), (330, 65), width=1)
+        doc.save(str(path))
+        doc.close()
+        with fitz.open(str(path)) as document:
+            plain, plain_excluded = figures_lib.detect_figure_regions_with_exclusions(document[0], 1, path)
+            framed, _ = figures_lib.detect_figure_regions_with_exclusions(document[0], 1, path, content_rect=FRAME)
+        assert plain == [] and [r["reason"] for r in plain_excluded] == ["furniture_band"]
+        assert len(framed) == 1

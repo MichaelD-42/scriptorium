@@ -90,16 +90,41 @@ def is_digit_only_pattern(masked: str) -> bool:
 CONTENT_RECT_MIN_AREA_FRACTION = 0.60
 
 
+def _center_inside(line_bbox, rect) -> bool:
+    cx = (line_bbox[0] + line_bbox[2]) / 2
+    cy = (line_bbox[1] + line_bbox[3]) / 2
+    return rect[0] <= cx <= rect[2] and rect[1] <= cy <= rect[3]
+
+
+def _is_inner_rect(rect, page_line_bboxes: dict[int, list] | None, body_page_count: int) -> bool:
+    """Follow-up R13: True when, on more than half of the body pages, `rect`
+    holds body text (a line whose center is inside it) AND text lies
+    outside it (the title block). An outer page border holds the title
+    block too, so it fails this test."""
+    if not page_line_bboxes:
+        return False
+    qualifying = 0
+    for lines in page_line_bboxes.values():
+        inside = any(_center_inside(b, rect) for b in lines)
+        outside = any(not _center_inside(b, rect) for b in lines)
+        qualifying += inside and outside
+    return qualifying / body_page_count > 0.5
+
+
 def find_content_rect(
     frame_drawings: list[dict], repeated_drawings: list[dict], body_page_count: int,
     page_width: float, page_height: float,
+    page_line_bboxes: dict[int, list] | None = None,
 ) -> list[float] | None:
-    """Follow-up R10: the content rect for `furniture["content_rect"]`, or
-    None. Candidates are the `frame_drawings` entries and the
-    `repeated_drawings` rects that cover more than
-    CONTENT_RECT_MIN_AREA_FRACTION of the page; each must repeat on at
-    least REPEATED_DRAWING_MIN_PAGE_FRACTION of the `body_page_count` body
-    pages. Of several, the smallest (innermost) wins."""
+    """Follow-up R10/R13: the INNER content rect for
+    `furniture["content_rect"]`, or None. Candidates are the
+    `frame_drawings` entries and the `repeated_drawings` rects that cover
+    more than CONTENT_RECT_MIN_AREA_FRACTION of the page; each must repeat
+    on at least REPEATED_DRAWING_MIN_PAGE_FRACTION of the `body_page_count`
+    body pages, and must be an inner rect (`_is_inner_rect`, from
+    `page_line_bboxes`: {body page number: [text line bbox, ...]}): body
+    text inside it and text outside it on most body pages. Of several, the
+    smallest (innermost) wins."""
     page_area = page_width * page_height
     if body_page_count <= 0 or page_area <= 0:
         return None
@@ -112,6 +137,7 @@ def find_content_rect(
         for entry in list(frame_drawings or []) + list(repeated_drawings or [])
         if area(entry["bbox"]) / page_area > CONTENT_RECT_MIN_AREA_FRACTION
         and entry.get("page_count", 0) / body_page_count >= REPEATED_DRAWING_MIN_PAGE_FRACTION
+        and _is_inner_rect(entry["bbox"], page_line_bboxes, body_page_count)
     ]
     if not candidates:
         return None
@@ -131,17 +157,15 @@ def band_limits(page_height: float, rect: list[float] | None = None) -> tuple[fl
     when it starts at or below `bottom_limit`.
 
     With no content rect, the bands are the fixed FURNITURE_EDGE_BAND (12%)
-    of the page height. With one, they are the page area outside it: above
-    rect.y0 and below rect.y1. A band never becomes smaller than the 12%
-    band, so a rect near the page edge (an outer page border, not an inner
-    content frame) changes nothing. Every stage that tests the band (triage,
-    extract_text, the merge filter, the gates) calls this function."""
-    top = FURNITURE_EDGE_BAND * page_height
-    bottom = (1 - FURNITURE_EDGE_BAND) * page_height
+    of the page height. With one (follow-up R13), they are exactly the page
+    area outside it: above rect.y0 and below rect.y1, with no 12% minimum.
+    `find_content_rect` only accepts an inner rect, never an outer page
+    border. Every stage that tests the band (triage, extract_text, the merge
+    filter, the gates, lib/figures.py's cluster band test) calls this
+    function."""
     if rect and rect[3] <= page_height:
-        top = max(top, rect[1])
-        bottom = min(bottom, rect[3])
-    return top, bottom
+        return rect[1], rect[3]
+    return FURNITURE_EDGE_BAND * page_height, (1 - FURNITURE_EDGE_BAND) * page_height
 
 
 def furniture_edge(y0: float, y1: float, page_height: float, rect: list[float] | None = None) -> str | None:

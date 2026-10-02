@@ -366,6 +366,23 @@ def _furniture_text_for_first_page(line_occurrences: dict) -> str | None:
     return "\n".join(text for text, _y in first_page_lines)
 
 
+def _page_line_bboxes(document, body_pages: set[int] | None) -> dict[int, list[list[float]]]:
+    """{body page number: [text line bbox, ...]}, for
+    `furniture_lib.find_content_rect`'s inner-rect test (follow-up R13)."""
+    found = {}
+    for page_number, page in enumerate(document, start=1):
+        if body_pages is not None and page_number not in body_pages:
+            continue
+        found[page_number] = [
+            list(line["bbox"])
+            for block in page.get_text("dict").get("blocks", [])
+            if block.get("type") == 0
+            for line in block.get("lines", [])
+            if "".join(span["text"] for span in line.get("spans", [])).strip()
+        ]
+    return found
+
+
 def detect_furniture(document, pdf_path: Path, body_pages: set[int] | None = None) -> tuple[dict, str | None]:
     """Runs once per document (not per page): finds repeated header/footer
     lines, repeated full-page-covering tables and drawings, repeated
@@ -384,6 +401,7 @@ def detect_furniture(document, pdf_path: Path, body_pages: set[int] | None = Non
             frame_drawings, repeated_drawings,
             len(body_pages) if body_pages is not None else document.page_count,
             first.width, first.height,
+            _page_line_bboxes(document, body_pages),
         )
         if first is not None
         else None
