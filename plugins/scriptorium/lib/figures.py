@@ -96,12 +96,15 @@ Detection pipeline, per page:
    - or overlaps a real (non-frame) table's bbox, queried fresh via
      `pdfplumber` and filtered the same way `extract_text.py`'s
      `furniture_lib.matches_any_frame()` filters `frame_tables` out of its own table query.
+     Follow-up R11: not when every overlapping table is a grid table
+     (`is_grid_table`: mostly empty cells, a chart's grid). Then the
+     cluster is a figure and each such table is recorded as "grid_table".
 
 Task A5b: every candidate this pipeline drops -- a pre-filtered frame
 drawing, the page's repeated drawings, or an excluded cluster -- is also
 returned as an "excluded region" (`{"bbox": [...], "reason":
-"frame_drawing"|"repeated_drawing"|"tiny"|"furniture_band"|
-"table_overlap"}`; a "repeated_drawing" entry also has a `count`) via
+"frame_drawing"|"repeated_drawing"|"tiny"|"text_box"|"furniture_band"|
+"table_overlap"|"grid_table"}`; a "repeated_drawing" entry also has a `count`) via
 `detect_figure_regions_with_exclusions`, so a large
 region that a filter removes is never silently dropped -- it's visible to
 `extract-images` (which writes it into the page's image shard as
@@ -167,6 +170,16 @@ MIN_CLUSTER_AREA_FRACTION = 0.01
 TABLE_OVERLAP_THRESHOLD = 0.3
 LINE_OVERLAP_THRESHOLD = 0.5
 
+# Follow-up R11: pdfplumber reads a chart's grid lines as a table. Before the
+# table_overlap exclusion, the overlapping table is tested: with more than
+# GRID_TABLE_EMPTY_FRACTION of its cells empty, or more than
+# GRID_TABLE_EMPTY_FRACTION_WITH_CURVES when the cluster has curves or
+# non-axis-aligned lines, it is a grid table (is_grid_table). The cluster is
+# then a figure, the table is recorded in excluded_regions as "grid_table",
+# and extract_text emits no table for it.
+GRID_TABLE_EMPTY_FRACTION = 0.60
+GRID_TABLE_EMPTY_FRACTION_WITH_CURVES = 0.40
+
 # Fix wave I1: a cluster is a text box when its drawings form one
 # axis-aligned rectangle -- one `re` item (stroked, filled or both; the same
 # rect drawn twice still counts as one), or at most this many axis-aligned
@@ -225,16 +238,61 @@ CAPTION_SEARCH_DISTANCE = 60.0
 CAPTION_EDGE_SLACK = REGION_PADDING
 
 
-def real_table_bboxes(pdf_path: Path, page_number: int, frame_tables: list[dict] | None = None) -> list[list[float]]:
-    """Real (non-frame) table bboxes on this page, queried fresh via
-    pdfplumber -- not read from any shard, on purpose: extract_images.py and
+def page_tables(pdf_path: Path, page_number: int, frame_tables: list[dict] | None = None) -> list[dict]:
+    """Real (non-frame) tables on this page, queried fresh via pdfplumber
+    -- not read from any shard, on purpose: extract_images.py and
     extract_text.py may run in either order, or in parallel, for the same
     page (see module docstring), so neither script can assume the other's
-    shard already exists."""
+    shard already exists. Each entry is `{"bbox", "rows", "empty_fraction"}`:
+    `rows` with None cells as "", and the fraction of cells that are empty
+    (follow-up R11, `is_grid_table`). extract_text builds its `table`
+    elements from this same list."""
     frame_tables = frame_tables or []
+    found = []
     with pdfplumber.open(pdf_path) as pl_doc:
-        tables = pl_doc.pages[page_number - 1].find_tables()
-        return [list(t.bbox) for t in tables if not furniture_lib.matches_any_frame(t.bbox, frame_tables)]
+        for table in pl_doc.pages[page_number - 1].find_tables():
+            if furniture_lib.matches_any_frame(table.bbox, frame_tables):
+                continue
+            rows = [[cell if cell is not None else "" for cell in row] for row in table.extract()]
+            cells = [cell for row in rows for cell in row]
+            empty = sum(1 for cell in cells if not str(cell).strip())
+            found.append({
+                "bbox": list(table.bbox),
+                "rows": rows,
+                "empty_fraction": empty / len(cells) if cells else 1.0,
+            })
+    return found
+
+
+def real_table_bboxes(pdf_path: Path, page_number: int, frame_tables: list[dict] | None = None) -> list[list[float]]:
+    """The bboxes of `page_tables`."""
+    return [t["bbox"] for t in page_tables(pdf_path, page_number, frame_tables)]
+
+
+def is_grid_table(table: dict, cluster_has_curves: bool) -> bool:
+    """Follow-up R11: True when `table` is a chart's grid, not a table: more
+    than GRID_TABLE_EMPTY_FRACTION of its cells are empty, or the
+    overlapping drawing cluster has curves or non-axis-aligned lines and
+    more than GRID_TABLE_EMPTY_FRACTION_WITH_CURVES are empty."""
+    empty = table["empty_fraction"]
+    if empty > GRID_TABLE_EMPTY_FRACTION:
+        return True
+    return cluster_has_curves and empty > GRID_TABLE_EMPTY_FRACTION_WITH_CURVES
+
+
+def _has_curves_or_diagonals(drawings: list[dict]) -> bool:
+    """True when any path item of `drawings` is a curve or a line that is
+    not axis-aligned (within TEXT_BOX_AXIS_TOLERANCE)."""
+    for d in drawings:
+        for item in d.get("items", []):
+            op = item[0]
+            if op == "c":
+                return True
+            if op == "l":
+                p1, p2 = item[1], item[2]
+                if abs(p1.x - p2.x) > TEXT_BOX_AXIS_TOLERANCE and abs(p1.y - p2.y) > TEXT_BOX_AXIS_TOLERANCE:
+                    return True
+    return False
 
 
 def _matches_repeated_drawing(drawing: dict, bbox, repeated_drawings: list[dict]) -> bool:
@@ -282,11 +340,15 @@ def _furniture_band_overlap_fraction(bbox, page_height: float) -> float:
 _overlap_ratio = furniture_lib.overlap_ratio
 
 
-def _overlaps_any_table(bbox, table_bboxes: list[list[float]]) -> bool:
-    return any(
-        _overlap_ratio(bbox, t) > TABLE_OVERLAP_THRESHOLD or _overlap_ratio(t, bbox) > TABLE_OVERLAP_THRESHOLD
-        for t in table_bboxes
+def _overlaps_table(bbox, table_bbox) -> bool:
+    return (
+        _overlap_ratio(bbox, table_bbox) > TABLE_OVERLAP_THRESHOLD
+        or _overlap_ratio(table_bbox, bbox) > TABLE_OVERLAP_THRESHOLD
     )
+
+
+def _overlaps_any_table(bbox, table_bboxes: list[list[float]]) -> bool:
+    return any(_overlaps_table(bbox, t) for t in table_bboxes)
 
 
 def _drawings_in_cluster(cluster_rect, drawings: list[dict]) -> list[dict]:
@@ -401,7 +463,9 @@ def detect_figure_regions_with_exclusions(
 
     `excluded_regions`: Task A5b -- every drawing/cluster a filter removed,
     `[{"bbox": [...], "reason": "frame_drawing"|"repeated_drawing"|"tiny"|
-    "text_box"|"furniture_band"|"table_overlap"}]`, sorted the same way. The page's
+    "text_box"|"furniture_band"|"table_overlap"|"grid_table"}]`, sorted the same way.
+    A "grid_table" entry is a pdfplumber table that is a chart's grid; its
+    cluster is in `regions`. The page's
     repeated drawings give one summary entry (union bbox plus `count`), not
     one entry per line. This is the "no silent drops"
     record: `extract_images.py` writes it into the page's image shard so a
@@ -441,7 +505,7 @@ def detect_figure_regions_with_exclusions(
         return [], excluded_regions
 
     clusters = page.cluster_drawings(drawings=significant)
-    table_bboxes = real_table_bboxes(pdf_path, page_number, frame_tables)
+    tables = page_tables(pdf_path, page_number, frame_tables)
     page_lines = _page_lines(page)
 
     def padded(raw) -> list[float]:
@@ -454,13 +518,21 @@ def detect_figure_regions_with_exclusions(
 
     regions = []
 
-    def keep_unless_band_or_table(bbox) -> None:
+    def keep_unless_band_or_table(bbox, members: list[dict] | None = None) -> None:
         if _furniture_band_overlap_fraction(bbox, page_height) > FURNITURE_BAND_AREA_THRESHOLD:
             excluded_regions.append({"bbox": bbox, "reason": "furniture_band"})
-        elif _overlaps_any_table(bbox, table_bboxes):
-            excluded_regions.append({"bbox": bbox, "reason": "table_overlap"})
-        else:
-            regions.append({"bbox": bbox})
+            return
+        overlapping = [t for t in tables if _overlaps_table(bbox, t["bbox"])]
+        if overlapping:
+            # Follow-up R11: a chart's grid read as a table does not hide
+            # the chart. Only when every overlapping table is a grid table.
+            curves = _has_curves_or_diagonals(members or [])
+            if not all(is_grid_table(t, curves) for t in overlapping):
+                excluded_regions.append({"bbox": bbox, "reason": "table_overlap"})
+                return
+            for t in overlapping:
+                excluded_regions.append({"bbox": list(t["bbox"]), "reason": "grid_table"})
+        regions.append({"bbox": bbox})
 
     box_candidates = []  # raw [x0, y0, x1, y1] of each would-be text box
     for rect in clusters:
@@ -473,7 +545,7 @@ def detect_figure_regions_with_exclusions(
         if _is_text_box(rect, significant, page_lines):
             box_candidates.append(raw)
             continue
-        keep_unless_band_or_table(bbox)
+        keep_unless_band_or_table(bbox, _drawings_in_cluster(rect, significant))
 
     # Follow-up R2: a group of nearby boxes, or a single box, with a figure
     # caption next to it is a box diagram, not body text.

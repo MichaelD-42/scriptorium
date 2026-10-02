@@ -36,7 +36,9 @@ MIN_OUTPUT_BYTES = 20
 # rules the brief calls out as capable of excluding a genuinely large real
 # figure, so those are the ones worth a human's attention.
 LARGE_REGION_EXCLUDED_AREA_FRACTION = 0.2
-LARGE_REGION_EXCLUDED_BENIGN_REASONS = {"frame_drawing", "repeated_drawing", "tiny", "text_box"}
+# Follow-up R11: "grid_table" is a chart's grid read as a table; its cluster
+# is the image, so nothing is lost.
+LARGE_REGION_EXCLUDED_BENIGN_REASONS = {"frame_drawing", "repeated_drawing", "tiny", "text_box", "grid_table"}
 
 # Task A9: a `table` element whose bbox is within
 # furniture_lib.FRAME_MATCH_TOLERANCE of a triage `frame_tables` entry is the

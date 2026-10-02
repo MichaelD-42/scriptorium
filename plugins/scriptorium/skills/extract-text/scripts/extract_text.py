@@ -17,7 +17,6 @@ import paths  # noqa: E402
 import toc as toc_lib  # noqa: E402
 
 import fitz  # PyMuPDF
-import pdfplumber
 
 # Furniture removal (Task A2) reads triage.json["furniture"], written by
 # pdf-triage's detect_furniture(). The band, the frame matching tolerance and
@@ -808,17 +807,6 @@ def classify_heading_level(
     return heading_size_ranks.get(max_size)
 
 
-def extract_page_tables(pdf_path: Path, page_number: int) -> list[dict]:
-    tables = []
-    with pdfplumber.open(pdf_path) as pl_doc:
-        pl_page = pl_doc.pages[page_number - 1]
-        for table in pl_page.find_tables():
-            rows = table.extract()
-            rows = [[cell if cell is not None else "" for cell in row] for row in rows]
-            tables.append({"bbox": table.bbox, "rows": rows})
-    return tables
-
-
 def extract_page_text_blocks(page, body_size: float | None) -> tuple[list[dict], float]:
     """`body_size`, if given, comes from pdf-triage's document-wide,
     character-weighted measurement (`triage.json`'s `body_size` field) and
@@ -938,19 +926,24 @@ def main() -> None:
         page = fitz_doc[page_number - 1]
         page_height = page.rect.height
         text_blocks, body_size = extract_page_text_blocks(page, args.body_size)
-        tables = extract_page_tables(pdf_path, page_number)
-        # Drop page-frame tables (furniture, not real content) before doing
-        # anything else with the table list -- must happen before the
-        # overlap-drop below, or a frame "table" would swallow real text
-        # blocks that merely sit underneath it.
-        tables = [t for t in tables if not furniture_lib.matches_any_frame(t["bbox"], frame_tables)]
+        # Page-frame tables (furniture, not real content) are left out by
+        # the shared query -- before the overlap-drop below, or a frame
+        # "table" would swallow real text blocks that merely sit under it.
+        tables = [
+            {"bbox": t["bbox"], "rows": t["rows"]}
+            for t in figures_lib.page_tables(pdf_path, page_number, frame_tables)
+        ]
         # Task A5: figure regions detected the same way extract_images.py
         # detects them (same shared helper, so the two scripts can never
         # disagree about where a page's figures are) -- their text-layer
         # lines belong to figure_text, not to a paragraph/heading element.
-        figure_regions = figures_lib.detect_figure_regions(
+        figure_regions, region_exclusions = figures_lib.detect_figure_regions_with_exclusions(
             page, page_number, pdf_path, frame_tables, frame_drawings, repeated_drawings=repeated_drawings,
         )
+        # Follow-up R11: a chart's grid that pdfplumber read as a table is
+        # part of the figure, so it is not a table element.
+        grid_tables = [r["bbox"] for r in region_exclusions if r["reason"] == "grid_table"]
+        tables = [t for t in tables if not any(furniture_lib.bbox_matches(t["bbox"], g) for g in grid_tables)]
 
         # Task A6: caption lines -- one find_caption_line() search per
         # image bbox on the page (every vector region above, plus every

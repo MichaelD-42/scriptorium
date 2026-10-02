@@ -298,6 +298,11 @@ class TestRegionExclusionRules:
                 page.draw_line((x0, yy), (x1, yy), width=1)
             for xx in (x0, (x0 + x1) / 2, x1):
                 page.draw_line((xx, y0), (xx, y1), width=1)
+            # Follow-up R11: a real table has filled cells (an empty ruled
+            # grid is a chart's grid, a figure).
+            for cx in (x0 + 10, (x0 + x1) / 2 + 10):
+                for cy in (y0 + 25, (y0 + y1) / 2 + 25):
+                    page.insert_text((cx, cy), "cell", fontsize=9)
             page.draw_rect(fitz.Rect(150, 450, 450, 600), width=1)  # legitimate figure, well clear of the table
 
         doc, page = _make_region_pdf(path, draw)
