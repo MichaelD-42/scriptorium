@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Generate the synthetic furniture/TOC/heading/figure/list test fixture used
-by Track A of the PDF-extraction plan (Task A0 onward).
+by the PDF-extraction tests.
 
 This is a *second*, purpose-built PDF alongside sample.pdf -- sample.pdf
 stays untouched as the existing regression fixture. This one packs, in a

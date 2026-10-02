@@ -140,9 +140,8 @@ REGION_PADDING = 10.0
 
 # A cluster smaller than this fraction of the page area is treated as stray
 # line-art (a short rule, an underline) rather than a real figure. A judgment
-# call, not a derived constant -- a later step's document census (a later,
-# non-code step) is expected to tune this against the real golden document;
-# 1% gives a reasonable ballpark against this repo's fixtures today (the
+# call, not a derived constant -- a census of real documents is expected
+# to tune it; 1% gives a reasonable ballpark against this repo's fixtures today (the
 # smallest real figure region here, furniture_sample.pdf's bar chart, is
 # ~4.5% of its page; a single short stray line is two to three orders of
 # magnitude smaller).
@@ -186,8 +185,8 @@ CAPTION_PATTERN = re.compile(r"^(figure|fig\.?|table)\s+\d+\.?:?\s", re.IGNORECA
 # inside this window with room to spare. A generous window is safe here
 # because CAPTION_PATTERN, not distance, is the real filter: ordinary body
 # text never matches it, so widening the search window risks a slow query,
-# not a false match. a later step's document census is expected to tune this
-# against the real golden document, same as this module's other constants.
+# not a false match. A census of real documents is expected to tune this,
+# same as this module's other constants.
 CAPTION_SEARCH_DISTANCE = 60.0
 
 

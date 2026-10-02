@@ -166,8 +166,8 @@ A document with no `H1` at all produces a single `00-front-matter.md` file.
 
 `--format md-tree --split-depth N` splits the document into nested folders
 and files, unlike OKF's flat H1-only split — useful when a downstream
-consumer (the downstream step: a downstream consumer's RFQ-intake pipeline) needs one file
-per section, addressable by a stable per-heading anchor. `N` is the heading
+consumer needs one file per section, addressable by a stable per-heading
+anchor. `N` is the heading
 level at which a NEW FILE starts: levels shallower than `N` become folders,
 level `N` itself starts a file, levels deeper than `N` stay as headings
 inline within that file.
@@ -240,28 +240,26 @@ helper OKF uses.
   file, so it has no anchor. Nothing can point into it, because it holds
   no content.
 
-The slug rule:
+There is no shared code: a downstream consumer implements the same
+`slugify_heading` rule independently; the rule below is a byte-for-byte
+contract. The slug rule:
 
 - If the heading text starts with a leading number (digit groups separated
   by dots, matched from the very start of the text with only leading
   whitespace skipped — e.g. `"2.3.1 Some Title"`), the anchor is that
   number with every `.` replaced by `-` (`"2-3-1"`). No word-boundary check
   follows the digits, so `"3D Printing"` anchors as `"3"`, not
-  `"3d-printing"` — intentional, not a bug, because it must match the other
-  repo's regex exactly.
+  `"3d-printing"` — intentional, not a bug, because it must match the
+  consumer's rule exactly.
 - Otherwise, slugify the full heading text: lowercase, every run of
   non-alphanumeric characters replaced with a single `-`, leading/trailing
   `-` stripped, falling back to the literal `"section"` if that's empty.
 
-This is implemented independently in a downstream consumer (a different repo, no
-shared code) as its own `slugify_heading()`
-(`plugins/rfq-intake/skills/rfq-object-ids/scripts/tag_objects.py`), which
-that repo's own objects carry as `locator.anchor`/`object_anchor`. the downstream step
-(a later, separate step) directly compares this repo's anchors against that
-output — **any drift here breaks that cross-reference.** `slugify_heading`
-in `assemble.py` is unit-tested against the exact same input/output pairs
-that repo's own tests use (`"2.3.1 Some Title"` → `"2-3-1"`, `"Appendix A"`
-→ `"appendix-a"`) — see `tests/test_md_tree_split.py::TestSlugifyHeading`.
+**Any drift in this rule breaks the consumer's links into md-tree
+files.** `slugify_heading` in `assemble.py` is unit-tested against fixed
+input/output pairs
+(`"2.3.1 Some Title"` → `"2-3-1"`, `"Appendix A"` → `"appendix-a"`) — see
+`tests/test_md_tree_split.py::TestSlugifyHeading`.
 
 Note this is a *different* rule from the `NN`/`MM` folder/file naming above:
 folder/file naming uses `split_section_number`, which requires whitespace

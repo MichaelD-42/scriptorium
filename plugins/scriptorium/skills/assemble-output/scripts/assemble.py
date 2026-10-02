@@ -258,14 +258,11 @@ def write_okf(doc_data: dict, doc: str) -> list[Path]:
 
 # --- md-tree (Task A8) -------------------------------------------------
 
-# The anchor contract: EXACT cross-repo match with a downstream consumer's own,
-# independently-implemented `slugify_heading()`
-# (plugins/rfq-intake/skills/rfq-object-ids/scripts/tag_objects.py in that
-# repo -- no shared code between the two repos, reproduced here byte-for-byte
-# per Task A8's brief). See SKILL.md's "md-tree format" section for the
-# documented contract; the downstream step (a later, separate step) directly compares
-# this repo's anchors against that repo's `object_anchor`/`locator.anchor`
-# output, so any drift here breaks that cross-reference.
+# The anchor contract: a downstream consumer implements the same
+# `slugify_heading` rule independently; the rule below is a byte-for-byte
+# contract (no shared code). See SKILL.md's "md-tree format" section for the
+# documented contract; any drift here breaks the consumer's links into
+# md-tree files.
 LEADING_NUMBER_RE = re.compile(r"^\s*(\d+(?:\.\d+)*)")
 
 
@@ -276,10 +273,9 @@ def slugify_heading(text: str) -> str:
     Preferred source: the heading's own leading number (e.g. "2.3.1 Some
     Title" -> "2-3-1"), matched from the very start of the text (only
     leading whitespace is skipped -- note this means a heading like "3D
-    Printing" anchors as "3", not "3d-printing": the other repo's regex has
-    no word-boundary check after the digit groups, and this reproduces that
-    exactly, not a stricter version of it -- verified against that repo's
-    own `LEADING_NUMBER = re.compile(r"^\\s*(\\d+(?:\\.\\d+)*)")`). No
+    Printing" anchors as "3", not "3d-printing": the contract rule has no
+    word-boundary check after the digit groups, and this reproduces that
+    exactly, not a stricter version of it). No
     leading number -> slugify the full text: lowercase, every run of
     non-alphanumeric characters replaced with a single "-", leading/
     trailing "-" stripped, "section" if empty."""

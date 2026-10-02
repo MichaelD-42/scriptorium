@@ -15,9 +15,9 @@ section for the full contract):
     written (even with an empty body) since the heading itself IS the
     section.
   - Levels 3+ stay inline within their enclosing file, each preceded by a
-    stable `<a id="...">` anchor (Task A8's cross-repo anchor contract,
-    `slugify_heading` -- byte-for-byte match with a downstream consumer's own,
-    independently-implemented `slugify_heading()`). The L1/L2 heading that
+    stable `<a id="...">` anchor (the anchor contract, `slugify_heading`:
+    a downstream consumer implements the same rule independently, byte for
+    byte). The L1/L2 heading that
     opens a file puts its anchor on the file's first body line instead (see
     test_md_tree_anchors.py).
 
@@ -60,11 +60,9 @@ def _frontmatter(text: str) -> dict:
 
 
 # --------------------------------------------------------------------------
-# The anchor contract -- exact cross-repo match with a downstream consumer's own
-# `slugify_heading()` (plugins/rfq-intake/skills/rfq-object-ids/scripts/
-# tag_objects.py in that repo). Same input/output pairs as that repo's own
-# `test_locator_anchor_from_leading_heading_number` test, so a reader can
-# cross-check the two directly.
+# The anchor contract -- a downstream consumer implements the same
+# `slugify_heading` rule independently; the rule below is a byte-for-byte
+# contract. These input/output pairs are that contract's test pairs.
 # --------------------------------------------------------------------------
 
 class TestSlugifyHeading:

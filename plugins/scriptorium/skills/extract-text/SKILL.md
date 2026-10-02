@@ -80,7 +80,7 @@ document.
   `triage.json`/`furniture` section => no removal, same output as before.
 - **List items (Task A4b)**: a text line that starts with a bullet glyph
   (a single character — ``/``/``/`` (Symbol-font
-  private-use glyphs found on the golden document), `·`/`•`/`▪`/`–`/`-`)
+  private-use glyphs found in real documents), `·`/`•`/`▪`/`–`/`-`)
   or an enumerator token (`1)`, `1.`, `(1)`, `a)`, `(a)`, a short roman
   numeral like `i)`/`ii)`) followed by whitespace and more real text on
   the same line becomes a `list_item` instead of a `paragraph`:

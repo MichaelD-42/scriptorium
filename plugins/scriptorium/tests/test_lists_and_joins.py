@@ -105,7 +105,7 @@ class TestParseListMarker:
 
     def test_private_use_glyph(self):
         # The brief's own worked example: U+F02D, a Symbol-font private-use
-        # bullet glyph found on the real (customer) golden document --
+        # bullet glyph found in real documents --
         # PyMuPDF/reportlab can't reliably draw this via a base-14 font, so
         # it's only ever exercised as plain Python text here, never rendered.
         assert extract_text.parse_list_marker(" Ingestion step") == ("", "Ingestion step")

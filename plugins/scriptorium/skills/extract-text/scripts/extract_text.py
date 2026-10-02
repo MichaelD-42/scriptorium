@@ -236,7 +236,7 @@ def is_fallback_heading_candidate(text: str, is_bold_block: bool, max_size: floa
 
 # Task A4b: list items. Bullet-glyph markers are single characters -- Symbol-
 # font private-use glyphs (U+F02D/U+F0B7/U+F0A7/U+F0D8, the shapes actually
-# found on the golden document), plus the common Unicode bullet punctuation
+# found in real documents), plus the common Unicode bullet punctuation
 # (middle dot, bullet, black small square, en dash) and a plain ASCII
 # hyphen. Keep the set in one place so parse_list_marker/document scanning/
 # tests all agree on exactly which characters count.
