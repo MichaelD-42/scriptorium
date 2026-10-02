@@ -121,8 +121,8 @@ class TestWrappedTitles:
         assert entries == [
             {"number": "3.2", "title": "Next entry", "page": 9, "level": 2}
         ]
-        # The unclosed line has no leader, so it is not a lost entry.
-        assert unparsed == []
+        # Follow-up R9: a numbered line that gives no entry is unparsed.
+        assert unparsed == ["3.1 Title with no leader"]
 
     def test_wrapped_title_on_a_real_toc_page(self, tmp_path):
         page = FULL_PAGE[:18] + [

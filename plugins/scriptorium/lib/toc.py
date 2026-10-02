@@ -34,7 +34,10 @@ is a thin convenience wrapper for callers that only want the entries list.
 
 Fix wave I2 also accepts a short last TOC page (see
 CONTINUATION_MIN_QUALIFYING_LINES) and joins a title that wraps onto
-further lines (see WRAP_MAX_LINES).
+further lines (see WRAP_MAX_LINES). Follow-up R9 accepts a title whose
+leader and page number wrap onto a line that holds only the page number
+(see SAME_Y_TOLERANCE), and puts every numbered line that gives no entry in
+`unparsed`.
 
 `normalize_toc_text(text)` and `toc_entry_heading_text(entry)` (Task A4) are
 the shared normalization this module's "does this printed text match this
@@ -107,6 +110,21 @@ CONTINUATION_MIN_LINE_FRACTION = 0.30
 # are joined to the title, until a leader line closes the entry.
 WRAP_MAX_LINES = 3
 
+# Follow-up R9: a long title can push its leader and page number onto the
+# next line, which then holds only the page number ("5" / "<TITLE>" at one y,
+# then "53" alone). Two lines are on the same visual line when their tops
+# differ by at most this much. A lone page number has no other text at its
+# y; a lone section number always has its title span at its y.
+SAME_Y_TOLERANCE = 3.0  # pt
+
+# A bare integer line: the page-number-only line of a wrapped entry.
+PAGE_ONLY_RE = re.compile(r"^(\d+)$")
+
+# A section-number token for the `unparsed` check: dotted parts of at most 3
+# digits each, so a long document number in the title block ("12345678") is
+# not one.
+SECTION_NUMBER_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3})*$")
+
 
 def _level_from_number(number: str) -> int:
     """"1" -> 1, "1.2" -> 2, "1.2.3" -> 3, ... -- dot-depth, no hardcoded cap."""
@@ -132,6 +150,22 @@ def toc_from_outline(document) -> list[dict]:
 
 def _page_lines(page) -> list[str]:
     return [line.strip() for line in page.get_text("text").splitlines() if line.strip()]
+
+
+def _page_line_records(page) -> tuple[list[str], list[float]]:
+    """The same lines as `_page_lines` (PyMuPDF's "text" output is its
+    "dict" lines in order, each line's spans joined), plus each line's top
+    y, for the same-y checks of follow-up R9."""
+    lines, ys = [], []
+    for block in page.get_text("dict").get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            text = "".join(span["text"] for span in line.get("spans", [])).strip()
+            if text:
+                lines.append(text)
+                ys.append(line["bbox"][1])
+    return lines, ys
 
 
 def _qualifying_line_count(lines: list[str]) -> int:
@@ -210,18 +244,78 @@ def _close_wrapped_entry(lines: list[str], i: int, number: str, title_parts: lis
     return None
 
 
-def parse_toc_page_lines(lines: list[str]) -> tuple[list[dict], list[str]]:
+def _same_y(ys: list[float], a: int, b: int) -> bool:
+    return abs(ys[a] - ys[b]) <= SAME_Y_TOLERANCE
+
+
+def _alone_at_its_y(ys: list[float], k: int) -> bool:
+    """True when no other line of the page starts at line `k`'s y."""
+    return not any(j != k and _same_y(ys, j, k) for j in range(len(ys)))
+
+
+def _close_page_wrapped_entry(
+    lines: list[str], ys: list[float] | None, i: int, number: str, title: str | None
+) -> tuple[dict, int] | None:
+    """Follow-up R9: the entry that `lines[i]` opens when its title has no
+    leader and no page number, and the next line holds only the page number.
+    `title` is the title when `lines[i]` carries it ("5 TITLE"); for a
+    number-only line it is None, and the title must be the next line, at the
+    same y. The page line must be a bare integer with no other text at its
+    y, which tells it apart from a lone section number (that one always has
+    its title span at its y). Needs the line ys; returns `(entry,
+    next_index)` or None."""
+    if ys is None:
+        return None
+    j = i + 1
+    if title is None:
+        if j >= len(lines) or not _same_y(ys, i, j):
+            return None
+        title_line = lines[j]
+        if TITLE_LEADER_PAGE_RE.match(title_line) or _starts_entry(title_line):
+            return None
+        title = title_line.strip()
+        j += 1
+    if j >= len(lines) or not PAGE_ONLY_RE.match(lines[j]) or not _alone_at_its_y(ys, j):
+        return None
+    return _entry(number, title, int(lines[j])), j + 1
+
+
+def _is_numbered_line(lines: list[str], ys: list[float] | None, k: int) -> bool:
+    """Follow-up R9: `lines[k]` starts with a section-number token
+    (SECTION_NUMBER_RE) and carries a title: letters after the number, or,
+    for a number-only line, a line with letters at the same y (needs the
+    ys). A footer like "2 ( 1 2 0 )" or a document number has no title."""
+    line = lines[k]
+    prefix = NUMBER_PREFIX_RE.match(line)
+    if prefix and SECTION_NUMBER_RE.match(prefix.group(1)):
+        return bool(re.search(r"[^\W\d_]", prefix.group(2)))
+    if SECTION_NUMBER_RE.match(line) and ys is not None:
+        return any(
+            j != k and _same_y(ys, j, k) and re.search(r"[^\W\d_]", lines[j]) for j in range(len(lines))
+        )
+    return False
+
+
+def parse_toc_page_lines(lines: list[str], ys: list[float] | None = None) -> tuple[list[dict], list[str]]:
     """`(entries, unparsed)` for one printed TOC page's lines. An entry is
     one of:
     - a numbered title with a leader on one line ("1 Introduction .... 4");
     - a number-only line, then the title with the leader ("2" / "Scope ....
       5"), with up to WRAP_MAX_LINES wrapped title lines in between;
     - a numbered title with no leader, then up to WRAP_MAX_LINES further
-      wrapped lines and the line with the leader.
+      wrapped lines and the line with the leader;
+    - follow-up R9: a numbered title with no leader and no page number (on
+      one line, or a number-only line and its title at the same y), then a
+      line that holds only the page number, alone at its y. This shape
+      needs `ys`, each line's top y (`_page_line_records`).
     `unparsed` (fix wave I2) is every dot-leader line that gave no entry,
-    verbatim -- for example a leader line with no section number."""
+    verbatim -- for example a leader line with no section number. Follow-up
+    R9 adds every numbered line (`_is_numbered_line`) that ends up in no
+    entry, so the next unknown shape is visible too. Both kinds keep page
+    order."""
     entries: list[dict] = []
-    unparsed: list[str] = []
+    unparsed_at: list[int] = []
+    used: set[int] = set()
     i = 0
     while i < len(lines):
         line = lines[i]
@@ -232,8 +326,9 @@ def parse_toc_page_lines(lines: list[str]) -> tuple[list[dict], list[str]]:
             number, title = _split_leading_number(left)
             if number is not None:
                 entries.append(_entry(number, title, target_page))
+                used.add(i)
             else:
-                unparsed.append(line)
+                unparsed_at.append(i)
             i += 1
             continue
 
@@ -242,15 +337,22 @@ def parse_toc_page_lines(lines: list[str]) -> tuple[list[dict], list[str]]:
         if number_match or prefix_match:
             if number_match:
                 closed = _close_wrapped_entry(lines, i, number_match.group(1), [])
+                if closed is None:
+                    closed = _close_page_wrapped_entry(lines, ys, i, number_match.group(1), None)
             else:
                 closed = _close_wrapped_entry(lines, i, prefix_match.group(1), [prefix_match.group(2).strip()])
+                if closed is None:
+                    closed = _close_page_wrapped_entry(lines, ys, i, prefix_match.group(1), prefix_match.group(2).strip())
             if closed is not None:
-                entry, i = closed
+                entry, next_i = closed
                 entries.append(entry)
+                used.update(range(i, next_i))
+                i = next_i
                 continue
 
         i += 1
-    return entries, unparsed
+    unparsed_at.extend(k for k in range(len(lines)) if k not in used and _is_numbered_line(lines, ys, k))
+    return entries, [lines[k] for k in sorted(set(unparsed_at))]
 
 
 def _parse_toc_page_lines(lines: list[str]) -> list[dict]:
@@ -263,7 +365,7 @@ def parse_printed_toc_with_unparsed(document, toc_pages: list[int]) -> tuple[lis
     entries: list[dict] = []
     unparsed: list[str] = []
     for page_number in toc_pages:
-        page_entries, page_unparsed = parse_toc_page_lines(_page_lines(document[page_number - 1]))
+        page_entries, page_unparsed = parse_toc_page_lines(*_page_line_records(document[page_number - 1]))
         entries.extend(page_entries)
         unparsed.extend(page_unparsed)
     return entries, unparsed

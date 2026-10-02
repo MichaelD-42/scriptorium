@@ -87,7 +87,11 @@ Also writes `work/<doc-name>/toc.json`:
    as a printed TOC and parsed, handling both "number and title on one
    line" and "number alone on one line, title+leader+page on the next".
    A title that wraps (up to 3 lines without a leader before the leader
-   line) is joined into one entry. The first TOC page needs at least 15
+   line) is joined into one entry. A long title whose leader and page
+   number wrap onto a line that holds only the page number (`5` and its
+   title at one y, then `53` alone at the next y) is one entry with that
+   page; a lone section number is told apart from a page line because it
+   always has its title at its y (within 3 pt). The first TOC page needs at least 15
    dot-leader lines; a page directly after a TOC page also counts when it
    has at least 3 dot-leader lines and its dot-leader plus number-only
    lines are at least 30% of its lines (a short last TOC page).
@@ -97,7 +101,9 @@ Also writes `work/<doc-name>/toc.json`:
    the detected contiguous run is marked `role: "toc"` in `triage.json`.
 
 `unparsed` lists, verbatim, every dot-leader line on a TOC page that gave
-no entry (for example a leader line with no section number). It is `[]`
+no entry (for example a leader line with no section number), and every
+numbered line (a section-number token with a title) that ended up in no
+entry. It is `[]`
 for the outline path. `grade-output`'s `toc_headings_match` fails while it
 is not empty, because each such line may be a lost entry whose heading
 then became a paragraph.
