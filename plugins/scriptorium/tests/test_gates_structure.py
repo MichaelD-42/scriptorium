@@ -120,7 +120,12 @@ class TestFurnitureAbsent:
         assert result["passed"] is True
 
     def test_fails_on_a_furniture_line_in_the_assembled_markdown(self, tmp_path):
-        _write_md(tmp_path, "# 1 Introduction\n\nBody text.\n\nDoc No. SYN-FUR-0001\n")
+        # Follow-up R14: furniture is repetition, so the footer is a whole
+        # line at least 3 times.
+        _write_md(
+            tmp_path,
+            "# 1 Introduction\n\nBody text.\n\nDoc No. SYN-FUR-0001\n\nDoc No. SYN-FUR-0002\n\nDoc No. SYN-FUR-0003\n",
+        )
         result = gates.check_furniture_absent(_doc_data(_clean_pages()), FURNITURE, tmp_path)
         assert result["passed"] is False
         offender = result["offenders"][0]
@@ -130,13 +135,22 @@ class TestFurnitureAbsent:
         # The output file names no page, so it adds none to `pages`.
         assert result["pages"] == []
 
-    def test_fails_on_a_furniture_line_in_a_markdown_table_cell_or_md_tree_file(self, tmp_path):
+    def test_fails_on_a_repeated_furniture_line_in_an_md_tree_file(self, tmp_path):
         section = tmp_path / "01-introduction"
         section.mkdir(parents=True)
-        (section / "01.00-introduction.md").write_text("| page 4 (11) | x |\n", encoding="utf-8", newline="")
+        (section / "01.00-introduction.md").write_text(
+            "page 4 (11)\n\npage 5 (11)\n\npage 6 (11)\n", encoding="utf-8", newline=""
+        )
         result = gates.check_furniture_absent(_doc_data(_clean_pages()), FURNITURE, tmp_path)
         assert result["passed"] is False
         assert result["offenders"][0]["where"] == "01-introduction/01.00-introduction.md line 1"
+
+    def test_a_single_output_line_or_table_cell_is_not_flagged(self, tmp_path):
+        """Follow-up R14: one matching whole line, or a table cell, is body
+        text."""
+        _write_md(tmp_path, "# 1 Introduction\n\nDoc No. SYN-FUR-0001\n\n| page 4 (11) | x |\n")
+        result = gates.check_furniture_absent(_doc_data(_clean_pages()), FURNITURE, tmp_path)
+        assert result["passed"] is True, result
 
     # Fix round 1 (review finding 2): a digit-only pattern (a footer that is
     # just the page number) matches an element only inside a furniture
@@ -171,11 +185,18 @@ class TestFurnitureAbsent:
         result = gates.check_furniture_absent(_doc_data(pages), self.BARE_NUMBER_FURNITURE, tmp_path)
         assert result["passed"] is True
 
-    def test_a_pattern_with_letters_still_matches_anywhere(self, tmp_path):
+    def test_a_pattern_with_letters_matches_anywhere_without_a_bbox(self, tmp_path):
+        pages = _clean_pages()
+        pages[1]["elements"].append({"type": "paragraph", "text": "page 1 (3)"})
+        result = gates.check_furniture_absent(_doc_data(pages), FURNITURE, tmp_path, self.PAGE_HEIGHTS)
+        assert result["passed"] is False
+
+    def test_a_pattern_with_letters_needs_the_band_with_a_bbox(self, tmp_path):
+        """Follow-up R14: an element with a bbox matches only in the band."""
         pages = _clean_pages()
         pages[1]["elements"].append({"type": "paragraph", "text": "page 1 (3)", "bbox": [72.0, 300.0, 200.0, 312.0]})
         result = gates.check_furniture_absent(_doc_data(pages), FURNITURE, tmp_path, self.PAGE_HEIGHTS)
-        assert result["passed"] is False
+        assert result["passed"] is True, result
 
     def test_digit_masking_does_not_match_other_text(self, tmp_path):
         pages = _clean_pages()
@@ -464,7 +485,7 @@ class TestGatesCliReadsTriageAndToc:
         assert report["passed"] is True
 
     def test_a_failing_structure_check_fails_the_report(self, tmp_project):
-        self._seed(tmp_project, "1 Intro", "Cover.\n\n# 1 Intro\n\npage 2 (2)\n")
+        self._seed(tmp_project, "1 Intro", "Cover.\n\n# 1 Intro\n\npage 2 (2)\n\npage 2 (2)\n\npage 2 (2)\n")
         report = json.loads(_run_ok("grade-output/scripts/gates.py", "--doc", "doc", cwd=tmp_project))
         checks = {c["name"]: c for c in report["checks"]}
         assert checks["furniture_absent"]["passed"] is False

@@ -197,34 +197,38 @@ def in_furniture_band(bbox, page_height: float | None, rect: list[float] | None 
 #   has the exact text-layer geometry, so it can be strict: a body line that
 #   happens to equal a title-block label is kept.
 # - The merge-time filter for `ocr`/`vision` bodies (`lib/elements.py`) and
-#   the `furniture_absent` gate both use `patterns_for_element` below: a
-#   letter-bearing pattern matches ANYWHERE, a digit-only pattern only inside
-#   the band. The merge filter must use the gate's rule, so that an escalated
+#   the `furniture_absent` gate both use `patterns_for_element` below.
+#   Follow-up R14: an element with a bbox matches any pattern only inside the
+#   band; an element without a bbox matches a letter-bearing pattern
+#   ANYWHERE. The merge filter must use the gate's rule, so that an escalated
 #   page passes the gate; and an OCR or vision element often has no bbox, so
 #   a band test alone could not remove its title block.
 # Two effects follow. A digit-only footer line in an OCR or vision body (no
 # bbox) is never removed, and the gate cannot flag it either, so the two
-# stay consistent. A mid-page body line that equals a letter-bearing
-# furniture line is removed on an `ocr`/`vision` page but kept on a `text`
-# page.
+# stay consistent. A mid-page body line with no bbox that equals a
+# letter-bearing furniture line is removed on an `ocr`/`vision` page but
+# kept on a `text` page.
 
 
 def patterns_for_element(
     all_patterns: set[str], bbox, page_height: float | None, rect: list[float] | None = None
 ) -> set[str]:
     """The band plus pattern rule: the masked line patterns that may match
-    one element's text.
+    one element's text (follow-up R14).
 
-    A letter-bearing pattern matches anywhere on the page. A digit-only
-    pattern also matches any bare number in the body (a table cell "3", a
-    quantity), so it applies only when the element's bbox lies in a
-    furniture band of its page (band_limits, with the content rect
-    `rect`). With no bbox or no page height, only the letter-bearing
-    patterns apply."""
-    letter_patterns = {m for m in all_patterns if not is_digit_only_pattern(m)}
-    if letter_patterns != all_patterns and in_furniture_band(bbox, page_height, rect):
-        return set(all_patterns)
-    return letter_patterns
+    - An element WITH a bbox, on a page of known height, matches every
+      pattern (letters or digits) only when the bbox lies in a furniture
+      band (band_limits, with the content rect `rect`), and none outside
+      it. A short title-block value can also be an abbreviations-table row
+      or a word in body text, and a bare number can be a table cell, so a
+      body element never matches.
+    - An element WITHOUT a bbox (OCR, vision), or with no page height,
+      matches the letter-bearing patterns anywhere: there is no geometry to
+      test, and the title block of a transcribed page has to go. A
+      digit-only pattern never matches it."""
+    if bbox and len(bbox) == 4 and page_height and page_height > 0:
+        return set(all_patterns) if in_furniture_band(bbox, page_height, rect) else set()
+    return {m for m in all_patterns if not is_digit_only_pattern(m)}
 
 
 def furniture_line_hits(text: str, masked_patterns: set[str]) -> list[str]:

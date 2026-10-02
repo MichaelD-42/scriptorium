@@ -7,6 +7,7 @@ belongs in rubric.md instead, applied by the calling agent.
 
 import argparse
 import json
+import math
 import re
 import sys
 import zipfile
@@ -218,6 +219,20 @@ def _output_line_candidates(line: str) -> list[str]:
     return result
 
 
+# Follow-up R14: a furniture pattern is flagged in the assembled output only
+# when it is a whole line at least max(OUTPUT_REPEAT_MIN_COUNT,
+# OUTPUT_REPEAT_MIN_FRACTION of the body pages) times.
+OUTPUT_REPEAT_MIN_COUNT = 3
+OUTPUT_REPEAT_MIN_FRACTION = 0.10
+
+
+def output_repeat_threshold(doc_data: dict) -> int:
+    """See OUTPUT_REPEAT_MIN_COUNT. Body pages are the pages not skipped as
+    a printed TOC."""
+    body = sum(1 for p in doc_data.get("pages", {}).values() if p.get("skipped") != "toc")
+    return max(OUTPUT_REPEAT_MIN_COUNT, math.ceil(OUTPUT_REPEAT_MIN_FRACTION * body))
+
+
 def check_furniture_absent(doc_data: dict, furniture: dict, output_dir: Path, page_heights: dict[int, float] | None = None) -> dict:
     """Task A9: no page furniture (pdf-triage's `triage.json["furniture"]`)
     survived into the merged elements or the assembled output.
@@ -226,20 +241,23 @@ def check_furniture_absent(doc_data: dict, furniture: dict, output_dir: Path, pa
       `figure_text` or `caption` has a line whose furniture key equals
       a `line_patterns` entry.
     - Tables: no `table` element's bbox matches a `frame_tables` entry.
-    - Assembled output: no line of any .md/.html file under the doc's
-      output dir (md, md-tree, okf, html) matches a `line_patterns` entry.
-      These offenders have `page: None` -- an output file names no page.
+    - Assembled output: no whole line of the .md/.html files under the
+      doc's output dir (md, md-tree, okf, html) matches a `line_patterns`
+      entry at least output_repeat_threshold() times in one output
+      (follow-up R14: furniture is repetition, a single matching line is
+      body text). These offenders have `page: None` -- an output file names
+      no page.
     - Furniture images: NOT checked. No extractor records the source image
       xref on an image element, so gates.py cannot tell which asset came
       from a furniture xref. extract-images skips those xrefs itself.
 
-    Digit-only patterns (fix round 1): a pattern with no letters, e.g.
-    "#" for a footer that is only the page number, also matches any bare
-    number in the body (a table cell "3", a quantity). So a digit-only
-    pattern matches an element only when the element's bbox lies in a
-    furniture band of its page (`page_heights`, from the PDF), and it is
-    never checked in the assembled output, where a bare number tells
-    nothing. With no page height (non-PDF input) it never matches.
+    Which patterns may match an element is `furniture.patterns_for_element`
+    (follow-up R14): an element with a bbox matches any pattern only when
+    the bbox lies in a furniture band of its page (`page_heights`, from the
+    PDF); an element without a bbox (or with no page height) matches only
+    the letter-bearing patterns, anywhere. A digit-only pattern (e.g. "#",
+    a footer that is only the page number) is never checked in the
+    assembled output, where a bare number tells nothing.
 
     Passes trivially when the document has no furniture (no line patterns
     and no frame tables -- e.g. every non-PDF format, or no triage.json)."""
@@ -276,13 +294,26 @@ def check_furniture_absent(doc_data: dict, furniture: dict, output_dir: Path, pa
                             add(page_number, f"image {field}", hit)
 
     if masked_patterns and output_dir.exists():
+        # Follow-up R14: furniture is repetition. A pattern is flagged in the
+        # assembled output only when it is a whole line at least
+        # output_repeat_threshold() times in one output (a single-file md or
+        # html, or one split bundle).
+        threshold = output_repeat_threshold(doc_data)
+        hits: dict[tuple[str, str], list[tuple[str, str]]] = {}
         for out_file in sorted(list(output_dir.rglob("*.md")) + list(output_dir.rglob("*.html"))):
             rel = out_file.relative_to(output_dir).as_posix()
+            group = rel if out_file.parent == output_dir and out_file.stem == output_dir.name else "split"
             for line_number, line in enumerate(out_file.read_text(encoding="utf-8").splitlines(), start=1):
-                for candidate in _output_line_candidates(line):
-                    if furniture_lib.furniture_key(candidate) in masked_patterns:
-                        add(None, f"{rel} line {line_number}", candidate)
-                        break
+                candidates = _output_line_candidates(line)
+                if not candidates:
+                    continue
+                key = furniture_lib.furniture_key(candidates[0])
+                if key in masked_patterns:
+                    hits.setdefault((group, key), []).append((f"{rel} line {line_number}", candidates[0]))
+        for found in hits.values():
+            if len(found) >= threshold:
+                for where, text in found:
+                    add(None, where, text)
 
     pages = sorted({o["page"] for o in offenders if o["page"] is not None})
     if not all_patterns and not frame_bboxes:

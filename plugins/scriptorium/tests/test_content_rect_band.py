@@ -112,7 +112,8 @@ class TestBandLimits:
     def test_digit_only_pattern_does_not_hit_a_cell_near_the_top_inside_the_rect(self):
         cell = [60.0, 60.0, 80.0, 70.0]  # inside the rect, but in the old 12% band
         assert not furniture_lib.in_furniture_band(cell, H, FRAME)
-        assert furniture_lib.patterns_for_element({"#", "DocNo#"}, cell, H, FRAME) == {"DocNo#"}
+        # Follow-up R14: an element with a bbox outside the band matches no pattern.
+        assert furniture_lib.patterns_for_element({"#", "DocNo#"}, cell, H, FRAME) == set()
 
 
 class TestWithInnerFrame:

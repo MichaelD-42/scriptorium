@@ -24,9 +24,10 @@ The one place all three extraction tiers converge. Three scripts:
    whitespace, digit runs as `#`) equals one of
    `triage.json["furniture"]["line_patterns"]`, with `lib/furniture.py`'s
    band plus pattern rule (the rule `grade-output`'s `furniture_absent`
-   checks): a letter-bearing pattern matches anywhere; a digit-only pattern
-   matches only when the element's bbox lies in the furniture band
-   (`band_limits`, with triage's `content_rect` when there is one). An
+   checks, follow-up R14): an element with a bbox matches any pattern only
+   when the bbox lies in the furniture band (`band_limits`, with triage's
+   `content_rect` when there is one), so a body line is never deleted; an
+   element without a bbox matches a letter-bearing pattern anywhere. An
    element that is empty afterwards is dropped. The page records the count
    as `furniture_lines_removed` (absent when zero). `text` bodies are not
    touched.
@@ -37,9 +38,9 @@ The one place all three extraction tiers converge. Three scripts:
    `furniture_absent`, and because an `ocr` or `vision` element often has no
    bbox to test against the band. Two effects: a digit-only footer line in
    an `ocr`/`vision` body with no bbox is never removed (and the gate cannot
-   flag it either); and a mid-page body line that equals a letter-bearing
-   furniture line is removed on an `ocr`/`vision` page but kept on a `text`
-   page. The note in `lib/furniture.py` says the same.
+   flag it either); and a mid-page body line with no bbox that equals a
+   letter-bearing furniture line is removed on an `ocr`/`vision` page but
+   kept on a `text` page. The note in `lib/furniture.py` says the same.
    **Page-break joins (Task A4b)**: after combining, `lib/elements.py`'s
    `merge_shards()` walks every adjacent page pair once, ascending. If page
    `n`'s last non-image element is a `paragraph`/`list_item` whose text
