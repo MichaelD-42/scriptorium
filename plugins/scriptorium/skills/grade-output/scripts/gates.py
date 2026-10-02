@@ -221,7 +221,7 @@ def check_furniture_absent(doc_data: dict, furniture: dict, output_dir: Path, pa
     survived into the merged elements or the assembled output.
 
     - Text: no heading/paragraph/list_item text, table cell, image
-      `figure_text` or `caption` has a line whose digit-masked text equals
+      `figure_text` or `caption` has a line whose furniture key equals
       a `line_patterns` entry.
     - Tables: no `table` element's bbox matches a `frame_tables` entry.
     - Assembled output: no line of any .md/.html file under the doc's
@@ -278,7 +278,7 @@ def check_furniture_absent(doc_data: dict, furniture: dict, output_dir: Path, pa
             rel = out_file.relative_to(output_dir).as_posix()
             for line_number, line in enumerate(out_file.read_text(encoding="utf-8").splitlines(), start=1):
                 for candidate in _output_line_candidates(line):
-                    if furniture_lib.mask_digits(candidate) in masked_patterns:
+                    if furniture_lib.furniture_key(candidate) in masked_patterns:
                         add(None, f"{rel} line {line_number}", candidate)
                         break
 

@@ -55,14 +55,30 @@ def empty_furniture() -> dict:
 
 
 def mask_digits(text: str) -> str:
-    """Every run of digits becomes one "#". Furniture line patterns are
-    compared in this masked form, so "page 3 (9)" matches "page 4 (9)"."""
+    """Every run of digits becomes one "#". The second step of
+    `furniture_key`; compare furniture lines with that function, not this
+    one."""
     return re.sub(r"\d+", "#", text)
 
 
+def furniture_key(text: str) -> str:
+    """The form in which every stage compares furniture lines (follow-up
+    R6): all whitespace removed, then every run of digits made one "#".
+
+    PyMuPDF can return one footer line in different shapes on different
+    pages: letter-spaced ("1 0 ( 1 2 0 )"), compact ("100(120)"), or
+    letter-spaced with one digit ("9 ( 1 2 0 )"). Masking the digits alone
+    gives three patterns, and none may reach triage's page fraction. With
+    the whitespace removed first, all three give "#(#)". Letter patterns
+    change too ("Legal Owner" gives "LegalOwner"); that is safe because
+    triage stores this key in `line_patterns[].masked`, and extract_text, the
+    merge filter and the gates all compare with this same function."""
+    return mask_digits(re.sub(r"\s+", "", text))
+
+
 def is_digit_only_pattern(masked: str) -> bool:
-    """A masked furniture pattern with no letters, e.g. "#" or "# / #" (a
-    footer that is only the page number)."""
+    """A furniture key with no letters, e.g. "#" or "#/#" (a footer that is
+    only the page number)."""
     return not re.search(r"[^\W\d_]", masked)
 
 
@@ -121,23 +137,23 @@ def patterns_for_element(all_patterns: set[str], bbox, page_height: float | None
 
 
 def furniture_line_hits(text: str, masked_patterns: set[str]) -> list[str]:
-    """Every line of `text` (and the whole text) whose stripped,
-    digit-masked form equals a furniture pattern."""
+    """Every line of `text` (and the whole text) whose `furniture_key`
+    equals a furniture pattern."""
     hits = []
     for candidate in [text] + text.splitlines():
         stripped = candidate.strip()
-        if stripped and mask_digits(stripped) in masked_patterns and stripped not in hits:
+        if stripped and furniture_key(stripped) in masked_patterns and stripped not in hits:
             hits.append(stripped)
     return hits
 
 
 def strip_furniture_lines(text: str, masked_patterns: set[str]) -> tuple[str, int]:
-    """`text` without the lines whose stripped, digit-masked form equals a
-    furniture pattern, and the number of lines removed."""
+    """`text` without the lines whose `furniture_key` equals a furniture
+    pattern, and the number of lines removed."""
     kept, removed = [], 0
     for line in text.splitlines():
         stripped = line.strip()
-        if stripped and mask_digits(stripped) in masked_patterns:
+        if stripped and furniture_key(stripped) in masked_patterns:
             removed += 1
         else:
             kept.append(line)

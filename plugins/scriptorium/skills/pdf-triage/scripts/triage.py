@@ -100,8 +100,9 @@ def classify_page(page) -> dict:
 
 
 def _find_repeated_lines(document) -> tuple[list[dict], dict]:
-    """Text lines whose digit-masked form repeats, at the same document
-    edge, on at least LINE_PATTERN_MIN_PAGE_FRACTION of pages.
+    """Text lines whose furniture key (`furniture_lib.furniture_key`: no
+    whitespace, digit runs as "#") repeats, at the same document edge, on at
+    least LINE_PATTERN_MIN_PAGE_FRACTION of pages.
 
     Returns `(line_patterns, occurrences)` -- `occurrences` maps each kept
     (masked_text, edge) key to its per-page raw text and y-position, so
@@ -128,7 +129,7 @@ def _find_repeated_lines(document) -> tuple[list[dict], dict]:
                 if edge is None:
                     continue
 
-                masked = furniture_lib.mask_digits(text)
+                masked = furniture_lib.furniture_key(text)
                 key = (masked, edge)
                 entry = occurrences.setdefault(
                     key, {"pages": {}, "y_mins": [], "y_maxs": []}

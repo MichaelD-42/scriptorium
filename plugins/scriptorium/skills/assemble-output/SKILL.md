@@ -20,7 +20,8 @@ The one place all three extraction tiers converge. Three scripts:
    lines while it extracts, but an `ocr` or `vision` body holds the whole
    page, title block included. So for a page whose body tier is `ocr` or
    `vision`, `merge_shards()` removes every `heading`/`paragraph`/
-   `list_item` text line whose stripped, digit-masked form equals one of
+   `list_item` text line whose furniture key (`furniture_key`: no
+   whitespace, digit runs as `#`) equals one of
    `triage.json["furniture"]["line_patterns"]`, with `lib/furniture.py`'s
    band plus pattern rule (the rule `grade-output`'s `furniture_absent`
    checks): a letter-bearing pattern matches anywhere; a digit-only pattern

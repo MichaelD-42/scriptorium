@@ -54,7 +54,7 @@ def furniture_filtered_lines(block: dict, furniture_masked: set[str], page_heigh
     """The subset of `block["lines"]` that survive furniture filtering.
 
     A line is dropped only if the block sits in a top/bottom edge band
-    *and* that specific line's digit-masked text matches a known furniture
+    *and* that specific line's furniture key matches a known furniture
     line pattern -- matched lines are the unit of exclusion, not the whole
     block. A block that mixes one furniture-matching line with unrelated
     real content on an adjacent line (e.g. PyMuPDF merging a footer note
@@ -821,7 +821,7 @@ def extract_page_text_blocks(page, body_size: float | None) -> tuple[list[dict],
                 line_max_size = max(line_max_size, span["size"])
             lines.append({
                 "text": stripped,
-                "masked": furniture_lib.mask_digits(stripped),
+                "masked": furniture_lib.furniture_key(stripped),
                 "bbox": line["bbox"],
                 "max_size": line_max_size,
                 "bold": bool(line_spans) and all(is_bold_span(s) for s in line_spans),

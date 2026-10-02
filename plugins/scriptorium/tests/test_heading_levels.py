@@ -34,6 +34,7 @@ from xml.etree import ElementTree as ET
 import fitz  # PyMuPDF
 import pytest
 
+import furniture as furniture_lib
 import paths
 from conftest import load_script, run_script
 
@@ -289,7 +290,7 @@ class TestFallbackRankingExcludesFurniture:
         assert toc_data["entries"] == []  # sanity: fallback path really is in play
 
         masked_patterns = {p["masked"] for p in triage["furniture"]["line_patterns"]}
-        assert header_text in masked_patterns  # sanity: header really is detected as furniture (no digits to mask)
+        assert furniture_lib.furniture_key(header_text) in masked_patterns  # sanity: header really is detected as furniture
 
         pages = [1, 2]
         _run_extract_text(doc_name, pages, triage["body_size"], tmp_project)

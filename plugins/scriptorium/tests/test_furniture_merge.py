@@ -27,8 +27,8 @@ gates = load_script("grade-output/scripts/gates.py", "gates_module_furniture_mer
 FURNITURE = {
     **furniture_lib.empty_furniture(),
     "line_patterns": [
-        {"masked": "Doc No. SYN-FUR-#"},
-        {"masked": "page # (#)"},
+        {"masked": "DocNo.SYN-FUR-#"},
+        {"masked": "page#(#)"},
         {"masked": "#"},
     ],
 }

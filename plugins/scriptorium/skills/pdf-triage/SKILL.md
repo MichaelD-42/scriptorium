@@ -38,7 +38,7 @@ the same JSON to stdout.
   "body_size": 11.0,
   "furniture": {
     "line_patterns": [
-      {"masked": "Doc No. SYN-FUR-#", "edge": "bottom", "y_min": 0.9159, "y_max": 0.9298, "page_count": 11}
+      {"masked": "DocNo.SYN-FUR-#", "edge": "bottom", "y_min": 0.9159, "y_max": 0.9298, "page_count": 11}
     ],
     "frame_tables": [],
     "frame_drawings": [
@@ -120,10 +120,14 @@ no printed TOC found.
 
 - `furniture`: page furniture detected once, document-wide (not yet
   removed — that is a separate, later step).
-  - `line_patterns`: text lines whose digit-masked form (`re.sub(r"\d+",
-    "#", line)`) repeats in the top or bottom 12% of the page on at least
-    60% of pages — running headers/footers, doc-number/revision/page-number
-    lines, etc. `y_min`/`y_max` are that line's observed y-position range,
+  - `line_patterns`: text lines whose furniture key repeats in the top or
+    bottom 12% of the page on at least 60% of pages — running
+    headers/footers, doc-number/revision/page-number lines, etc. The key
+    (`lib/furniture.py`'s `furniture_key`, stored in `masked`) removes all
+    whitespace and then turns every digit run into one `#`, so the
+    letter-spaced footer `1 0 ( 1 2 0 )` and the compact `100(120)` are the
+    one pattern `#(#)`, and `Doc No. 12` is `DocNo.#`. Every stage that
+    compares furniture lines uses the same function. `y_min`/`y_max` are that line's observed y-position range,
     as a fraction of page height.
   - `frame_tables`: tables (per pdfplumber's `find_tables()`) covering more
     than 60% of the page area that repeat at the same bbox (within 2pt) on

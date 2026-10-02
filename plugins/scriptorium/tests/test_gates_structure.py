@@ -21,8 +21,8 @@ gates = load_script("grade-output/scripts/gates.py", "gates_module_a9")
 
 FURNITURE = {
     "line_patterns": [
-        {"masked": "Doc No. SYN-FUR-#", "edge": "bottom", "y_min": 730.0, "y_max": 740.0, "page_count": 3},
-        {"masked": "page # (#)", "edge": "bottom", "y_min": 754.0, "y_max": 764.0, "page_count": 3},
+        {"masked": "DocNo.SYN-FUR-#", "edge": "bottom", "y_min": 730.0, "y_max": 740.0, "page_count": 3},
+        {"masked": "page#(#)", "edge": "bottom", "y_min": 754.0, "y_max": 764.0, "page_count": 3},
     ],
     "frame_tables": [{"bbox": [24.0, 24.0, 588.0, 768.0], "page_count": 3}],
     "frame_drawings": [],
