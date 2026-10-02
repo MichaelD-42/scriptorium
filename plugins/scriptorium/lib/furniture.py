@@ -52,6 +52,12 @@ def mask_digits(text: str) -> str:
     return re.sub(r"\d+", "#", text)
 
 
+def is_digit_only_pattern(masked: str) -> bool:
+    """A masked furniture pattern with no letters, e.g. "#" or "# / #" (a
+    footer that is only the page number)."""
+    return not re.search(r"[^\W\d_]", masked)
+
+
 def furniture_edge(y0: float, y1: float, page_height: float) -> str | None:
     """ "top" when the span y0..y1 lies in the top band, "bottom" when it
     lies in the bottom band, else None."""
@@ -71,6 +77,56 @@ def in_furniture_band(bbox, page_height: float | None) -> bool:
     if not page_height or page_height <= 0 or not bbox or len(bbox) != 4:
         return False
     return furniture_edge(bbox[1], bbox[3], page_height) is not None
+
+
+def patterns_for_element(all_patterns: set[str], bbox, page_height: float | None) -> set[str]:
+    """The band plus pattern rule: the masked line patterns that may match
+    one element's text.
+
+    A letter-bearing pattern matches anywhere on the page. A digit-only
+    pattern also matches any bare number in the body (a table cell "3", a
+    quantity), so it applies only when the element's bbox lies in a
+    furniture band of its page. With no bbox or no page height, only the
+    letter-bearing patterns apply."""
+    letter_patterns = {m for m in all_patterns if not is_digit_only_pattern(m)}
+    if letter_patterns != all_patterns and in_furniture_band(bbox, page_height):
+        return set(all_patterns)
+    return letter_patterns
+
+
+def furniture_line_hits(text: str, masked_patterns: set[str]) -> list[str]:
+    """Every line of `text` (and the whole text) whose stripped,
+    digit-masked form equals a furniture pattern."""
+    hits = []
+    for candidate in [text] + text.splitlines():
+        stripped = candidate.strip()
+        if stripped and mask_digits(stripped) in masked_patterns and stripped not in hits:
+            hits.append(stripped)
+    return hits
+
+
+def strip_furniture_lines(text: str, masked_patterns: set[str]) -> tuple[str, int]:
+    """`text` without the lines whose stripped, digit-masked form equals a
+    furniture pattern, and the number of lines removed."""
+    kept, removed = [], 0
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped and mask_digits(stripped) in masked_patterns:
+            removed += 1
+        else:
+            kept.append(line)
+    if not removed:
+        return text, 0
+    return "\n".join(kept).strip(), removed
+
+
+def pdf_page_heights(pdf_path) -> dict[int, float]:
+    """{page_number: height in points} for a PDF, the geometry the band
+    rule needs."""
+    import fitz  # PyMuPDF
+
+    with fitz.open(pdf_path) as doc:
+        return {i: page.rect.height for i, page in enumerate(doc, start=1)}
 
 
 def bbox_matches(a, b, tolerance: float = FRAME_MATCH_TOLERANCE) -> bool:

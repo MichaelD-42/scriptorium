@@ -203,11 +203,15 @@ subagent output.
       `status: "needs-human"` **immediately**, and record the check's
       `detail` and `pages` in the queue entry. These checks stay
       document-level: their input is deterministic script output
-      (furniture removal in `extract-text`, TOC-driven heading levels), so
-      a retry at the same tier gives the same result, and a tier bump
-      makes it worse — `ocr`/`vision` do no furniture removal and no
-      TOC-driven heading levels. This is the same logic as the
-      `docx`/`xlsx`/`html` content-defect rule below.
+      (furniture removal in `extract-text` and in `merge.py`, TOC-driven
+      heading levels), so a retry at the same tier gives the same result,
+      and a tier bump does not help — `ocr`/`vision` get no TOC-driven
+      heading levels. This is the same logic as the `docx`/`xlsx`/`html`
+      content-defect rule below.
+      The reverse case is safe: a page bumped to `ocr`/`vision` for a
+      rubric issue does not bring the title block back, because
+      `merge.py` removes the furniture lines from `ocr`/`vision` bodies
+      with the same band plus pattern rule `furniture_absent` checks.
     - `figures_complete` failed → for each page in its `pages`, keep the
       body tier and set `recheck_images: true` (the same flag as
       `missing_image`/`bad_caption` below), with the check's `detail` as

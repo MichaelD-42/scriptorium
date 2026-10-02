@@ -12,6 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 import elements as elements_lib  # noqa: E402
+import furniture as furniture_lib  # noqa: E402
 import paths  # noqa: E402
 
 
@@ -39,7 +40,20 @@ def main() -> None:
     input_format = paths.detect_input_format(args.doc)
     page_count = paths.true_page_count(args.doc, input_format)
 
-    pages = elements_lib.merge_shards(paths.shards_dir(args.doc), page_count)
+    # Fix wave I5: ocr/vision bodies lose their furniture lines here, with
+    # the same band plus pattern rule gates.py checks (lib/furniture.py).
+    furniture = furniture_lib.load_furniture(args.doc)
+    page_heights = (
+        furniture_lib.pdf_page_heights(input_path)
+        if input_format == "pdf" and furniture.get("line_patterns")
+        else {}
+    )
+    pages = elements_lib.merge_shards(
+        paths.shards_dir(args.doc), page_count, furniture=furniture, page_heights=page_heights
+    )
+    removed = sum(p.get("furniture_lines_removed", 0) for p in pages.values())
+    if removed:
+        print(f"furniture lines removed from ocr/vision bodies: {removed}", file=sys.stderr)
     doc_data = {
         "doc": args.doc,
         "source_file": str(input_path),

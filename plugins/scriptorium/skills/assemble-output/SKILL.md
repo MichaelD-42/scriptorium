@@ -16,6 +16,18 @@ The one place all three extraction tiers converge. Three scripts:
    verbatim repeated header/footer text, if any) to the top level of
    `elements.json`, alongside `doc`/`source_file`/`page_count` — `None` if
    `triage.json` doesn't exist or has no `furniture_text`.
+   **Furniture filter (fix wave I5)**: `extract-text` removes furniture
+   lines while it extracts, but an `ocr` or `vision` body holds the whole
+   page, title block included. So for a page whose body tier is `ocr` or
+   `vision`, `merge_shards()` removes every `heading`/`paragraph`/
+   `list_item` text line whose stripped, digit-masked form equals one of
+   `triage.json["furniture"]["line_patterns"]`, with `lib/furniture.py`'s
+   band plus pattern rule (the rule `grade-output`'s `furniture_absent`
+   checks): a letter-bearing pattern matches anywhere; a digit-only pattern
+   matches only when the element's bbox lies in the furniture band. An
+   element that is empty afterwards is dropped. The page records the count
+   as `furniture_lines_removed` (absent when zero). `text` bodies are not
+   touched.
    **Page-break joins (Task A4b)**: after combining, `lib/elements.py`'s
    `merge_shards()` walks every adjacent page pair once, ascending. If page
    `n`'s last non-image element is a `paragraph`/`list_item` whose text

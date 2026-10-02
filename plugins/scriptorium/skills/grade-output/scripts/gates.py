@@ -147,17 +147,6 @@ def check_large_region_excluded(doc_data: dict, page_areas: dict[int, float]) ->
     return warnings
 
 
-def _furniture_hits(text: str, masked_patterns: set[str]) -> list[str]:
-    """Every line of `text` (and the whole text) whose stripped,
-    digit-masked form equals a furniture pattern."""
-    hits = []
-    for candidate in [text] + text.splitlines():
-        stripped = candidate.strip()
-        if stripped and furniture_lib.mask_digits(stripped) in masked_patterns and stripped not in hits:
-            hits.append(stripped)
-    return hits
-
-
 def _output_line_candidates(line: str) -> list[str]:
     """The text pieces of one assembled-output line: the line with HTML tags
     removed, and each Markdown table cell, each with leading Markdown
@@ -170,12 +159,6 @@ def _output_line_candidates(line: str) -> list[str]:
         if cleaned:
             result.append(cleaned)
     return result
-
-
-def _is_digit_only_pattern(masked: str) -> bool:
-    """A masked furniture pattern with no letters, e.g. "#" or "# / #" (a
-    footer that is only the page number)."""
-    return not re.search(r"[^\W\d_]", masked)
 
 
 def check_furniture_absent(doc_data: dict, furniture: dict, output_dir: Path, page_heights: dict[int, float] | None = None) -> dict:
@@ -204,8 +187,7 @@ def check_furniture_absent(doc_data: dict, furniture: dict, output_dir: Path, pa
     Passes trivially when the document has no furniture (no line patterns
     and no frame tables -- e.g. every non-PDF format, or no triage.json)."""
     all_patterns = {p["masked"] for p in furniture.get("line_patterns", [])}
-    masked_patterns = {m for m in all_patterns if not _is_digit_only_pattern(m)}
-    digit_only_patterns = all_patterns - masked_patterns
+    masked_patterns = {m for m in all_patterns if not furniture_lib.is_digit_only_pattern(m)}
     page_heights = page_heights or {}
     frame_bboxes = [f["bbox"] for f in furniture.get("frame_tables", [])]
     offenders = []
@@ -218,22 +200,22 @@ def check_furniture_absent(doc_data: dict, furniture: dict, output_dir: Path, pa
             page_number = page.get("page_number")
             for el in page.get("elements", []):
                 el_type = el.get("type")
-                patterns = masked_patterns
-                if digit_only_patterns and furniture_lib.in_furniture_band(el.get("bbox"), page_heights.get(page_number)):
-                    patterns = all_patterns
+                patterns = furniture_lib.patterns_for_element(
+                    all_patterns, el.get("bbox"), page_heights.get(page_number)
+                )
                 if el_type in ("heading", "paragraph", "list_item"):
-                    for hit in _furniture_hits(el.get("text") or "", patterns):
+                    for hit in furniture_lib.furniture_line_hits(el.get("text") or "", patterns):
                         add(page_number, el_type, hit)
                 elif el_type == "table":
                     for row in el.get("rows", []):
                         for cell in row:
-                            for hit in _furniture_hits(str(cell or ""), patterns):
+                            for hit in furniture_lib.furniture_line_hits(str(cell or ""), patterns):
                                 add(page_number, "table cell", hit)
                     if any(furniture_lib.bbox_matches(el.get("bbox"), fb) for fb in frame_bboxes):
                         add(page_number, "frame table", f"table bbox {el.get('bbox')}")
                 elif el_type == "image":
                     for field in ("figure_text", "caption"):
-                        for hit in _furniture_hits(el.get(field) or "", patterns):
+                        for hit in furniture_lib.furniture_line_hits(el.get(field) or "", patterns):
                             add(page_number, f"image {field}", hit)
 
     if masked_patterns and output_dir.exists():
@@ -379,15 +361,6 @@ def _load_json(path: Path) -> dict:
     return json.loads(path.read_text()) if path.exists() else {}
 
 
-def _pdf_page_heights(input_path: Path) -> dict[int, float]:
-    """{page_number: height in points} for a PDF input -- the geometry
-    check_furniture_absent needs for its furniture-band rule."""
-    import fitz  # PyMuPDF
-
-    with fitz.open(input_path) as doc:
-        return {i: page.rect.height for i, page in enumerate(doc, start=1)}
-
-
 def _pdf_page_areas(input_path: Path) -> dict[int, float]:
     """{page_number: width*height in points^2} for a PDF input -- the
     geometry check_large_region_excluded needs to turn an excluded region's
@@ -484,7 +457,7 @@ def main() -> None:
             doc_data,
             _load_json(paths.triage_json(args.doc)).get("furniture") or furniture_lib.empty_furniture(),
             paths.output_dir(args.doc),
-            _pdf_page_heights(input_path) if input_format == "pdf" else {},
+            furniture_lib.pdf_page_heights(input_path) if input_format == "pdf" else {},
         ),
         check_toc_headings_match(
             doc_data,

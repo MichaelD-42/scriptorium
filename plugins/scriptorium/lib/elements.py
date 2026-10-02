@@ -42,7 +42,11 @@ though none exist today), so a downstream consumer like gates.py can see it.
 """
 
 import json
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import furniture as furniture_lib  # noqa: E402
 
 BODY_KINDS_BY_PRIORITY = ("vision", "ocr", "text")  # highest tier first — wins at merge time
 
@@ -53,6 +57,12 @@ JOIN_TERMINAL_PUNCTUATION = ".!?:;"
 # Same ~3pt tolerance convention as extract_text.py's other geometry
 # tolerances (FRAME_MATCH_TOLERANCE, LIST_MARKER_X_TOLERANCE, etc).
 JOIN_X_TOLERANCE = 3.0  # pt
+
+# Fix wave I5: the body tiers that do no furniture removal of their own.
+# extract-text removes furniture lines while it extracts; OCR and a vision
+# transcription see the whole page image, title block included.
+UNFILTERED_BODY_TIERS = ("ocr", "vision")
+FURNITURE_TEXT_TYPES = ("heading", "paragraph", "list_item")
 
 
 def write_shard(shard_path: Path, page_number: int, elements: list, **extra) -> None:
@@ -67,11 +77,44 @@ def read_shard(shard_path: Path) -> dict | None:
     return json.loads(shard_path.read_text())
 
 
-def merge_shards(shards_dir: Path, page_count: int) -> dict[int, dict]:
+def remove_furniture_lines(
+    elements: list[dict], all_patterns: set[str], page_height: float | None
+) -> tuple[list[dict], int]:
+    """Fix wave I5: drop the furniture lines from an `ocr`/`vision` body,
+    with lib/furniture.py's band plus pattern rule (the rule gates.py's
+    `furniture_absent` checks). An element that is empty afterwards is
+    dropped. Returns the kept elements and the number of removed lines."""
+    kept, removed = [], 0
+    for el in elements:
+        if el.get("type") not in FURNITURE_TEXT_TYPES or not el.get("text"):
+            kept.append(el)
+            continue
+        patterns = furniture_lib.patterns_for_element(all_patterns, el.get("bbox"), page_height)
+        text, count = furniture_lib.strip_furniture_lines(el["text"], patterns)
+        removed += count
+        if count and not text:
+            continue
+        kept.append({**el, "text": text} if count else el)
+    return kept, removed
+
+
+def merge_shards(
+    shards_dir: Path,
+    page_count: int,
+    furniture: dict | None = None,
+    page_heights: dict[int, float] | None = None,
+) -> dict[int, dict]:
     """Combine every page's shards into {page_number: page_dict}. A page
     with no body shard yet (extraction incomplete or still in flight) gets
     tier "text" with no elements — assemble/gates will flag it as empty
-    rather than silently dropping it."""
+    rather than silently dropping it.
+
+    `furniture` (triage.json["furniture"]) and `page_heights` (PDF page
+    heights in points) are optional. With them, an `ocr`/`vision` body
+    loses its furniture lines (`remove_furniture_lines`), and the page
+    records `furniture_lines_removed` when that count is above zero."""
+    all_patterns = {p["masked"] for p in (furniture or {}).get("line_patterns", [])}
+    page_heights = page_heights or {}
     pages: dict[int, dict] = {}
     for n in range(1, page_count + 1):
         body_tier, body_shard = None, None
@@ -100,7 +143,13 @@ def merge_shards(shards_dir: Path, page_count: int) -> dict[int, dict]:
             # bbox-less elements default to y0=0 -- so elements that predate
             # the additive bbox field (or a hand-built test fixture without
             # one) keep their original append order relative to each other.
-            combined = body_shard["elements"] + image_elements
+            body_elements = body_shard["elements"]
+            furniture_removed = 0
+            if all_patterns and body_tier in UNFILTERED_BODY_TIERS:
+                body_elements, furniture_removed = remove_furniture_lines(
+                    body_elements, all_patterns, page_heights.get(n)
+                )
+            combined = body_elements + image_elements
             combined.sort(key=lambda e: e.get("bbox", [0, 0, 0, 0])[1])
             pages[n] = {
                 "page_number": n,
@@ -108,6 +157,8 @@ def merge_shards(shards_dir: Path, page_count: int) -> dict[int, dict]:
                 "elements": combined,
                 **extra,
             }
+            if furniture_removed:
+                pages[n]["furniture_lines_removed"] = furniture_removed
         else:
             pages[n] = {"page_number": n, "tier": "text", "elements": image_elements, **image_extra}
 

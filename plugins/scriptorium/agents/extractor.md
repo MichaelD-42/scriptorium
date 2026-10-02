@@ -46,7 +46,10 @@ already resolved by the environment-setup step.
    rendered PNG yourself (Read tool) and transcribe it faithfully (this is
    transcription, not interpretation: if something is illegible, say so in
    the text rather than inventing a plausible guess), then land it with
-   `write_vision_page.py`.
+   `write_vision_page.py`. Leave out the page furniture: the lines listed in
+   `work/<doc>/triage.json`'s `furniture_text` (the repeated header, footer
+   and title-block lines). `merge.py` also removes them from `ocr`/`vision`
+   bodies, but only when a line matches a furniture pattern exactly.
 3. Pages assigned `vision` directly (a retry, forced by the orchestrator
    after a previous grade failure): skip straight to the vision step above.
 
