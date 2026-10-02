@@ -34,7 +34,11 @@ Handles both image kinds a PDF can contain:
     axis-aligned rectangle (one `re` item, or at most 4 axis-aligned
     lines, no curves) with at least one text-layer line inside — a boxed
     paragraph or a shaded ID row. Its text stays body text in
-    `extract-text`; nothing is cropped;
+    `extract-text`; nothing is cropped. Nearby text boxes (at most 24 pt
+    apart on one axis, overlapping on the other) are grouped first, and
+    a group or a single box with a "Figure n" caption line within 36 pt
+    directly below or above it is a figure region instead (a box diagram
+    drawn without connectors);
   - *more than half* its own area lies inside the furniture edge band
     (Task A5b tightened this from "any overlap at all", so a tall real
     figure that only grazes the band survives);

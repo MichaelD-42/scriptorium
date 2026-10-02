@@ -83,7 +83,10 @@ Detection pipeline, per page:
      one text-layer line lies inside it. A boxed requirement paragraph or a
      shaded ID row is body text, not a figure; excluding the cluster keeps
      its lines in the body. A multi-item figure (a flow diagram, a bar
-     chart) is never a text box;
+     chart) is never a text box. Follow-up R2: before this test, nearby
+     would-be text boxes are grouped, and a group (or a single box) with a
+     "Figure n" caption line directly next to it is a figure region (a box
+     diagram drawn without connectors). See BOX_GROUP_MAX_GAP;
    - has *more than half its own area* inside the top/bottom furniture edge
      band (reuses the same `FURNITURE_EDGE_BAND` convention
      `lib/furniture.py`'s `in_furniture_band` and `extract_text.py`'s `furniture_filtered_lines`
@@ -172,6 +175,18 @@ LINE_OVERLAP_THRESHOLD = 0.5
 # at most TEXT_BOX_AXIS_TOLERANCE in x or in y.
 TEXT_BOX_MAX_LINE_ITEMS = 4
 TEXT_BOX_AXIS_TOLERANCE = 0.5  # pt
+
+# Follow-up R2: a diagram of separate labelled boxes (a row of components, a
+# stack of layers) has no connectors, so each box is its own cluster and
+# would pass the text-box test above. Before that test, the would-be text
+# boxes are grouped: two boxes join a group when they are at most
+# BOX_GROUP_MAX_GAP apart on one axis and overlap on the other. A group, or
+# a single box, is a figure region when a figure-caption line
+# (is_figure_caption) lies directly below or above it, at most
+# BOX_CAPTION_MAX_GAP from its edge. A box with no caption next to it stays a
+# text box, so a boxed paragraph or a shaded ID row stays body text.
+BOX_GROUP_MAX_GAP = 24.0  # pt
+BOX_CAPTION_MAX_GAP = 36.0  # pt
 
 # Task A6: a caption line's text pattern -- "Figure 1: ...", "Fig. 2 ...",
 # "Table 3: ..." (case-insensitive, optional trailing period/colon after the
@@ -317,6 +332,45 @@ def _is_text_box(cluster_rect, drawings: list[dict], page_lines: list[dict]) -> 
     return any(line_in_region(line["bbox"], raw_bbox) for line in page_lines)
 
 
+def _boxes_adjacent(a, b, max_gap: float = BOX_GROUP_MAX_GAP) -> bool:
+    """True when bboxes `a` and `b` are at most `max_gap` apart on one axis
+    and overlap on the other (see BOX_GROUP_MAX_GAP)."""
+    x_gap = max(a[0], b[0]) - min(a[2], b[2])
+    y_gap = max(a[1], b[1]) - min(a[3], b[3])
+    return (x_gap <= max_gap and y_gap < 0) or (y_gap <= max_gap and x_gap < 0)
+
+
+def group_boxes(boxes: list[list[float]], max_gap: float = BOX_GROUP_MAX_GAP) -> list[list[list[float]]]:
+    """`boxes` split into groups of adjacent boxes (`_boxes_adjacent`,
+    joined transitively). A box with no neighbour is a group of one. Groups
+    keep the input order of their first box."""
+    parent = list(range(len(boxes)))
+
+    def root(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i in range(len(boxes)):
+        for j in range(i + 1, len(boxes)):
+            if _boxes_adjacent(boxes[i], boxes[j], max_gap):
+                parent[root(j)] = root(i)
+    groups: dict[int, list[list[float]]] = {}
+    for i, box in enumerate(boxes):
+        groups.setdefault(root(i), []).append(box)
+    return list(groups.values())
+
+
+def _union_bbox(boxes: list[list[float]]) -> list[float]:
+    return [
+        min(b[0] for b in boxes),
+        min(b[1] for b in boxes),
+        max(b[2] for b in boxes),
+        max(b[3] for b in boxes),
+    ]
+
+
 def line_in_region(line_bbox, region_bbox, threshold: float = LINE_OVERLAP_THRESHOLD) -> bool:
     """True if `line_bbox` (a text line's own bbox) is majority-inside
     `region_bbox` -- the single overlap test both extract_text.py (to drop
@@ -383,28 +437,46 @@ def detect_figure_regions_with_exclusions(
     table_bboxes = real_table_bboxes(pdf_path, page_number, frame_tables)
     page_lines = _page_lines(page)
 
-    regions = []
-    for rect in clusters:
-        bbox = [
-            max(0.0, rect.x0 - REGION_PADDING),
-            max(0.0, rect.y0 - REGION_PADDING),
-            min(page_width, rect.x1 + REGION_PADDING),
-            min(page_height, rect.y1 + REGION_PADDING),
+    def padded(raw) -> list[float]:
+        return [
+            max(0.0, raw[0] - REGION_PADDING),
+            max(0.0, raw[1] - REGION_PADDING),
+            min(page_width, raw[2] + REGION_PADDING),
+            min(page_height, raw[3] + REGION_PADDING),
         ]
+
+    regions = []
+
+    def keep_unless_band_or_table(bbox) -> None:
+        if _furniture_band_overlap_fraction(bbox, page_height) > FURNITURE_BAND_AREA_THRESHOLD:
+            excluded_regions.append({"bbox": bbox, "reason": "furniture_band"})
+        elif _overlaps_any_table(bbox, table_bboxes):
+            excluded_regions.append({"bbox": bbox, "reason": "table_overlap"})
+        else:
+            regions.append({"bbox": bbox})
+
+    box_candidates = []  # raw [x0, y0, x1, y1] of each would-be text box
+    for rect in clusters:
+        raw = [rect.x0, rect.y0, rect.x1, rect.y1]
+        bbox = padded(raw)
         area = max(0.0, bbox[2] - bbox[0]) * max(0.0, bbox[3] - bbox[1])
         if area / page_area < MIN_CLUSTER_AREA_FRACTION:
             excluded_regions.append({"bbox": bbox, "reason": "tiny"})
             continue
         if _is_text_box(rect, significant, page_lines):
-            excluded_regions.append({"bbox": bbox, "reason": "text_box"})
+            box_candidates.append(raw)
             continue
-        if _furniture_band_overlap_fraction(bbox, page_height) > FURNITURE_BAND_AREA_THRESHOLD:
-            excluded_regions.append({"bbox": bbox, "reason": "furniture_band"})
-            continue
-        if _overlaps_any_table(bbox, table_bboxes):
-            excluded_regions.append({"bbox": bbox, "reason": "table_overlap"})
-            continue
-        regions.append({"bbox": bbox})
+        keep_unless_band_or_table(bbox)
+
+    # Follow-up R2: a group of nearby boxes, or a single box, with a figure
+    # caption next to it is a box diagram, not body text.
+    for group in group_boxes(box_candidates):
+        union = _union_bbox(group)
+        if _nearest_caption_line(page_lines, union, BOX_CAPTION_MAX_GAP, is_figure_caption):
+            keep_unless_band_or_table(padded(union))
+        else:
+            for raw in group:
+                excluded_regions.append({"bbox": padded(raw), "reason": "text_box"})
 
     regions.sort(key=lambda r: r["bbox"][1])
     excluded_regions.sort(key=lambda r: r["bbox"][1])
@@ -481,8 +553,14 @@ def find_caption_line(page, bbox: list[float], distance: float = CAPTION_SEARCH_
     matches -- the caller leaves `caption` absent rather than guessing, so
     a false match never overwrites a genuinely uncaptioned figure with
     unrelated nearby text."""
+    return _nearest_caption_line(_page_lines(page), bbox, distance, CAPTION_PATTERN.match)
+
+
+def _nearest_caption_line(lines: list[dict], bbox: list[float], distance: float, is_caption) -> dict | None:
+    """find_caption_line's search over an already-scanned line list: the
+    nearest line below `bbox` (then above it) within `distance` points that
+    overlaps it horizontally and for which `is_caption(text)` is true."""
     x0, y0, x1, y1 = bbox
-    lines = _page_lines(page)
     below = sorted(
         (l for l in lines if y1 <= l["bbox"][1] <= y1 + distance and _x_overlaps(bbox, l["bbox"])),
         key=lambda l: l["bbox"][1],
@@ -492,7 +570,7 @@ def find_caption_line(page, bbox: list[float], distance: float = CAPTION_SEARCH_
         key=lambda l: -l["bbox"][3],
     )
     for line in below + above:
-        if CAPTION_PATTERN.match(line["text"]):
+        if is_caption(line["text"]):
             return line
     return None
 
