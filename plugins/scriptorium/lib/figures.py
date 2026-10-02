@@ -131,6 +131,7 @@ from pathlib import Path
 import pdfplumber
 
 import furniture as furniture_lib
+import toc as toc_lib
 
 # The furniture band (FURNITURE_EDGE_BAND) and the frame matching tolerance
 # (FRAME_MATCH_TOLERANCE, 3pt; triage groups with 2pt) are in
@@ -220,7 +221,11 @@ BOX_CAPTION_MAX_GAP = 36.0  # pt
 # number). Checked against furniture_sample.pdf's real caption text
 # ("Figure 1: Process Diagram", "Figure 2: Revenue by Quarter") in
 # furniture_golden.json's "figures" entries.
-CAPTION_PATTERN = re.compile(r"^(figure|fig\.?|table)\s+\d+\.?:?\s", re.IGNORECASE)
+#
+# Follow-up R17: the number may also end the line ("Fig. 11" printed as its
+# own span, with the title in a second span at the same y; _page_lines joins
+# the two).
+CAPTION_PATTERN = re.compile(r"^(figure|fig\.?|table)\s+\d+\.?:?(?=\s|$)", re.IGNORECASE)
 
 
 def is_figure_caption(text: str) -> bool:
@@ -657,7 +662,49 @@ def _page_lines(page) -> list[dict]:
             if not stripped:
                 continue
             lines.append({"text": stripped, "bbox": list(line["bbox"])})
-    return lines
+    return _join_split_captions(lines)
+
+
+def _is_lone_caption_number(text: str) -> bool:
+    """True when `text` is only a caption number ("Fig. 11", "Figure 3:"),
+    with no title after it."""
+    match = CAPTION_PATTERN.match(text)
+    return bool(match) and not text[match.end():].strip()
+
+
+def _join_split_captions(lines: list[dict]) -> list[dict]:
+    """Follow-up R17: a lone caption-number line ("Fig. 11") joined with
+    the nearest text line to its right at the same y (tops within
+    toc.SAME_Y_TOLERANCE) into one caption line: text "Fig. 11 <title>",
+    the union bbox, and `parts`, the two source line bboxes (extract_text
+    excludes those from the body). A lone number with no such line stays as
+    it is."""
+    used: set[int] = set()
+    joined: dict[int, dict] = {}
+    for i, line in enumerate(lines):
+        if i in used or not _is_lone_caption_number(line["text"]):
+            continue
+        partners = [
+            j for j, other in enumerate(lines)
+            if j != i and j not in used
+            and abs(other["bbox"][1] - line["bbox"][1]) <= toc_lib.SAME_Y_TOLERANCE
+            and other["bbox"][0] >= line["bbox"][2]
+            and not CAPTION_PATTERN.match(other["text"])
+        ]
+        if not partners:
+            continue
+        j = min(partners, key=lambda k: lines[k]["bbox"][0])
+        other = lines[j]
+        used.update((i, j))
+        joined[i] = {
+            "text": f"{line['text']} {other['text']}",
+            "bbox": [
+                min(line["bbox"][0], other["bbox"][0]), min(line["bbox"][1], other["bbox"][1]),
+                max(line["bbox"][2], other["bbox"][2]), max(line["bbox"][3], other["bbox"][3]),
+            ],
+            "parts": [list(line["bbox"]), list(other["bbox"])],
+        }
+    return [joined[i] if i in joined else line for i, line in enumerate(lines) if i in joined or i not in used]
 
 
 def region_text_lines(page, region_bbox, threshold: float = LINE_OVERLAP_THRESHOLD) -> list[dict]:
@@ -695,9 +742,12 @@ def find_caption_line(page, bbox: list[float], distance: float = CAPTION_SEARCH_
     as long as it is not majority-inside `bbox` (then it is figure text).
     A vector region's bbox is padded by REGION_PADDING, so a caption printed
     closer than that to the drawing reaches into the padding."""
+    lines = _page_lines(page)
+    # Follow-up R17: the nearest figure caption wins over a "Table n"
+    # caption; a table caption is used only when no figure caption is near.
     return _nearest_caption_line(
-        _page_lines(page), bbox, distance, CAPTION_PATTERN.match, edge_slack=CAPTION_EDGE_SLACK
-    )
+        lines, bbox, distance, is_figure_caption, edge_slack=CAPTION_EDGE_SLACK
+    ) or _nearest_caption_line(lines, bbox, distance, CAPTION_PATTERN.match, edge_slack=CAPTION_EDGE_SLACK)
 
 
 def _nearest_caption_line(

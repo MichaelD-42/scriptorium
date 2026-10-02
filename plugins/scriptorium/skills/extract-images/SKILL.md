@@ -94,7 +94,12 @@ For an image document, `--pages` is always `1` — there's only ever page 1.
   searches the text layer within 60pt directly above or below the
   element's own bbox for a line matching `Figure n[.:]`/`Fig. n`/`Table n`
   (case-insensitive) and, if found, sets `caption` to that line's text
-  verbatim; absent/`null` if nothing nearby matches. That same line is
+  verbatim; absent/`null` if nothing nearby matches. Follow-up R17: the
+  number may end the line (`Fig. 11`), and a lone caption-number line is
+  joined with the text line at its y (within 3 pt) into one caption, so
+  a caption printed as two spans is still found; the nearest figure
+  caption wins over a `Table n` caption, which is used only when no
+  figure caption is near. That same line (both source lines, when joined) is
   excluded from `extract-text`'s paragraph/heading output on the same page
   — same "shared detection, no ordering dependency" pattern as
   `figure_text` above, so the two scripts can never disagree about which

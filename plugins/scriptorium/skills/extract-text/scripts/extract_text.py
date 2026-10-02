@@ -954,10 +954,13 @@ def main() -> None:
         # extraction below, since its text is now script-authoritative on
         # the matching image element's `caption` field instead.
         image_bboxes = [r["bbox"] for r in figure_regions] + figures_lib.bitmap_bboxes(page, furniture_xrefs)
+        # Follow-up R17: a caption joined from two lines (figures'
+        # _join_split_captions) excludes both of its source lines.
         caption_bboxes = {
-            tuple(line["bbox"])
+            tuple(part)
             for line in (figures_lib.find_caption_line(page, bbox) for bbox in image_bboxes)
             if line
+            for part in line.get("parts", [line["bbox"]])
         }
 
         # Drop text blocks that mostly overlap a detected table; the table
