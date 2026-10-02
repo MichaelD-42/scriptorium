@@ -92,7 +92,11 @@ Also writes `work/<doc-name>/toc.json`:
    number wrap onto a line that holds only the page number (`5` and its
    title at one y, then `53` alone at the next y) is one entry with that
    page; a lone section number is told apart from a page line because it
-   always has its title at its y (within 3 pt). The first TOC page needs at least 15
+   always has its title at its y (within 3 pt). A numbered title with no
+   leader that ends in whitespace and an integer (`8 TITLE 58`, or `8` with
+   its title at the same y) is an entry with that page when the integer is
+   at most the document page count and at least the previous entry's page
+   (follow-up R15). A leader is a run of 2 or more dots. The first TOC page needs at least 15
    dot-leader lines; a page directly after a TOC page also counts when it
    has at least 3 dot-leader lines and its dot-leader plus number-only
    lines are at least 30% of its lines (a short last TOC page).

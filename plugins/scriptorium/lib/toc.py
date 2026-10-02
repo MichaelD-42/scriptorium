@@ -66,13 +66,20 @@ import re
 # production threshold to fit a small fixture.
 MIN_QUALIFYING_LINES = 15
 
-# "........ 4" -- three or more dots, optional whitespace, a trailing page
-# number, optional trailing whitespace, end of line.
-DOT_LEADER_RE = re.compile(r"\.{3,}\s*\d+\s*$")
+# "........ 4" -- two or more dots (follow-up R15: a short leader of 2 dots
+# is still a leader), optional whitespace, a trailing page number, optional
+# trailing whitespace, end of line.
+DOT_LEADER_RE = re.compile(r"\.{2,}\s*\d+\s*$")
 
 # "<title> .......... <page>" -- same shape as DOT_LEADER_RE but capturing
 # the title and page number separately.
-TITLE_LEADER_PAGE_RE = re.compile(r"^(.*?)\s*\.{3,}\s*(\d+)\s*$")
+TITLE_LEADER_PAGE_RE = re.compile(r"^(.*?)\s*\.{2,}\s*(\d+)\s*$")
+
+# Follow-up R15: "<title> 58" -- a title with no leader that ends in
+# whitespace and an integer (the page). Used only when no leader closes the
+# entry, and only for a page within the document and not before the
+# previous entry's page.
+TRAILING_PAGE_RE = re.compile(r"^(.*\S)\s+(\d+)$")
 
 # A bare section number on its own line, e.g. "2.1.1".
 NUMBER_ONLY_RE = re.compile(r"^(\d+(?:\.\d+)*)$")
@@ -296,7 +303,36 @@ def _is_numbered_line(lines: list[str], ys: list[float] | None, k: int) -> bool:
     return False
 
 
-def parse_toc_page_lines(lines: list[str], ys: list[float] | None = None) -> tuple[list[dict], list[str]]:
+def _close_trailing_page_entry(
+    lines: list[str], ys: list[float] | None, i: int, number: str, title: str | None,
+    page_count: int | None, min_page: int,
+) -> tuple[dict, int] | None:
+    """Follow-up R15: the entry that `lines[i]` opens when its title ends in
+    whitespace and an integer, with no leader: "8 TITLE 58", or a
+    number-only line "8" with "TITLE 58" at the same y (needs `ys`). The
+    integer is the page when it is at most `page_count` (when known) and at
+    least `min_page`, the previous entry's page. Returns `(entry,
+    next_index)` or None."""
+    j = i + 1
+    if title is None:
+        if ys is None or j >= len(lines) or not _same_y(ys, i, j):
+            return None
+        title = lines[j]
+        if _starts_entry(title):
+            return None
+        j += 1
+    match = TRAILING_PAGE_RE.match(title.strip())
+    if not match:
+        return None
+    page = int(match.group(2))
+    if page < min_page or (page_count is not None and page > page_count):
+        return None
+    return _entry(number, match.group(1).strip(), page), j
+
+
+def parse_toc_page_lines(
+    lines: list[str], ys: list[float] | None = None, page_count: int | None = None, min_page: int = 0,
+) -> tuple[list[dict], list[str]]:
     """`(entries, unparsed)` for one printed TOC page's lines. An entry is
     one of:
     - a numbered title with a leader on one line ("1 Introduction .... 4");
@@ -307,7 +343,11 @@ def parse_toc_page_lines(lines: list[str], ys: list[float] | None = None) -> tup
     - follow-up R9: a numbered title with no leader and no page number (on
       one line, or a number-only line and its title at the same y), then a
       line that holds only the page number, alone at its y. This shape
-      needs `ys`, each line's top y (`_page_line_records`).
+      needs `ys`, each line's top y (`_page_line_records`);
+    - follow-up R15: a numbered title with no leader that ends in whitespace
+      and an integer ("8 TITLE 58", or "8" with "TITLE 58" at the same y),
+      when the integer is at most `page_count` and at least the previous
+      entry's page (`min_page` for the first entry of this page).
     `unparsed` (fix wave I2) is every dot-leader line that gave no entry,
     verbatim -- for example a leader line with no section number. Follow-up
     R9 adds every numbered line (`_is_numbered_line`) that ends up in no
@@ -335,14 +375,24 @@ def parse_toc_page_lines(lines: list[str], ys: list[float] | None = None) -> tup
         number_match = NUMBER_ONLY_RE.match(line)
         prefix_match = None if number_match else NUMBER_PREFIX_RE.match(line)
         if number_match or prefix_match:
+            previous_page = entries[-1]["page"] if entries else min_page
             if number_match:
                 closed = _close_wrapped_entry(lines, i, number_match.group(1), [])
                 if closed is None:
                     closed = _close_page_wrapped_entry(lines, ys, i, number_match.group(1), None)
-            else:
-                closed = _close_wrapped_entry(lines, i, prefix_match.group(1), [prefix_match.group(2).strip()])
                 if closed is None:
-                    closed = _close_page_wrapped_entry(lines, ys, i, prefix_match.group(1), prefix_match.group(2).strip())
+                    closed = _close_trailing_page_entry(
+                        lines, ys, i, number_match.group(1), None, page_count, previous_page
+                    )
+            else:
+                title = prefix_match.group(2).strip()
+                closed = _close_wrapped_entry(lines, i, prefix_match.group(1), [title])
+                if closed is None:
+                    closed = _close_page_wrapped_entry(lines, ys, i, prefix_match.group(1), title)
+                if closed is None:
+                    closed = _close_trailing_page_entry(
+                        lines, ys, i, prefix_match.group(1), title, page_count, previous_page
+                    )
             if closed is not None:
                 entry, next_i = closed
                 entries.append(entry)
@@ -365,7 +415,10 @@ def parse_printed_toc_with_unparsed(document, toc_pages: list[int]) -> tuple[lis
     entries: list[dict] = []
     unparsed: list[str] = []
     for page_number in toc_pages:
-        page_entries, page_unparsed = parse_toc_page_lines(*_page_line_records(document[page_number - 1]))
+        lines, ys = _page_line_records(document[page_number - 1])
+        page_entries, page_unparsed = parse_toc_page_lines(
+            lines, ys, page_count=document.page_count, min_page=entries[-1]["page"] if entries else 0
+        )
         entries.extend(page_entries)
         unparsed.extend(page_unparsed)
     return entries, unparsed
