@@ -180,6 +180,11 @@ LINE_OVERLAP_THRESHOLD = 0.5
 GRID_TABLE_EMPTY_FRACTION = 0.60
 GRID_TABLE_EMPTY_FRACTION_WITH_CURVES = 0.40
 
+# Follow-up R12: a table detected inside the content rect that covers more
+# than this fraction of it (and matches it within FRAME_MATCH_TOLERANCE) is
+# the page frame, not a table. See page_tables.
+FRAME_TABLE_CONTENT_FRACTION = 0.60
+
 # Fix wave I1: a cluster is a text box when its drawings form one
 # axis-aligned rectangle -- one `re` item (stroked, filled or both; the same
 # rect drawn twice still counts as one), or at most this many axis-aligned
@@ -238,7 +243,10 @@ CAPTION_SEARCH_DISTANCE = 60.0
 CAPTION_EDGE_SLACK = REGION_PADDING
 
 
-def page_tables(pdf_path: Path, page_number: int, frame_tables: list[dict] | None = None) -> list[dict]:
+def page_tables(
+    pdf_path: Path, page_number: int, frame_tables: list[dict] | None = None,
+    content_rect: list[float] | None = None,
+) -> list[dict]:
     """Real (non-frame) tables on this page, queried fresh via pdfplumber
     -- not read from any shard, on purpose: extract_images.py and
     extract_text.py may run in either order, or in parallel, for the same
@@ -246,12 +254,32 @@ def page_tables(pdf_path: Path, page_number: int, frame_tables: list[dict] | Non
     shard already exists. Each entry is `{"bbox", "rows", "empty_fraction"}`:
     `rows` with None cells as "", and the fraction of cells that are empty
     (follow-up R11, `is_grid_table`). extract_text builds its `table`
-    elements from this same list."""
+    elements from this same list.
+
+    Follow-up R12: with a `content_rect` (triage's
+    `furniture["content_rect"]`), tables are detected on the page cropped
+    to that rect (pdfplumber keeps page coordinates), so the frame's title
+    block never joins a table. A table found there that covers more than
+    FRAME_TABLE_CONTENT_FRACTION of the rect and matches it within
+    FRAME_MATCH_TOLERANCE is the frame again, and is dropped. This catches
+    a frame table whose bbox is a few points off the repeated
+    `frame_tables` entry on one page."""
     frame_tables = frame_tables or []
     found = []
     with pdfplumber.open(pdf_path) as pl_doc:
-        for table in pl_doc.pages[page_number - 1].find_tables():
+        pl_page = pl_doc.pages[page_number - 1]
+        crop = None
+        if content_rect:
+            x0, top, x1, bottom = pl_page.bbox
+            crop = [max(content_rect[0], x0), max(content_rect[1], top), min(content_rect[2], x1), min(content_rect[3], bottom)]
+            if crop[2] > crop[0] and crop[3] > crop[1]:
+                pl_page = pl_page.crop(crop)
+            else:
+                crop = None
+        for table in pl_page.find_tables():
             if furniture_lib.matches_any_frame(table.bbox, frame_tables):
+                continue
+            if crop is not None and _is_content_frame(table.bbox, crop):
                 continue
             rows = [[cell if cell is not None else "" for cell in row] for row in table.extract()]
             cells = [cell for row in rows for cell in row]
@@ -264,9 +292,20 @@ def page_tables(pdf_path: Path, page_number: int, frame_tables: list[dict] | Non
     return found
 
 
-def real_table_bboxes(pdf_path: Path, page_number: int, frame_tables: list[dict] | None = None) -> list[list[float]]:
+def _is_content_frame(table_bbox, rect) -> bool:
+    """Follow-up R12: a table on the cropped page that is the content frame
+    itself (see page_tables)."""
+    rect_area = max(1e-6, (rect[2] - rect[0]) * (rect[3] - rect[1]))
+    table_area = max(0.0, table_bbox[2] - table_bbox[0]) * max(0.0, table_bbox[3] - table_bbox[1])
+    return table_area / rect_area > FRAME_TABLE_CONTENT_FRACTION and furniture_lib.bbox_matches(table_bbox, rect)
+
+
+def real_table_bboxes(
+    pdf_path: Path, page_number: int, frame_tables: list[dict] | None = None,
+    content_rect: list[float] | None = None,
+) -> list[list[float]]:
     """The bboxes of `page_tables`."""
-    return [t["bbox"] for t in page_tables(pdf_path, page_number, frame_tables)]
+    return [t["bbox"] for t in page_tables(pdf_path, page_number, frame_tables, content_rect)]
 
 
 def is_grid_table(table: dict, cluster_has_curves: bool) -> bool:
@@ -454,6 +493,7 @@ def detect_figure_regions_with_exclusions(
     frame_tables: list[dict] | None = None,
     frame_drawings: list[dict] | None = None,
     repeated_drawings: list[dict] | None = None,
+    content_rect: list[float] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """The full detection pipeline (see module docstring): returns
     `(regions, excluded_regions)`.
@@ -505,7 +545,7 @@ def detect_figure_regions_with_exclusions(
         return [], excluded_regions
 
     clusters = page.cluster_drawings(drawings=significant)
-    tables = page_tables(pdf_path, page_number, frame_tables)
+    tables = page_tables(pdf_path, page_number, frame_tables, content_rect)
     page_lines = _page_lines(page)
 
     def padded(raw) -> list[float]:
@@ -567,6 +607,7 @@ def detect_figure_regions(
     frame_tables: list[dict] | None = None,
     frame_drawings: list[dict] | None = None,
     repeated_drawings: list[dict] | None = None,
+    content_rect: list[float] | None = None,
 ) -> list[dict]:
     """Candidate figure regions for one page -- the `regions` half of
     `detect_figure_regions_with_exclusions`, for the (majority of) callers
@@ -574,7 +615,7 @@ def detect_figure_regions(
     function's docstring, and the module docstring, for the full pipeline."""
     regions, _excluded = detect_figure_regions_with_exclusions(
         page, page_number, pdf_path, frame_tables=frame_tables, frame_drawings=frame_drawings,
-        repeated_drawings=repeated_drawings,
+        repeated_drawings=repeated_drawings, content_rect=content_rect,
     )
     return regions
 

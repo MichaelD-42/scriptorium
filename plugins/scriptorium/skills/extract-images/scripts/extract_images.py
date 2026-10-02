@@ -102,6 +102,7 @@ def extract_vector_regions(
     frame_drawings: list[dict] | None = None,
     dpi: int = VECTOR_REGION_DPI,
     repeated_drawings: list[dict] | None = None,
+    content_rect: list[float] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Task A5: one image element per surviving figure region (see
     `lib/figures.py`'s `detect_figure_regions_with_exclusions` for the full
@@ -122,7 +123,7 @@ def extract_vector_regions(
     shard by `main()` below so nothing a filter removes vanishes silently."""
     regions, excluded_regions = figures_lib.detect_figure_regions_with_exclusions(
         page, page_number, pdf_path, frame_tables=frame_tables, frame_drawings=frame_drawings,
-        repeated_drawings=repeated_drawings,
+        repeated_drawings=repeated_drawings, content_rect=content_rect,
     )
     zoom = dpi / 72
     found = []
@@ -169,6 +170,7 @@ def main() -> None:
     frame_tables = furniture.get("frame_tables", [])
     frame_drawings = furniture.get("frame_drawings", [])
     repeated_drawings = furniture.get("repeated_drawings", [])
+    content_rect = furniture_lib.content_rect(furniture)
     furniture_xrefs = set(furniture.get("image_xrefs", []))
     page_roles = furniture_lib.load_page_roles(args.doc)
 
@@ -187,7 +189,7 @@ def main() -> None:
         image_elements = extract_bitmaps(fitz_doc, page, page_number, assets_dir, furniture_xrefs)
         vector_elements, excluded_regions = extract_vector_regions(
             page, page_number, assets_dir, pdf_path, frame_tables, frame_drawings,
-            repeated_drawings=repeated_drawings,
+            repeated_drawings=repeated_drawings, content_rect=content_rect,
         )
         image_elements += vector_elements
 

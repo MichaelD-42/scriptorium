@@ -931,7 +931,7 @@ def main() -> None:
         # "table" would swallow real text blocks that merely sit under it.
         tables = [
             {"bbox": t["bbox"], "rows": t["rows"]}
-            for t in figures_lib.page_tables(pdf_path, page_number, frame_tables)
+            for t in figures_lib.page_tables(pdf_path, page_number, frame_tables, content_rect)
         ]
         # Task A5: figure regions detected the same way extract_images.py
         # detects them (same shared helper, so the two scripts can never
@@ -939,6 +939,7 @@ def main() -> None:
         # lines belong to figure_text, not to a paragraph/heading element.
         figure_regions, region_exclusions = figures_lib.detect_figure_regions_with_exclusions(
             page, page_number, pdf_path, frame_tables, frame_drawings, repeated_drawings=repeated_drawings,
+            content_rect=content_rect,
         )
         # Follow-up R11: a chart's grid that pdfplumber read as a table is
         # part of the figure, so it is not a table element.

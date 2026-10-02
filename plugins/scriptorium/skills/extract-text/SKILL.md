@@ -69,6 +69,12 @@ document.
   furniture detection), it's applied before anything else is written: a
   pdfplumber table whose bbox matches a `frame_tables` entry is dropped
   (page frames aren't real tables — never emitted as a `table` element).
+  Follow-up R12: with a `content_rect`, tables are detected on the page
+  cropped to it (`lib/figures.py`'s `page_tables`, shared with
+  `extract-images`), so the title block never joins a table, and a table
+  there that covers more than 60% of the rect and matches it within 3 pt
+  is the frame again and is dropped, even where its bbox is a few points
+  off the `frame_tables` entry.
   For text: a block that sits in the furniture band (the top/bottom 12%,
   or outside triage's `content_rect`, see `band_limits`) has each of
   its **lines** checked individually against `line_patterns` — only the
