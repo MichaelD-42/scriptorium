@@ -48,7 +48,7 @@ def score_from_issues(issues: list[str]) -> float:
 def write_grade_shard(doc: str, page_number: int, score: float, issues: list[str]) -> None:
     shard_path = paths.grade_shard_path(doc, page_number)
     shard_path.parent.mkdir(parents=True, exist_ok=True)
-    shard_path.write_text(json.dumps({"page_number": page_number, "score": score, "issues": issues}, indent=2))
+    shard_path.write_text(json.dumps({"page_number": page_number, "score": score, "issues": issues}, indent=2), encoding="utf-8", newline="")
     print(f"page {page_number}: score={score} issues={issues}")
 
 

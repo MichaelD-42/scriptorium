@@ -68,13 +68,13 @@ FURNITURE_TEXT_TYPES = ("heading", "paragraph", "list_item")
 def write_shard(shard_path: Path, page_number: int, elements: list, **extra) -> None:
     shard_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"page_number": page_number, "elements": elements, **extra}
-    shard_path.write_text(json.dumps(payload, indent=2))
+    shard_path.write_text(json.dumps(payload, indent=2), encoding="utf-8", newline="")
 
 
 def read_shard(shard_path: Path) -> dict | None:
     if not shard_path.exists():
         return None
-    return json.loads(shard_path.read_text())
+    return json.loads(shard_path.read_text(encoding="utf-8"))
 
 
 def remove_furniture_lines(
@@ -256,7 +256,7 @@ def load_doc(elements_path: Path) -> dict:
     """Read the merged elements.json (merge_shards()' output, written by
     merge.py). Returns pages as a dict keyed by page_number for convenience."""
     if elements_path.exists():
-        data = json.loads(elements_path.read_text())
+        data = json.loads(elements_path.read_text(encoding="utf-8"))
         data["pages"] = {p["page_number"]: p for p in data.get("pages", [])}
         return data
     return {"doc": None, "source_file": None, "page_count": 0, "pages": {}}
@@ -266,4 +266,4 @@ def save_doc(elements_path: Path, doc: dict) -> None:
     elements_path.parent.mkdir(parents=True, exist_ok=True)
     pages_sorted = sorted(doc["pages"].values(), key=lambda p: p["page_number"])
     payload = {**doc, "pages": pages_sorted}
-    elements_path.write_text(json.dumps(payload, indent=2))
+    elements_path.write_text(json.dumps(payload, indent=2), encoding="utf-8", newline="")

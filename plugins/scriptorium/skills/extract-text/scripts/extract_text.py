@@ -34,7 +34,7 @@ def load_toc_entries(doc: str) -> list[dict]:
     toc_path = paths.toc_json(doc)
     if not toc_path.exists():
         return []
-    return json.loads(toc_path.read_text()).get("entries", [])
+    return json.loads(toc_path.read_text(encoding="utf-8")).get("entries", [])
 
 
 def build_toc_heading_lookup(toc_entries: list[dict]) -> dict[str, int]:

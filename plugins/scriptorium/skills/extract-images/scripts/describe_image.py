@@ -193,7 +193,7 @@ def main() -> None:
         print(f"error: no image element with asset {args.asset} on page {args.page}", file=sys.stderr)
         sys.exit(1)
 
-    shard_path.write_text(json.dumps(shard, indent=2))
+    shard_path.write_text(json.dumps(shard, indent=2), encoding="utf-8", newline="")
     print(f"described {args.asset}: {args.description!r}")
 
 

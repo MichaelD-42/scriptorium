@@ -200,7 +200,7 @@ def _load_triage(doc: str) -> dict:
     triage_path = paths.triage_json(doc)
     if not triage_path.exists():
         return {}
-    return json.loads(triage_path.read_text())
+    return json.loads(triage_path.read_text(encoding="utf-8"))
 
 
 def load_furniture(doc: str) -> dict:

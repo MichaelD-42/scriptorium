@@ -26,7 +26,7 @@ def main() -> None:
     issues = [i.strip() for i in args.issues.split(",") if i.strip()]
     shard_path = paths.grade_shard_path(args.doc, args.page)
     shard_path.parent.mkdir(parents=True, exist_ok=True)
-    shard_path.write_text(json.dumps({"page_number": args.page, "score": args.score, "issues": issues}, indent=2))
+    shard_path.write_text(json.dumps({"page_number": args.page, "score": args.score, "issues": issues}, indent=2), encoding="utf-8", newline="")
     print(f"page {args.page}: score={args.score} issues={issues}")
 
 

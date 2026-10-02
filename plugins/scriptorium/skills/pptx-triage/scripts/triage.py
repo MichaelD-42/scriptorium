@@ -60,7 +60,7 @@ def main() -> None:
 
     out_path = paths.triage_json(args.doc)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(result, indent=2))
+    out_path.write_text(json.dumps(result, indent=2), encoding="utf-8", newline="")
     print(json.dumps(result, indent=2))
 
 

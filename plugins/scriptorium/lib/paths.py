@@ -85,7 +85,7 @@ def true_page_count(doc: str, input_format: str, root: Path = Path(".")) -> int:
         triage_path = triage_json(doc, root)
         if not triage_path.exists():
             raise FileNotFoundError(f"{triage_path} not found — run docx-triage first")
-        return json.loads(triage_path.read_text())["page_count"]
+        return json.loads(triage_path.read_text(encoding="utf-8"))["page_count"]
     if input_format == "html":
         return 1
     if input_format == "image":

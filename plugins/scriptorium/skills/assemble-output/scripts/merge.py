@@ -24,7 +24,7 @@ def load_furniture_text(doc: str) -> str | None:
     triage_path = paths.triage_json(doc)
     if not triage_path.exists():
         return None
-    triage = json.loads(triage_path.read_text())
+    triage = json.loads(triage_path.read_text(encoding="utf-8"))
     return triage.get("furniture_text")
 
 

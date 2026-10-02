@@ -427,13 +427,13 @@ def main() -> None:
 
     out_path = paths.triage_json(args.doc)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(result, indent=2))
+    out_path.write_text(json.dumps(result, indent=2), encoding="utf-8", newline="")
     print(json.dumps(result, indent=2))
 
     toc_out_path = paths.toc_json(args.doc)
     toc_out_path.parent.mkdir(parents=True, exist_ok=True)
     toc_out_path.write_text(
-        json.dumps({"doc": args.doc, "entries": toc_entries, "unparsed": toc_unparsed}, indent=2)
+        json.dumps({"doc": args.doc, "entries": toc_entries, "unparsed": toc_unparsed}, indent=2), encoding="utf-8", newline=""
     )
 
 

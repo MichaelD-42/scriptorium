@@ -413,7 +413,7 @@ def check_figures_complete(doc_data: dict, input_format: str | None = None) -> d
 
 
 def _load_json(path: Path) -> dict:
-    return json.loads(path.read_text()) if path.exists() else {}
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
 
 def _pdf_page_areas(input_path: Path) -> dict[int, float]:
@@ -533,7 +533,7 @@ def main() -> None:
 
     out_path = paths.gates_report_json(args.doc)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(result, indent=2))
+    out_path.write_text(json.dumps(result, indent=2), encoding="utf-8", newline="")
     print(json.dumps(result, indent=2))
 
 

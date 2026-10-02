@@ -78,6 +78,10 @@ def main() -> None:
     parser.add_argument("--asset", required=True, help='e.g. "assets/page2_vector1.png"')
     args = parser.parse_args()
 
+    # Follow-up R8: stdin is UTF-8, whatever the locale (a test may pass a
+    # StringIO, which is already text).
+    if hasattr(sys.stdin, "reconfigure"):
+        sys.stdin.reconfigure(encoding="utf-8")
     mermaid = sys.stdin.read().strip()
     if not mermaid:
         print("error: no mermaid source on stdin", file=sys.stderr)
@@ -103,7 +107,7 @@ def main() -> None:
         print(f"error: no image element with asset {args.asset} on page {args.page}", file=sys.stderr)
         sys.exit(1)
 
-    shard_path.write_text(json.dumps(shard, indent=2))
+    shard_path.write_text(json.dumps(shard, indent=2), encoding="utf-8", newline="")
     print(f"landed mermaid on {args.asset} ({len(mermaid.splitlines())} line(s))")
 
 
