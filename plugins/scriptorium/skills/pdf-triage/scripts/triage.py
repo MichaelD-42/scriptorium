@@ -260,16 +260,18 @@ def _find_frame_drawings(document) -> list[dict]:
 def _find_repeated_drawings(document, body_pages: set[int] | None = None) -> list[dict]:
     """Every vector drawing (`page.get_drawings()`), of any size and any
     fill/stroke type, whose rect repeats (within FRAME_GROUP_TOLERANCE, same
-    drawing type) on at least FRAME_TABLE_MIN_PAGE_FRACTION of the body
-    pages AND on at least FRAME_MIN_PAGE_COUNT body pages.
+    drawing type) on at least furniture_lib.REPEATED_DRAWING_MIN_PAGE_FRACTION
+    (80%) of the body pages AND on at least FRAME_MIN_PAGE_COUNT body pages.
 
     This finds a page frame that is drawn from many separate parts: border
     lines, title-block rules, a filled inner rect. Each part is small or
     thin, so `_find_frame_drawings` (one large drawing) misses most of them.
     Left in, the parts touch each other and the page content, and
     `cluster_drawings()` joins everything into one page-sized cluster.
-    Repetition, not size, is the signal: a real figure does not sit at the
-    same position on half the pages.
+    Repetition, not size, is the signal. The fraction is 80%, not the 50%
+    of the other furniture lists: a figure can recur at one position on a
+    few pages of a short document (4 of 6 pages is 67%), but real frame
+    parts sit on nearly every body page.
 
     `body_pages` is the set of page numbers to count (every page that is
     not a printed TOC page); None means every page. Near-identical rects
@@ -320,7 +322,7 @@ def _find_repeated_drawings(document, body_pages: set[int] | None = None) -> lis
         matched_page_count = len(group["pages"])
         if (
             matched_page_count >= FRAME_MIN_PAGE_COUNT
-            and matched_page_count / len(body_pages) >= FRAME_TABLE_MIN_PAGE_FRACTION
+            and matched_page_count / len(body_pages) >= furniture_lib.REPEATED_DRAWING_MIN_PAGE_FRACTION
         ):
             n = len(group["bboxes"])
             avg_bbox = [round(sum(b[i] for b in group["bboxes"]) / n, 2) for i in range(4)]

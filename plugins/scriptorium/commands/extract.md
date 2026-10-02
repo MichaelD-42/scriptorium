@@ -182,14 +182,15 @@ subagent output.
 ### 5. Decide
 
 - **`grade-report.json["warnings"]` is non-empty** (Task A5b fix round 1,
-  controller finding 2 — e.g. a `large_region_excluded` entry): record the
+  controller finding 2 — e.g. a `large_region_excluded` or
+  `orphan_figure_caption` entry): record the
   list verbatim in this document's `runs/state.json` queue entry as
   `warnings`, and include it in the loop summary you report to the human,
   **regardless of `overall_passed`** — a warning never blocks the pass/fail
   decision below (it's not a gate), but it must never be silently dropped
   either. This is the visibility half of the "no silent drops" contract
-  `grade-output`'s `large_region_excluded` gate exists for — the warning
-  is worthless if nothing downstream of `gates.py` ever surfaces it to a
+  `grade-output`'s `large_region_excluded` and `orphan_figure_caption`
+  warnings exist for — a warning is worthless if nothing downstream of `gates.py` ever surfaces it to a
   human.
 - **`overall_passed: true`**: `status: "passed"`. If `--zip` was given, run
   `assemble-output/scripts/zip_output.py --doc <name>` now (a script, not an

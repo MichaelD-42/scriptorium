@@ -23,9 +23,10 @@ Detection pipeline, per page:
    - `triage.json["furniture"]["repeated_drawings"]` (fix wave B1,
      `triage.py`'s `_find_repeated_drawings`): any drawing, of any size
      and any fill/stroke type, whose rect (and drawing type) repeats on at
-     least half the body pages AND on at least `FRAME_MIN_PAGE_COUNT`
-     pages. This catches a frame drawn from many parts (border lines,
-     title-block rules, a filled inner rect). Recorded as ONE summary entry
+     least `REPEATED_DRAWING_MIN_PAGE_FRACTION` (80%) of the body pages
+     AND on at least `FRAME_MIN_PAGE_COUNT` pages. This catches a frame
+     drawn from many parts (border lines, title-block rules, a filled inner
+     rect). Recorded as ONE summary entry
      per page, `reason: "repeated_drawing"`, with the union bbox and a
      `count`.
 
@@ -38,8 +39,10 @@ Detection pipeline, per page:
      page into one page-sized cluster.
    - The removal is per drawing, not per region. A real figure drawn
      inside a repeated box still clusters from its own drawings, which do
-     not repeat. Only a drawing that is identical on half the pages is
-     removed, and such a drawing carries no page-specific content.
+     not repeat. Only a drawing that is identical on 80% of the body
+     pages is removed, and such a drawing carries no page-specific
+     content. The fraction is 80%, not 50%, because a figure can recur
+     at one position on a few pages of a short document (follow-up R1).
    - The 1- and 2-page cases that fix round 1 guarded against are covered
      by the `FRAME_MIN_PAGE_COUNT` floor in triage, which both lists use.
    Every removal is still recorded in `excluded_regions`, so nothing
@@ -176,6 +179,16 @@ TEXT_BOX_AXIS_TOLERANCE = 0.5  # pt
 # ("Figure 1: Process Diagram", "Figure 2: Revenue by Quarter") in
 # furniture_golden.json's "figures" entries.
 CAPTION_PATTERN = re.compile(r"^(figure|fig\.?|table)\s+\d+\.?:?\s", re.IGNORECASE)
+
+
+def is_figure_caption(text: str) -> bool:
+    """True when `text` starts like a figure caption: it matches
+    CAPTION_PATTERN in its "Figure n" or "Fig. n" form. The "Table n" form
+    is left out, because a table caption belongs to a table, not to an
+    image."""
+    match = CAPTION_PATTERN.match(text or "")
+    return bool(match) and match.group(1).lower() != "table"
+
 
 # How far above/below an image element's own bbox to search for a caption
 # line, in points. A judgment call (documented per the brief), not a

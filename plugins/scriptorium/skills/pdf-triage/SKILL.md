@@ -141,8 +141,10 @@ no printed TOC found.
     drawings into figure regions — see `extract-images`'s SKILL.md.
   - `repeated_drawings` (fix wave B1): every vector drawing, of any size
     and any fill/stroke type (`type`: PyMuPDF's `"s"`, `"f"` or `"fs"`),
-    whose rect repeats (within 2pt, same type) on at least 50% of the body
+    whose rect repeats (within 2pt, same type) on at least 80% of the body
     pages (every page that is not `role: "toc"`) and on at least 3 pages.
+    The fraction is higher than the 50% of the other lists, so that a
+    figure which recurs on some pages of a short document stays a figure.
     This finds a page frame drawn from many separate parts — border lines,
     title-block rules, a filled inner panel — that no single large drawing
     covers. Near-identical rects are grouped, so the list has one entry per

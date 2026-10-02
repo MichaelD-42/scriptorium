@@ -27,6 +27,14 @@ FURNITURE_EDGE_BAND = 0.12
 FRAME_GROUP_TOLERANCE = 2.0  # pt
 FRAME_MATCH_TOLERANCE = 3.0  # pt
 
+# A drawing is a `repeated_drawings` part (a piece of the page frame or title
+# block) only when its rect repeats on at least this fraction of the body
+# pages, and on at least triage's FRAME_MIN_PAGE_COUNT pages. Real frame parts
+# sit on nearly every body page. A figure that recurs at one position on some
+# pages (the same small diagram on 4 of 6 pages is 67%) stays below it, so it
+# stays a figure. The other furniture lists keep their 50% in triage.py.
+REPEATED_DRAWING_MIN_PAGE_FRACTION = 0.80
+
 # The input formats whose image `caption` is only the printed caption the
 # script extracts. Only these may use describe_image.py's no_visible_text
 # flag; for pptx/docx/xlsx/html the agent writes --caption.

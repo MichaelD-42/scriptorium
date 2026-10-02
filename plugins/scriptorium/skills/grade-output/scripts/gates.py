@@ -15,6 +15,7 @@ from xml.etree import ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 import elements as elements_lib  # noqa: E402
+import figures as figures_lib  # noqa: E402
 import furniture as furniture_lib  # noqa: E402
 import paths  # noqa: E402
 import toc as toc_lib  # noqa: E402
@@ -144,6 +145,60 @@ def check_large_region_excluded(doc_data: dict, page_areas: dict[int, float]) ->
                         f"was excluded (reason: {region.get('reason')}) -- verify this wasn't a real figure"
                     ),
                 })
+    return warnings
+
+
+def _normalized(text: str) -> str:
+    return " ".join((text or "").split())
+
+
+def check_orphan_figure_caption(doc_data: dict) -> list[dict]:
+    """Follow-up R1: a WARNING (never a hard gate failure, like
+    check_large_region_excluded) for every `paragraph` whose text is a
+    figure caption (`figures.is_figure_caption`: CAPTION_PATTERN in its
+    "Figure n" / "Fig. n" form) when no `image` element on the same page
+    or on the next page has that text as its `caption`.
+
+    extract-images claims a caption line for the image it belongs to, and
+    extract-text then leaves the line out of the body. A caption that is
+    still a paragraph with no image claiming it means that its figure was
+    probably lost: removed as furniture, kept as a text box, or never
+    detected. The next page counts because a caption can sit at the top
+    of the page after its figure, and an OCR or vision page can keep the
+    caption as a paragraph next to its image.
+
+    A warning, not a gate: the line can also be a list-of-figures entry or
+    a body sentence that starts with "Figure 3 shows". The grader looks at
+    the page and decides."""
+    pages = doc_data.get("pages", {})
+    claimed: dict[int, set[str]] = {}
+    for page in pages.values():
+        claimed[page.get("page_number")] = {
+            _normalized(el["caption"])
+            for el in page.get("elements", [])
+            if el.get("type") == "image" and el.get("caption")
+        }
+    warnings = []
+    for page in sorted(pages.values(), key=lambda p: p.get("page_number") or 0):
+        page_number = page.get("page_number")
+        for el in page.get("elements", []):
+            if el.get("type") != "paragraph":
+                continue
+            caption = (el.get("text") or "").strip()
+            if not figures_lib.is_figure_caption(caption):
+                continue
+            key = _normalized(caption)
+            if key in claimed.get(page_number, set()) or key in claimed.get((page_number or 0) + 1, set()):
+                continue
+            warnings.append({
+                "name": "orphan_figure_caption",
+                "page": page_number,
+                "caption": caption,
+                "detail": (
+                    f"page {page_number}: the figure caption {caption!r} is a paragraph, and no image "
+                    f"on this page or the next has it as its caption -- verify the figure was not lost"
+                ),
+            })
     return warnings
 
 
@@ -469,9 +524,10 @@ def main() -> None:
 
     # Task A5b: large_region_excluded is a WARNING, not one of the checks
     # above -- it never affects `passed`. See check_large_region_excluded's
-    # docstring for why.
+    # docstring for why. Follow-up R1: orphan_figure_caption is a warning
+    # for the same reason.
     page_areas = _pdf_page_areas(input_path) if input_format == "pdf" else {}
-    warnings = check_large_region_excluded(doc_data, page_areas)
+    warnings = check_large_region_excluded(doc_data, page_areas) + check_orphan_figure_caption(doc_data)
 
     result = {"doc": args.doc, "passed": all(c["passed"] for c in checks), "checks": checks, "warnings": warnings}
 

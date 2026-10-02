@@ -23,8 +23,8 @@ Handles both image kinds a PDF can contain:
     even sees it);
   - it's a single drawing matching `triage.json["furniture"]
     ["repeated_drawings"]` (fix wave B1 — any drawing, of any size and
-    fill, that repeats on at least half the body pages: the separate parts
-    of a page frame or title block). Without this, those parts join every
+    fill, that repeats on at least 80% of the body pages: the separate
+    parts of a page frame or title block). Without this, those parts join every
     other drawing on the page into one page-sized cluster. These two
     removals use repetition only (no stroke-only or page-edge check any
     more): a real page frame can be a filled panel, and a real figure drawn

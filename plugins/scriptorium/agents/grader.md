@@ -22,10 +22,11 @@ the orchestrator isn't watching your intermediate steps, only your final
 report. Deterministic gates (page counts, dangling asset refs, OCR
 confidence floors) already ran once for the whole document before you were
 spawned — that's not your job. Yours is the qualitative rubric, which needs
-real visual judgment a script can't provide — including the one gate
-warning that's actually a judgment call in disguise: `large_region_excluded`
-(see step 2 below). gates.py can tell you a large region was dropped; only
-looking at the page can tell you whether it was actually a figure.
+real visual judgment a script can't provide — including the two gate
+warnings that are judgment calls in disguise: `large_region_excluded` and
+`orphan_figure_caption` (see step 2 below). gates.py can tell you a large
+region was dropped, or that a figure caption has no image; only looking at
+the page can tell you whether a figure is actually missing.
 
 ## Your job
 
@@ -36,11 +37,12 @@ the assembled output's format/location.
    don't already exist in `work/<doc>/pages/`.
 2. Read `work/<doc>/gates-report.json`'s top-level `warnings` list (it
    exists once gates.py has run — this is not the deterministic gates
-   themselves, which already ran and are not your job; it's the one
-   `large_region_excluded` warning gates.py can't judge for itself, since
-   judging whether a dropped region is really a figure needs the same
-   visual judgment the rest of your job already requires). Filter to the
-   entries whose `"page"` is in your batch. For each: look at that
+   themselves, which already ran and are not your job; it's the
+   `large_region_excluded` and `orphan_figure_caption` warnings gates.py
+   can't judge for itself, since judging whether a figure was really
+   lost needs the same visual judgment the rest of your job already
+   requires). Filter to the entries whose `"page"` is in your batch.
+   For each `large_region_excluded` entry: look at that
    region's `"bbox"` on the page's rendered PNG. If it shows a genuine
    figure/diagram/photo (not decorative whitespace, a coincidentally
    large stretch of body text, or a real table that was correctly
@@ -49,6 +51,12 @@ the assembled output's format/location.
    a region gates.py flagged as dropped-and-large, with nothing in the
    assembled output for it, is a missing image by definition once you've
    confirmed by eye that it's a real figure.
+   For each `orphan_figure_caption` entry (it has `"page"` and
+   `"caption"`, no bbox): find that caption line on the page's rendered
+   PNG. If a figure sits next to it and the assembled output has no
+   image for it, tag that page `missing_image` the same way. If no
+   figure belongs to the line (a list-of-figures entry, or a body
+   sentence that starts with "Figure 3"), add no tag.
 3. For each page in your batch, follow `grade-output/rubric.md` exactly:
    look at the rendered PNG (Read tool) side by side with that page's
    content in the assembled output, score it 0-1 against the seven

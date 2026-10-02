@@ -120,6 +120,30 @@ of the pipeline (Task A5b fix round 1):
   human in the loop summary, regardless of `overall_passed` — a warning is
   never silently dropped even when everything else passes.
 
+## `orphan_figure_caption` (warning, not a gate)
+
+`gates.py` also appends a `{"name": "orphan_figure_caption", "page": ...,
+"caption": ..., "detail": ...}` entry to the same top-level `warnings` list
+for every `paragraph` whose text is a figure caption, when no `image`
+element on the same page or on the next page has that text as its
+`caption`. A figure caption is a line that matches `lib/figures.py`'s
+`CAPTION_PATTERN` in its "Figure n" or "Fig. n" form (`is_figure_caption`);
+"Table n" captions belong to tables and never warn. It runs for every input
+format.
+
+`extract-images` claims each caption line for the image it belongs to, and
+`extract-text` then leaves the line out of the body. A caption left as a
+paragraph, with no image claiming it, means its figure was probably lost:
+removed as page furniture, kept as a text box, or never detected. The
+warning backs up both of those filters.
+
+It is wired exactly like `large_region_excluded`: it never flips `passed`;
+the `grader` subagent looks for the caption on the rendered PNG and tags the
+page `missing_image` only when a real figure next to it has no image in the
+output (a list-of-figures entry or a sentence that starts with "Figure 3"
+gets no tag); `merge_grades.py` lifts it to `grade-report.json`; and
+`commands/extract.md`'s Decide step records it and reports it to the human.
+
 ## Notes for the calling agent
 
 - A rubric verdict of "pass" cannot rescue a failed gate — gates are the
