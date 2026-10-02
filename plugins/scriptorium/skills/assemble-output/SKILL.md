@@ -203,18 +203,32 @@ gap can't be hit silently.
   path.
 - The heading that OPENS a folder/file becomes that file's frontmatter
   `title`/`section`, not a duplicated body heading (same convention
-  `split_sections_by_h1`/OKF already use for `H1`).
+  `split_sections_by_h1`/OKF already use for `H1`). Its anchor (see
+  "Anchors" below) is the first body line of the file it opens.
 
 **Frontmatter** — every split file except `index.md`: `doc` (the doc name),
 `section` (the heading's own number, e.g. `"2.3"`, or `null` for
 `00-front-matter.md`), `title`, `level` (`null` for front matter), and
 `source_pages` (the list of page numbers whose content landed in this
-file). Written with the same `render_frontmatter` YAML helper OKF uses.
+file, including the second page of an element joined across a page break,
+from its `pages` list). Written with the same `render_frontmatter` YAML
+helper OKF uses.
 
-**Anchors — exact cross-repo contract.** Every heading that stays inline
-within a file (level `> N`, e.g. level 3+ for `--split-depth 2`) gets a
-stable `<a id="...">` anchor immediately before its heading line, from
-`slugify_heading(text)`:
+**Anchors — exact cross-repo contract.** Every heading gets a stable
+`<a id="...">` anchor from `slugify_heading(text)`:
+
+- A heading that stays inline within a file (level `> N`, e.g. level 3+
+  for `--split-depth 2`): the anchor line comes immediately before its
+  heading line.
+- A heading that opens a file (level `<= N`): the anchor line is the first
+  body line of that file, followed by a blank line. A level-1 heading with
+  no body of its own (no `NN.00` file) puts its anchor at the top of its
+  first `NN.MM` file, before that file's own anchor.
+- A level-1 heading with neither body content nor level-2 children has no
+  file, so it has no anchor. Nothing can point into it, because it holds
+  no content.
+
+The slug rule:
 
 - If the heading text starts with a leading number (digit groups separated
   by dots, matched from the very start of the text with only leading

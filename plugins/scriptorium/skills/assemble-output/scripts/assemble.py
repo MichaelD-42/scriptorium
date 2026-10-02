@@ -352,7 +352,9 @@ def build_md_tree_sections(pages: list[dict], split_depth: int) -> tuple[dict, l
 
     The heading element that OPENS a folder/file is never itself appended as
     body content -- it becomes that section's frontmatter `title`/`section`
-    instead (same convention `split_sections_by_h1`/OKF already uses)."""
+    instead (same convention `split_sections_by_h1`/OKF already uses). Its
+    original text is kept as `heading_text`, so `write_md_tree` can write
+    its anchor as the file's first body line."""
     front_matter = {"elements": [], "source_pages": []}
     folders: list[dict] = []
     active_folder = None
@@ -361,6 +363,14 @@ def build_md_tree_sections(pages: list[dict], split_depth: int) -> tuple[dict, l
     def track_page(bucket: dict, page_number: int) -> None:
         if page_number not in bucket["source_pages"]:
             bucket["source_pages"].append(page_number)
+
+    def track_element_pages(bucket: dict, el: dict, page_number: int) -> None:
+        # A paragraph or list item joined across a page break carries
+        # `pages: [n, n+1]` (lib/elements.py); its file holds text from
+        # both pages, so both go into `source_pages`.
+        track_page(bucket, page_number)
+        for joined_page in el.get("pages", []):
+            track_page(bucket, joined_page)
 
     for page in pages:
         page_number = page["page_number"]
@@ -372,6 +382,7 @@ def build_md_tree_sections(pages: list[dict], split_depth: int) -> tuple[dict, l
                 active_folder = {
                     "number": number,
                     "title": title,
+                    "heading_text": el["text"],
                     "level": level,
                     "pre": {"elements": [], "source_pages": [page_number]},
                     "files": [],
@@ -385,6 +396,7 @@ def build_md_tree_sections(pages: list[dict], split_depth: int) -> tuple[dict, l
                 new_file = {
                     "number": number,
                     "title": title,
+                    "heading_text": el["text"],
                     "level": level,
                     "elements": [],
                     "source_pages": [page_number],
@@ -399,6 +411,7 @@ def build_md_tree_sections(pages: list[dict], split_depth: int) -> tuple[dict, l
                     active_folder = {
                         "number": None,
                         "title": None,
+                        "heading_text": None,
                         "level": split_depth - 1,
                         "pre": {"elements": [], "source_pages": []},
                         "files": [],
@@ -415,7 +428,7 @@ def build_md_tree_sections(pages: list[dict], split_depth: int) -> tuple[dict, l
             else:
                 target = front_matter
             target["elements"].append(el)
-            track_page(target, page_number)
+            track_element_pages(target, el, page_number)
 
     return front_matter, folders
 
@@ -452,6 +465,19 @@ def elements_to_markdown_with_anchors(elements: list[dict], asset_prefix: str = 
             lines.extend(render_image_markdown(el, asset_prefix=asset_prefix))
         lines.append("")
     return "\n".join(lines).strip() + "\n"
+
+
+def _with_opener_anchors(heading_texts: list[str | None], body: str, has_elements: bool) -> str:
+    """Put one `<a id="...">` line per opener heading at the top of a split
+    file's body. The heading that opens a file is frontmatter only, so this
+    is the only place its anchor can live; without it an L1/L2 heading would
+    have no anchor in any md-tree file."""
+    anchors = [f'<a id="{slugify_heading(t)}"></a>' for t in heading_texts if t]
+    if not anchors:
+        return body
+    if not has_elements:
+        return "\n\n".join(anchors) + "\n"
+    return "\n\n".join(anchors + [body])
 
 
 def write_md_tree(doc_data: dict, doc: str, split_depth: int) -> list[Path]:
@@ -515,7 +541,11 @@ def write_md_tree(doc_data: dict, doc: str, split_depth: int) -> list[Path]:
                 "level": folder["level"],
                 "source_pages": pre["source_pages"],
             })
-            body = elements_to_markdown_with_anchors(pre["elements"], asset_prefix="../")
+            body = _with_opener_anchors(
+                [folder["heading_text"]],
+                elements_to_markdown_with_anchors(pre["elements"], asset_prefix="../"),
+                has_elements=True,
+            )
             pre_path.write_text(f"{frontmatter}\n{body}", encoding="utf-8", newline="")
             written.append(pre_path)
             index_lines.append(f"* [{folder_label}]({folder_dirname}/{pre_path.name})")
@@ -533,7 +563,16 @@ def write_md_tree(doc_data: dict, doc: str, split_depth: int) -> list[Path]:
                 "level": file["level"],
                 "source_pages": file["source_pages"],
             })
-            body = elements_to_markdown_with_anchors(file["elements"], asset_prefix="../")
+            # A chapter with no body of its own has no NN.00 file, so its
+            # anchor goes at the top of its first NN.MM file instead.
+            openers = [file["heading_text"]]
+            if file_idx == 1 and not has_pre:
+                openers.insert(0, folder["heading_text"])
+            body = _with_opener_anchors(
+                openers,
+                elements_to_markdown_with_anchors(file["elements"], asset_prefix="../"),
+                has_elements=bool(file["elements"]),
+            )
             file_path.write_text(f"{frontmatter}\n{body}", encoding="utf-8", newline="")
             written.append(file_path)
             file_label = f"{file['number']} {file['title']}".strip() if file["number"] else (file["title"] or mm)

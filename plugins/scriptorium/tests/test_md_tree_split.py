@@ -17,7 +17,9 @@ section for the full contract):
   - Levels 3+ stay inline within their enclosing file, each preceded by a
     stable `<a id="...">` anchor (Task A8's cross-repo anchor contract,
     `slugify_heading` -- byte-for-byte match with a downstream consumer's own,
-    independently-implemented `slugify_heading()`).
+    independently-implemented `slugify_heading()`). The L1/L2 heading that
+    opens a file puts its anchor on the file's first body line instead (see
+    test_md_tree_anchors.py).
 
 Judgment calls made in `write_md_tree`, documented again here for anyone
 reading tests first:
