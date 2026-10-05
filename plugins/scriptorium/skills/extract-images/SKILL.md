@@ -111,8 +111,8 @@ For an image document, `--pages` is always `1` — there's only ever page 1.
 - If `work/<doc>/triage.json` has a `furniture` section (`pdf-triage`'s
   furniture detection), a bitmap whose xref is in `image_xrefs` (e.g. a logo
   repeated on every page) is skipped entirely — no `image` element is
-  written for it. `frame_tables` entries are also excluded from both
-  `page_has_table()`'s query and `lib/figures.py`'s real-table lookup, so a
+  written for it. `frame_tables` entries are also excluded from
+  `lib/figures.py`'s real-table lookup (`page_tables`), so a
   page whose only pdfplumber-detected table is the page frame doesn't
   suppress vector-region detection on that page, and a real ruled table
   never itself becomes a vector-region `image` element. No

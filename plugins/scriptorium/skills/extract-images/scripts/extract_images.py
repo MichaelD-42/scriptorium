@@ -14,7 +14,6 @@ import furniture as furniture_lib  # noqa: E402
 import paths  # noqa: E402
 
 import fitz  # PyMuPDF
-import pdfplumber
 from PIL import Image
 
 VECTOR_REGION_DPI = 200  # Task A5: region crops render sharper than the old whole-page 150dpi default
@@ -76,24 +75,6 @@ def _set_caption_if_found(element: dict, page, bbox: list[float]) -> None:
     caption_line = figures_lib.find_caption_line(page, bbox)
     if caption_line:
         element["caption"] = caption_line["text"]
-
-
-def page_has_table(pdf_path: Path, page_number: int, frame_tables: list[dict] | None = None) -> bool:
-    """A ruled table's grid lines are vector paths too, so a page's table(s)
-    must never be misdetected as a figure. Tables are extract-text's job,
-    not ours. Kept as a small standalone utility (still directly unit
-    tested); `extract_vector_regions` below uses `lib/figures.py`'s
-    per-region `real_table_bboxes` instead, since region-level detection
-    needs each table's own bbox to exclude just the overlapping cluster,
-    not a whole-page yes/no.
-
-    `frame_tables` (triage.json["furniture"]["frame_tables"]) is excluded
-    from the query: a page whose only pdfplumber "table" is the page frame
-    must NOT count as having a table for this purpose (Task A2)."""
-    frame_tables = frame_tables or []
-    with pdfplumber.open(pdf_path) as pl_doc:
-        tables = pl_doc.pages[page_number - 1].find_tables()
-        return any(not furniture_lib.matches_any_frame(t.bbox, frame_tables) for t in tables)
 
 
 def extract_vector_regions(

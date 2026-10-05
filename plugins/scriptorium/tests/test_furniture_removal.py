@@ -1,7 +1,7 @@
 """Task A2 -- furniture removal in extract-text and extract-images.
 
 Exercises the frame-table exclusion, furniture-line-text drop, repeated-image
-skip, page_has_table() frame-exclusion, additive bbox schema field, and
+skip, figures.page_tables() frame-exclusion, additive bbox schema field, and
 merge.py's furniture_text passthrough added in this task, against two
 fixtures:
 
@@ -181,17 +181,20 @@ class TestExtractImagesFurnitureSkip:
         assert len(all_bitmaps) == 1, f"expected exactly the one unique bitmap, got {all_bitmaps}"
 
 
-class TestPageHasTableExcludesFrame:
-    def test_false_on_frame_only_page_true_on_real_table_page(self, frame_table_doc, tmp_project):
+class TestPageTablesExcludesFrame:
+    def test_none_on_frame_only_page_one_on_real_table_page(self, frame_table_doc, tmp_project):
+        # Re-review 2 M3: extract-images' own page_has_table() query is
+        # gone; every stage asks lib/figures.py's page_tables.
+        import figures as figures_lib
+
         triage = _run_triage(frame_table_doc, tmp_project)
         frame_tables = triage["furniture"]["frame_tables"]
         assert frame_tables
 
-        mod = load_script("extract-images/scripts/extract_images.py", "extract_images_a2_page_has_table")
         pdf_path = paths.input_pdf(frame_table_doc)
 
-        assert mod.page_has_table(pdf_path, 1, frame_tables) is False
-        assert mod.page_has_table(pdf_path, 2, frame_tables) is True
+        assert figures_lib.page_tables(pdf_path, 1, frame_tables) == []
+        assert figures_lib.page_tables(pdf_path, 2, frame_tables) != []
 
 
 class TestBboxOnEveryElement:
