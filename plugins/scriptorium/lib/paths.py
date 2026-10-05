@@ -8,9 +8,11 @@ i.e. ${CLAUDE_PROJECT_DIR}).
     work/<doc>/shards/page{N}.image.json               independent of body tier
     work/<doc>/elements.json                           merge.py's output — the merged shards
     work/<doc>/triage.json
+    work/<doc>/toc.json
     work/<doc>/gates-report.json
     output/<doc>/<doc>.{md,html,reqif,reqifz}          single-file formats (reqifz is also a zip archive)
     output/<doc>/{index.md,NN-slug.md}                 okf format (multi-file bundle)
+    output/<doc>/{index.md,00-front-matter.md,NN-slug/NN.MM-slug.md}  md-tree format (split multi-file bundle, configurable depth)
     output/<doc>/assets/*.png
     output/<doc>/grade-shards/page{N}.json              one per grader batch page
     output/<doc>/grade-report.json                      merge_grades.py's output
@@ -83,7 +85,7 @@ def true_page_count(doc: str, input_format: str, root: Path = Path(".")) -> int:
         triage_path = triage_json(doc, root)
         if not triage_path.exists():
             raise FileNotFoundError(f"{triage_path} not found — run docx-triage first")
-        return json.loads(triage_path.read_text())["page_count"]
+        return json.loads(triage_path.read_text(encoding="utf-8"))["page_count"]
     if input_format == "html":
         return 1
     if input_format == "image":
@@ -120,6 +122,10 @@ def elements_json(doc: str, root: Path = Path(".")) -> Path:
 
 def triage_json(doc: str, root: Path = Path(".")) -> Path:
     return work_dir(doc, root) / "triage.json"
+
+
+def toc_json(doc: str, root: Path = Path(".")) -> Path:
+    return work_dir(doc, root) / "toc.json"
 
 
 def gates_report_json(doc: str, root: Path = Path(".")) -> Path:

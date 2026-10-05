@@ -26,8 +26,9 @@ yourself about to `Read` a page image or `elements.json` directly: stop,
 that's a subagent's job, not yours.
 
 Arguments (`$ARGUMENTS`, all optional): `--doc <name>` to process a single
-named document instead of the whole queue; `--format md|html|okf|reqif|reqifz`
-(default `md`); `--max-attempts <n>` (default `3`); `--batch-size <n>` (default `8`
+named document instead of the whole queue; `--format md|html|okf|md-tree|reqif|reqifz`
+(default `md`); `--split-depth <n>` (`md-tree` only, default `2`; only `2` is
+accepted); `--max-attempts <n>` (default `3`); `--batch-size <n>` (default `8`
 pages per subagent); `--zip` to also package each document's `output/<doc>/`
 into `output/<doc>.zip` once it passes (off by default).
 
@@ -57,7 +58,7 @@ that actually have scanned pages, and that's handled per-document below.
   stem isn't yet a key under `docs`, add it:
   `{"status": "pending", "attempt": 0, "input_format": "<ext>", "format": "<output format>", "escalated_pages": {}, "lang_flag": null, "tessdata_prefix": null}`.
   `input_format` is the source file's extension — not to be confused with
-  `format`, which is the output format (`md`/`html`/`okf`/`reqif`/`reqifz`).
+  `format`, which is the output format (`md`/`html`/`okf`/`md-tree`/`reqif`/`reqifz`).
   The five image extensions all normalize to `input_format: "image"`
   (`lib/paths.py`'s `detect_input_format`) — record `"image"`, not the raw
   extension.
@@ -69,7 +70,8 @@ Repeat until no document matches:
 
 **Pick** the first document (`input/` order) with `status` in `pending` or
 `retrying`. None left → report a short summary (passed / needs-human counts,
-with grade-report paths) and **stop**.
+with grade-report paths, and any document that has `warnings` recorded in
+its queue entry — see step 5) and **stop**.
 
 ### 1. Triage / resume
 
@@ -111,8 +113,11 @@ group** (multiple Agent tool calls together — this is what makes it
 parallel, not sequential calls across turns). Give each its doc name, its
 `input_format`, its page list, the tier for each of its pages (from triage,
 or the escalated tier), triage's `body_size` if the format has one (pass
-through to every `extract-text` call as `--body-size`), and
-`--lang`/`--tessdata-dir` if relevant. Wait for all of them.
+through to every `extract-text` call as `--body-size`),
+`--lang`/`--tessdata-dir` if relevant, and on a retry every page of the
+group whose `escalated_pages` entry has `recheck_images: true`, with its
+`reason` (the extractor then redoes only that page's image step). Wait for
+all of them.
 
 This is race-free by construction: each `extractor` only ever writes shard
 files for its own pages (`work/<doc>/shards/page{N}.*.json`), so batches
@@ -124,6 +129,19 @@ never touch the same file.
 uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/skills/assemble-output/scripts/merge.py" --doc <name>
 uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/skills/assemble-output/scripts/assemble.py" --doc <name> --format <format>
 uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/skills/grade-output/scripts/gates.py" --doc <name> --format <format>
+```
+
+For `--format md-tree`, run `assemble.py` twice: first `--format md`, then
+`--format md-tree --split-depth <n>`. Then run `gates.py --format md-tree`.
+The grader in step 4 reads the single-file `output/<doc>/<doc>.md`: md-tree
+renders the heading that opens a file only as frontmatter, so a grader that
+reads the split files would flag every level-1/level-2 heading as missing.
+Both formats use the same element renderers.
+
+```bash
+uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/skills/assemble-output/scripts/assemble.py" --doc <name> --format md
+uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/skills/assemble-output/scripts/assemble.py" --doc <name> --format md-tree --split-depth <n>
+uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/skills/grade-output/scripts/gates.py" --doc <name> --format md-tree
 ```
 
 `merge.py` recombines **every** page's shards, old and new — untouched
@@ -139,7 +157,8 @@ regrading).
 
 - **`pdf`/`pptx`/`image`** (rendered pages exist): partition into
   `--batch-size` groups, **spawn one `grader` subagent per group in
-  parallel**, each with its page list and the assembled output's location.
+  parallel**, each with its page list and the assembled output's location
+  (for `md-tree`, give it `output/<doc>/<doc>.md` — see step 3).
   Wait for all of them. (`image` is always a single page, so this is one
   `grader` subagent.)
 - **`docx`/`xlsx`/`html`** (no rendered page — see
@@ -162,6 +181,17 @@ subagent output.
 
 ### 5. Decide
 
+- **`grade-report.json["warnings"]` is non-empty** (Task A5b fix round 1,
+  controller finding 2 — e.g. a `large_region_excluded`,
+  `orphan_figure_caption` or `table_as_figure` entry): record the
+  list verbatim in this document's `runs/state.json` queue entry as
+  `warnings`, and include it in the loop summary you report to the human,
+  **regardless of `overall_passed`** — a warning never blocks the pass/fail
+  decision below (it's not a gate), but it must never be silently dropped
+  either. This is the visibility half of the "no silent drops" contract
+  `grade-output`'s `large_region_excluded` and `orphan_figure_caption`
+  warnings exist for — a warning is worthless if nothing downstream of `gates.py` ever surfaces it to a
+  human.
 - **`overall_passed: true`**: `status: "passed"`. If `--zip` was given, run
   `assemble-output/scripts/zip_output.py --doc <name>` now (a script, not an
   agent step — deterministic packaging of whatever `assemble.py` already
@@ -169,8 +199,29 @@ subagent output.
 - **`overall_passed: false`**:
   - `attempt += 1`. `attempt >= max_attempts` → `status: "needs-human"`,
     record the grade-report path, next document.
-  - Otherwise, for each page with issues in `rubric_verdict.per_page`,
-    escalate into `escalated_pages` (keyed by page number) — this is
+  - **Gate failures** (`grade-report.json["gates"]["checks"]`, each with
+    `passed: false`). The original five checks are document-level only:
+    they name no pages, and this step does not map them to pages. The
+    three Task A9 structure checks each carry a `pages` list:
+    - `furniture_absent` or `toc_headings_match` failed →
+      `status: "needs-human"` **immediately**, and record the check's
+      `detail` and `pages` in the queue entry. These checks stay
+      document-level: their input is deterministic script output
+      (furniture removal in `extract-text` and in `merge.py`, TOC-driven
+      heading levels), so a retry at the same tier gives the same result,
+      and a tier bump does not help — `ocr`/`vision` get no TOC-driven
+      heading levels. This is the same logic as the `docx`/`xlsx`/`html`
+      content-defect rule below.
+      The reverse case is safe: a page bumped to `ocr`/`vision` for a
+      rubric issue does not bring the title block back, because
+      `merge.py` removes the furniture lines from `ocr`/`vision` bodies
+      with the same band plus pattern rule `furniture_absent` checks.
+    - `figures_complete` failed → for each page in its `pages`, keep the
+      body tier and set `recheck_images: true` (the same flag as
+      `missing_image`/`bad_caption` below), with the check's `detail` as
+      `reason`. This retries normally for every format.
+  - Unless the document is now `needs-human`, also, for each page with
+    issues in `rubric_verdict.per_page`, escalate into `escalated_pages` (keyed by page number) — this is
     **retained feedback**, not a blind re-run:
     - **`pdf`/`pptx`**: `dropped_text` / `hallucinated_text` /
       `wrong_reading_order` / `duplicated_text` / `wrong_heading_level` /
@@ -194,7 +245,8 @@ subagent output.
       attempt without ever being able to fix anything. This is the same
       logic as the "already at vision" rule above, just starting from
       attempt 0 instead of the top of the ladder.
-    - `missing_image` / `bad_caption` (any format) / `bad_mermaid`
+    - `missing_image` / `bad_caption` (any format; for `pdf`/`image` this
+      also covers a wrong or incomplete `figure_text`) / `bad_mermaid`
       (`pdf`/`pptx`/`image` only — `text_mode_grade.py` can't judge diagram
       fidelity, so `docx`/`xlsx`/`html` never emit it) → keep the page's body tier
       as-is, set `recheck_images: true` so the next `extractor` batch

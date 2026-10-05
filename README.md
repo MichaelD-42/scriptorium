@@ -18,7 +18,7 @@ drop a file in, get a tidy document out.
 
 | You give it | It gives you back |
 |---|---|
-| PDF, Word (`.docx`), PowerPoint (`.pptx`), Excel (`.xlsx`), HTML, or an image (`.png`/`.jpg`/`.jpeg`/`.webp`/`.tiff`) | Markdown, HTML, an OKF bundle, or ReqIF — your pick |
+| PDF, Word (`.docx`), PowerPoint (`.pptx`), Excel (`.xlsx`), HTML, or an image (`.png`/`.jpg`/`.jpeg`/`.webp`/`.tiff`) | Markdown, HTML, an OKF bundle, an md-tree bundle, or ReqIF — your pick |
 
 Not sure which output to pick? A quick cheat sheet:
 
@@ -28,6 +28,9 @@ Not sure which output to pick? A quick cheat sheet:
 - **OKF bundle** — the document split into small linked files instead of one
   big one. Handy if the doc is huge or you're feeding it into a search/RAG
   pipeline later.
+- **md-tree bundle** — the document split into one folder per chapter and one
+  file per section, with a stable anchor on each heading. Use
+  `--split-depth 2` (the only depth supported now).
 - **ReqIF** (`.reqif`/`.reqifz`) — the standard requirements-interchange
   format. Only reach for this if you're feeding a requirements-management tool
   (DOORS, Polarion, etc.) — otherwise it's more format than you need.
@@ -94,7 +97,7 @@ page that's mostly a complex diagram.
 If you're driving it directly instead of asking Claude in plain English:
 
 ```
-/scriptorium:extract [--doc <name>] [--format md|html|okf|reqif|reqifz] [--zip]
+/scriptorium:extract [--doc <name>] [--format md|html|okf|md-tree|reqif|reqifz] [--split-depth 2] [--zip]
 ```
 
 - `--doc <name>` — process just one file from `input/` instead of everything

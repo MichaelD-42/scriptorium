@@ -83,6 +83,37 @@ class TestCheckOutputFileExists:
         (out_dir / "00-intro.md").write_text("content")
         assert gates.check_output_file_exists("sample", "okf")["passed"] is True
 
+    def test_md_tree_requires_index_and_nested_split_files(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        out_dir = tmp_path / "output" / "sample"
+        out_dir.mkdir(parents=True)
+        assert gates.check_output_file_exists("sample", "md-tree")["passed"] is False
+        (out_dir / "index.md").write_text("x" * 30)
+        # A flat OKF-style section file is not an md-tree split file.
+        (out_dir / "01-intro.md").write_text("content")
+        result = gates.check_output_file_exists("sample", "md-tree")
+        assert result["passed"] is False
+        assert "md-tree" in result["detail"]
+        (out_dir / "01-intro").mkdir()
+        (out_dir / "01-intro" / "01.01-scope.md").write_text("content")
+        assert gates.check_output_file_exists("sample", "md-tree")["passed"] is True
+
+    def test_md_tree_accepts_front_matter_only_bundle(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        out_dir = tmp_path / "output" / "sample"
+        out_dir.mkdir(parents=True)
+        (out_dir / "index.md").write_text("x" * 30)
+        (out_dir / "00-front-matter.md").write_text("content")
+        assert gates.check_output_file_exists("sample", "md-tree")["passed"] is True
+
+    def test_md_tree_fails_on_tiny_index(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        out_dir = tmp_path / "output" / "sample"
+        (out_dir / "01-intro").mkdir(parents=True)
+        (out_dir / "index.md").write_text("x")
+        (out_dir / "01-intro" / "01.01-scope.md").write_text("content")
+        assert gates.check_output_file_exists("sample", "md-tree")["passed"] is False
+
     def test_reqif_requires_well_formed_xml_with_req_if_root(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         out_dir = tmp_path / "output" / "sample"

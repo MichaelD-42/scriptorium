@@ -14,7 +14,7 @@ implement each step, see [`tooling.md`](tooling.md).
 |---|---|
 | Intent opens the loop | `/scriptorium:extract` sets doc (or the whole `input/` queue), format, `--batch-size`, `--max-attempts` |
 | Context grounds it | the PDF, per-page rendered PNGs, per-page shards |
-| Backpressure (structural/hard) | `grade-output`'s `gates.py` — page count, empty pages, dangling asset refs, OCR confidence floor |
+| Backpressure (structural/hard) | `grade-output`'s `gates.py` — page count, empty pages, dangling asset refs, OCR confidence floor, plus PDF-only structure checks: furniture removed, TOC headings matched, figures complete |
 | Backpressure (product/soft) | `grade-output/rubric.md` — reading order, dropped/hallucinated/duplicated text, table integrity, headings, captions. Pass threshold (0.85) is hardcoded there, not a CLI flag |
 | Verification closes it | the `grader` role — independent of `extractor`, never grades its own work |
 | Loop sizing | `pdf-triage` classifies each document `loose` (all tier-1) or `tight` (needs escalation) |

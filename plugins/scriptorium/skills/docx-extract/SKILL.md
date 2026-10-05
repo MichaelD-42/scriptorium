@@ -39,7 +39,8 @@ batches can't race on the same shard file.
 - **Inline images** (`lib.docx_pages.paragraph_images`) are saved to
   `output/<doc>/assets/page{N}_bitmap{idx}.<ext>` and become `image`
   elements with an empty caption — same contract as `extract-images`/
-  `pptx-extract`, so the same `caption_image.py` fills them in afterward
+  `pptx-extract`, so the same `describe_image.py` (its `--caption` alias —
+  docx has no script-side caption detection) fills them in afterward
   (the extractor reads the saved asset directly; no page render needed to
   caption an individual image).
 - Reading order follows the document's own block order (paragraphs and

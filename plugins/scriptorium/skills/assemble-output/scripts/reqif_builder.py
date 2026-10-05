@@ -213,6 +213,18 @@ def _build_spec_objects_and_hierarchy(content: ET.Element, doc: str, doc_data: d
         elif el["type"] == "paragraph":
             spec_object.set("LONG-NAME", "Paragraph")
             _add_xhtml_value(values, TEXT_ATTR_ID, _paragraph_xhtml(el["text"]))
+        elif el["type"] == "list_item":
+            # Task A4b: "the list item's rendered text as a paragraph" --
+            # same marker-render/indent rule as assemble.py's
+            # render_list_item_markdown (a glyph marker renders as "-", an
+            # enumerator verbatim), duplicated here in miniature rather than
+            # importing assemble.py from this module: assemble.py already
+            # imports reqif_builder at module scope, so the reverse import
+            # would be circular.
+            spec_object.set("LONG-NAME", "List Item")
+            marker_render = el["marker"] if len(el["marker"]) > 1 else "-"
+            indent = "  " * (el["level"] - 1)
+            _add_xhtml_value(values, TEXT_ATTR_ID, _paragraph_xhtml(f"{indent}{marker_render} {el['text']}"))
         elif el["type"] == "table":
             spec_object.set("LONG-NAME", "Table")
             _add_xhtml_value(values, TEXT_ATTR_ID, _table_xhtml(el["rows"]))

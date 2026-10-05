@@ -32,3 +32,6 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# local worktrees for feature branches
+.worktrees/

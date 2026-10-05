@@ -31,6 +31,14 @@ triage's document-wide `body_size` if the format has one, and — if any page
 needs OCR — a `--lang` value (and, only when set, a `--tessdata-dir` value)
 already resolved by the environment-setup step.
 
+On a retry you may also get **`recheck_images`** pages, each with the
+grader's `reason`. For such a page the body tier stays as it is. Redo the
+image step only: run `extract-images` again for a `pdf`/`image` page (for
+`pptx`/`docx`/`xlsx`/`html`, run the format's extract skill again; its
+body output is deterministic, so only the image shard changes in effect),
+then redo the caption, `figure_text`, description and mermaid work for
+that page with the `reason` in mind.
+
 ## Your job, per page in your batch
 
 **Body extraction — `pdf` documents:**
@@ -46,7 +54,10 @@ already resolved by the environment-setup step.
    rendered PNG yourself (Read tool) and transcribe it faithfully (this is
    transcription, not interpretation: if something is illegible, say so in
    the text rather than inventing a plausible guess), then land it with
-   `write_vision_page.py`.
+   `write_vision_page.py`. Leave out the page furniture: the lines listed in
+   `work/<doc>/triage.json`'s `furniture_text` (the repeated header, footer
+   and title-block lines). `merge.py` also removes them from `ocr`/`vision`
+   bodies, but only when a line matches a furniture pattern exactly.
 3. Pages assigned `vision` directly (a retry, forced by the orchestrator
    after a previous grade failure): skip straight to the vision step above.
 
@@ -94,28 +105,76 @@ the format's own extract skill already writes the image shard alongside the
 body shard in the same call — no separate image-extraction pass needed. Note
 `html-extract` only saves `data:` URI and local-file `<img>` sources —
 remote (`http(s)://`) images are a known, documented gap (not fetched),
-same idea as xlsx's missing charts below. Either way, for
-every image element reported, read the saved image file and write a
-specific, accurate caption with `caption_image.py` — never a generic
-placeholder like "image" or "figure". If you genuinely can't tell what an
-image shows, say that plainly in the caption rather than guessing
-confidently. Note `xlsx-extract` doesn't extract charts as images (no
-rendering engine available) — a chart-only sheet may have fewer image
-elements than `xlsx-triage` counted; that's a known, documented gap, not
-something to compensate for by inventing a chart screenshot yourself.
+same idea as xlsx's missing charts below.
 
-**Diagrams**, in addition to captioning: when an image element is a
+For a `pdf`/`image`-document image element, `caption` is already filled in
+for you — `extract-images` sets it deterministically (a nearby "Figure n:"/
+"Table n" text-layer line, verbatim, or absent if there's no such line
+nearby). You never write `caption` yourself for these: `caption` is only
+the printed caption the script extracts. `grade-output`'s
+`figures_complete` gate needs a `caption`, a `figure_text`, or the
+recorded `no_visible_text` flag on every image. If an element has no
+caption and no figure_text after extraction, look at the rendered crop
+first. If it shows text, transcribe it with `--figure-text`. Only if it
+shows no text at all, pass `--no-visible-text` (with your
+`--description`) — `describe_image.py` refuses the flag on an element
+that has a caption or figure_text. For a `pptx`/`docx`/`xlsx`/`html`
+image element there's no such script-side detection, so `caption` is still
+yours to set — pass `--caption` to `describe_image.py` as before.
+
+Either way, for **every** image element reported, read the saved image
+file and, with `describe_image.py`, always write a `--description` —
+specific and accurate, never a generic placeholder like "image" or
+"figure". If you genuinely can't tell what an image shows, say that
+plainly in the description rather than guessing confidently. Additionally:
+
+- If the image is a chart (bars, lines, a plotted curve, axes), also pass
+  `--data-table` — a JSON array of the rows it plots, read off the chart as
+  faithfully as you can.
+- If the image is a block/state/sequence diagram you can faithfully
+  redraw, also pass `--mermaid` (or use `mermaid_image.py` separately) —
+  see **Diagrams** below for the judgment call.
+- (`pptx`/`docx`/`xlsx`/`html` only) also pass `--caption`, unchanged from
+  before this contract existed.
+
+Note `xlsx-extract` doesn't extract charts as images (no rendering engine
+available) — a chart-only sheet may have fewer image elements than
+`xlsx-triage` counted; that's a known, documented gap, not something to
+compensate for by inventing a chart screenshot yourself.
+
+**Diagrams**, in addition to `--description`: when an image element is a
 diagram or flowchart whose structure (nodes, edges, labels) you can
 reconstruct faithfully from the PNG — most relevant for `pdf` vector
 regions, `pptx` pictures/SmartArt, and a whole `image` document that is
-itself a diagram — also land a mermaid representation
-with `mermaid_image.py` (mermaid source on stdin, e.g. `echo 'flowchart
+itself a diagram — also land a mermaid representation, either as
+`describe_image.py`'s `--mermaid` in the same call, or afterward with
+`mermaid_image.py` (mermaid source on stdin, e.g. `echo 'flowchart
 TD\n  A --> B' | uv run ... mermaid_image.py --doc <name> --page <n>
---asset <asset>`). This is additional to the caption, not a replacement —
-the image stays. Reconstruct only what's actually visible; if the diagram
-is too complex, dense, or ambiguous to represent faithfully as mermaid,
-skip it and rely on the caption alone rather than inventing structure that
-isn't there.
+--asset <asset>`). This is additional to the description (and, for a PDF
+element, the script-set caption), not a replacement — the image stays.
+Reconstruct only what's actually visible; if the diagram is too complex,
+dense, or ambiguous to represent faithfully as mermaid, skip it and rely
+on the description alone rather than inventing structure that isn't there.
+
+**`figure_text`** (`pdf` and `image` elements): for a `pdf` vector region
+the script sets it from the region's own text layer, whenever it has one —
+box labels, axis labels, and the like, newline-joined. A bitmap has no text
+layer, so its `figure_text` is always empty after extraction. You only ever
+fill `figure_text` yourself via vision, and only when it comes back
+null/absent (a bitmap, or a vector region with no text layer at all — e.g.
+a pure-raster chart with no underlying text): read the
+rendered crop, transcribe the visible text faithfully (this is
+transcription, not interpretation — say so plainly if something's
+illegible rather than inventing a plausible guess, same rule as OCR
+escalation above), and land it with `describe_image.py --figure-text`
+alongside your `--description` for the same element. `describe_image.py`
+enforces this precondition itself — it refuses (exits 1) if the element
+already has a non-empty `figure_text`, so calling `--figure-text` on an
+element that didn't need it is a hard error, not a silent overwrite. This
+is not new behavior — it was already the case before this contract existed
+— just restated here now that `caption`'s move to script-authoritative might
+otherwise read as "everything textual on a figure is now the script's
+job," which isn't true for `figure_text` without a text layer.
 
 ## What you return
 

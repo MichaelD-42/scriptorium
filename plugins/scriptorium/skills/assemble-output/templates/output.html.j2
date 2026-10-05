@@ -8,7 +8,11 @@
   table { border-collapse: collapse; margin: 1rem 0; }
   th, td { border: 1px solid #ccc; padding: 0.4rem 0.6rem; text-align: left; }
   img { max-width: 100%; }
-  h1, h2, h3 { margin-top: 1.5rem; }
+  h1, h2, h3, h4, h5, h6 { margin-top: 1.5rem; }
+  li.level-2 { margin-left: 1.2rem; }
+  li.level-3 { margin-left: 2.4rem; }
+  li.level-4 { margin-left: 3.6rem; }
+  li.level-5 { margin-left: 4.8rem; }
 </style>
 {% if has_mermaid %}
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
@@ -22,6 +26,10 @@
 <h{{ el.level }}>{{ el.text }}</h{{ el.level }}>
 {% elif el.type == "paragraph" %}
 <p>{{ el.text }}</p>
+{% elif el.type == "list_item" %}
+{% if not loop.previtem or loop.previtem.type != "list_item" %}<ul>{% endif %}
+  <li class="level-{{ el.level }}">{{ el.text }}</li>
+{% if not loop.nextitem or loop.nextitem.type != "list_item" %}</ul>{% endif %}
 {% elif el.type == "table" %}
 <table>
 {% for row in el.rows %}
@@ -30,9 +38,22 @@
 </table>
 {% elif el.type == "image" %}
 <figure>
-  {% if el.mermaid %}<pre class="mermaid">{{ el.mermaid }}</pre>{% endif %}
-  <img src="{{ el.asset }}" alt="{{ el.caption }}">
+  <img src="{{ el.asset }}" alt="{{ el.description or el.caption or '' }}">
   {% if el.caption %}<figcaption>{{ el.caption }}</figcaption>{% endif %}
+  {% if el.figure_text %}<blockquote style="white-space: pre-line">{{ el.figure_text }}</blockquote>{% endif %}
+  {% if el.description or el.data_table or el.mermaid %}
+  <!-- scriptorium:interpretation -->
+  {% if el.description %}<p>{{ el.description }}</p>{% endif %}
+  {% if el.data_table %}
+  <table>
+  {% for row in el.data_table %}
+    <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
+  {% endfor %}
+  </table>
+  {% endif %}
+  {% if el.mermaid %}<pre class="mermaid">{{ el.mermaid }}</pre>{% endif %}
+  <!-- /scriptorium:interpretation -->
+  {% endif %}
 </figure>
 {% endif %}
 {% endfor %}

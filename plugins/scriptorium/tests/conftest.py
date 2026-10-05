@@ -61,6 +61,43 @@ def run_script(relpath: str, *args: str, cwd: Path) -> subprocess.CompletedProce
     )
 
 
+def describe_all_images(doc: str, cwd: Path) -> None:
+    """Simulate the extractor agent's describe step (agents/extractor.md)
+    for a pipeline test: give every image element in every image shard a
+    `description` via describe_image.py. When the element has neither a
+    caption nor figure_text, a pdf/image document gets the recorded
+    `--no-visible-text` flag (never an invented caption), and a
+    pptx/docx/xlsx/html document gets `--caption`, which is the agent's job
+    for those formats. An element that already has a
+    description is left as it is. In the real loop the agent writes these
+    fields after extraction and before merge.py, so gates.py's
+    `figures_complete` check (Task A9) sees them. Run this after the
+    extract scripts and before merge.py."""
+    import json
+
+    import paths
+
+    input_format = paths.detect_input_format(doc, cwd)
+    shards_dir = cwd / "work" / doc / "shards"
+    for shard_file in sorted(shards_dir.glob("page*.image.json")):
+        shard = json.loads(shard_file.read_text())
+        page_number = shard["page_number"]
+        for el in shard.get("elements", []):
+            if el.get("type") != "image" or (el.get("description") or "").strip():
+                continue
+            args = [
+                "--doc", doc, "--page", str(page_number), "--asset", el["asset"],
+                "--description", f"Synthetic test description of {el['asset']}.",
+            ]
+            if not (el.get("caption") or "").strip() and not (el.get("figure_text") or "").strip():
+                if input_format in ("pdf", "image"):
+                    args += ["--no-visible-text"]
+                else:
+                    args += ["--caption", "Synthetic test caption"]
+            result = run_script("extract-images/scripts/describe_image.py", *args, cwd=cwd)
+            assert result.returncode == 0, result.stderr
+
+
 @pytest.fixture
 def tmp_project(tmp_path, monkeypatch):
     """A scaffolded project root (input/work/output/runs), cwd'd into --

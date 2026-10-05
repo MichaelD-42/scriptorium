@@ -1,7 +1,9 @@
 """Unit tests for the grade-output/ocr-page/extract-images scripts that
 aren't covered elsewhere: text_mode_grade.py's structural checks,
-merge_grades.py's arithmetic, and the three agent-landing scripts
-(write_grade_shard.py, write_vision_page.py, caption_image.py)."""
+merge_grades.py's arithmetic, and two agent-landing scripts
+(write_grade_shard.py, write_vision_page.py). describe_image.py (the old
+caption_image.py, generalized in Task A6) has its own dedicated tests in
+test_figure_captions.py."""
 
 import io
 import json
@@ -19,7 +21,6 @@ text_mode_grade = load_script("grade-output/scripts/text_mode_grade.py", "text_m
 merge_grades = load_script("grade-output/scripts/merge_grades.py", "merge_grades_module")
 write_grade_shard = load_script("grade-output/scripts/write_grade_shard.py", "write_grade_shard_module")
 write_vision_page = load_script("ocr-page/scripts/write_vision_page.py", "write_vision_page_module")
-caption_image = load_script("extract-images/scripts/caption_image.py", "caption_image_module")
 
 
 # --- text_mode_grade.py: docx --------------------------------------------
@@ -187,6 +188,38 @@ class TestMergeGrades:
         assert result["rubric_verdict"]["passed"] is True
         assert result["overall_passed"] is False
 
+    def test_warnings_lifted_to_top_level_when_gate_fired(self, tmp_project, monkeypatch):
+        """Task A5b fix round 1 (controller finding 2): gates-report.json's
+        warnings (e.g. large_region_excluded) must reach grade-report.json
+        at the TOP level, not just nested under "gates" -- that's what
+        commands/extract.md's Decide step actually reads."""
+        warning = {"name": "large_region_excluded", "page": 1, "reason": "table_overlap", "area_fraction": 0.7}
+        gates_path = paths.gates_report_json("doc")
+        gates_path.parent.mkdir(parents=True, exist_ok=True)
+        gates_path.write_text(json.dumps({"doc": "doc", "passed": True, "checks": [], "warnings": [warning]}))
+        _seed_grade_shard(tmp_project, "doc", 1, 1.0, [])
+
+        monkeypatch.setattr("sys.argv", ["merge_grades.py", "--doc", "doc"])
+        merge_grades.main()
+
+        result = json.loads(paths.grade_report_json("doc").read_text())
+        assert result["warnings"] == [warning]
+        assert result["gates"]["warnings"] == [warning]  # nested copy still present too
+        assert result["overall_passed"] is True  # a warning never blocks overall_passed
+
+    def test_warnings_defaults_to_empty_list_when_gates_report_has_none(self, tmp_project, monkeypatch):
+        """A gates-report.json predating the warnings field (or one with
+        nothing to warn about) must still yield an explicit top-level
+        `[]`, not a missing key."""
+        _seed_gates_report(tmp_project, "doc", passed=True)  # no "warnings" key at all
+        _seed_grade_shard(tmp_project, "doc", 1, 1.0, [])
+
+        monkeypatch.setattr("sys.argv", ["merge_grades.py", "--doc", "doc"])
+        merge_grades.main()
+
+        result = json.loads(paths.grade_report_json("doc").read_text())
+        assert result["warnings"] == []
+
     def test_missing_gates_report_exits_with_error(self, tmp_project, monkeypatch):
         monkeypatch.setattr("sys.argv", ["merge_grades.py", "--doc", "doc"])
         with pytest.raises(SystemExit) as exc_info:
@@ -201,7 +234,7 @@ class TestMergeGrades:
         assert exc_info.value.code == 1
 
 
-# --- write_grade_shard.py / write_vision_page.py / caption_image.py -------
+# --- write_grade_shard.py / write_vision_page.py --------------------------
 
 def test_write_grade_shard_lands_score_and_issues(tmp_project, monkeypatch):
     monkeypatch.setattr(
@@ -229,32 +262,3 @@ def test_write_vision_page_lands_elements_from_stdin(tmp_project, monkeypatch):
     assert shard["elements"] == [{"type": "paragraph", "text": "scanned text"}]
 
 
-def test_caption_image_sets_caption_on_matching_asset(tmp_project, monkeypatch):
-    import elements as elements_lib
-
-    shard_path = paths.shard_path("doc", 2, "image")
-    elements_lib.write_shard(shard_path, 2, [{"type": "image", "asset": "assets/page2_bitmap1.png", "caption": ""}])
-
-    monkeypatch.setattr(
-        "sys.argv",
-        ["caption_image.py", "--doc", "doc", "--page", "2", "--asset", "assets/page2_bitmap1.png", "--caption", "a red icon"],
-    )
-    caption_image.main()
-
-    shard = json.loads(shard_path.read_text())
-    assert shard["elements"][0]["caption"] == "a red icon"
-
-
-def test_caption_image_unknown_asset_exits_with_error(tmp_project, monkeypatch):
-    import elements as elements_lib
-
-    shard_path = paths.shard_path("doc", 2, "image")
-    elements_lib.write_shard(shard_path, 2, [{"type": "image", "asset": "assets/other.png", "caption": ""}])
-
-    monkeypatch.setattr(
-        "sys.argv",
-        ["caption_image.py", "--doc", "doc", "--page", "2", "--asset", "assets/page2_bitmap1.png", "--caption", "x"],
-    )
-    with pytest.raises(SystemExit) as exc_info:
-        caption_image.main()
-    assert exc_info.value.code == 1

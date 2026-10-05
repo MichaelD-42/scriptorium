@@ -11,9 +11,51 @@ Handles both image kinds a PDF can contain:
   figures, logos) — extracted directly from the PDF at native resolution.
 - **Vector graphics**: diagrams/charts drawn with PDF path operators
   (lines, curves, fills) rather than embedded as an image. These have no
-  extractable "image" to pull out, so a page with a lot of vector drawing
-  and little text is treated as a diagram and captured by rendering that
-  page to PNG (reusing `render-pages`' output if present).
+  extractable "image" to pull out, so this skill clusters a page's vector
+  drawings into candidate regions (`lib/figures.py`'s
+  `detect_figure_regions_with_exclusions`, shared with `extract-text` — see
+  below) and crop-renders each surviving region, not the whole page, at
+  200dpi to `page{N}_vector{k}.png`. A candidate region is dropped if:
+  - it's a single drawing matching `triage.json["furniture"]
+    ["frame_drawings"]` (Task A5b — a page-frame border identified by
+    *repetition* across the document, not by size, so a large one-off real
+    figure is never mistaken for furniture and dropped before clustering
+    even sees it);
+  - it's a single drawing matching `triage.json["furniture"]
+    ["repeated_drawings"]` (fix wave B1 — any drawing, of any size and
+    fill, that repeats on at least 80% of the body pages: the separate
+    parts of a page frame or title block). Without this, those parts join every
+    other drawing on the page into one page-sized cluster. These two
+    removals use repetition only (no stroke-only or page-edge check any
+    more): a real page frame can be a filled panel, and a real figure drawn
+    inside a repeated box still clusters from its own, non-repeated
+    drawings;
+  - it's a text box (fix wave I1): its drawings form exactly one
+    axis-aligned rectangle (one `re` item, or at most 4 axis-aligned
+    lines, no curves) with at least one text-layer line inside — a boxed
+    paragraph or a shaded ID row. Its text stays body text in
+    `extract-text`; nothing is cropped. Nearby text boxes (at most 24 pt
+    apart on one axis, overlapping on the other) are grouped first, and
+    a group or a single box with a "Figure n" caption line within 36 pt
+    directly below or above it is a figure region instead (a box diagram
+    drawn without connectors);
+  - *more than half* its own area lies inside the furniture edge band
+    (Task A5b tightened this from "any overlap at all", so a tall real
+    figure that only grazes the band survives);
+  - it overlaps a real (non-frame) table's bbox — unless every overlapping
+    table is a grid table (follow-up R11, re-review 2: the cluster has a
+    data series, a drawing off the table's cell boundaries that does not
+    stay inside one cell; or at most 10% of the table's cells hold text.
+    A spanned cell's positions are not empty cells). Then the cluster is a
+    figure, the table is recorded as `grid_table` with its `filled_cells`,
+    and `extract-text` emits no table for it. A
+    cluster that covers more than 60% of the page (or of the content rect)
+    never uses this rule (follow-up R16): a page-sized form stays a table; or
+  - it's too small to be more than a stray line.
+
+  This is what catches a diagram or chart sitting on an otherwise
+  text-heavy page — the old whole-page rule (gated on the page having
+  little text overall) missed this case entirely.
 
 For a standalone **image** document (`input_format` `image`), there's
 nothing to detect — the whole input file *is* the diagram/photo. This skill
@@ -33,25 +75,117 @@ For an image document, `--pages` is always `1` — there's only ever page 1.
 
 ## Output
 
-- Saves assets to `output/<doc>/assets/page{N}_{bitmap|vector}{idx}.png`.
+- Saves assets to `output/<doc>/assets/page{N}_{bitmap|vector}{idx}.png`
+  (`vector{idx}` is 1-indexed per page, in top-to-bottom region order).
 - Writes one shard per given page to `work/<doc>/shards/page{N}.image.json`
-  (`image` elements, `kind: "bitmap"|"vector"`, `asset: "assets/..."`) — even
-  when a page has no images, so a retry can tell "checked, found nothing"
-  apart from "never checked". This shard is independent of whatever
-  text/OCR/vision shard the page has; `merge.py` combines them.
-- Captioning is intentionally **not** done here — a script can't judge what
-  an image shows. The calling agent (the `extractor` role) looks at the
-  saved PNG (with the Read tool) and fills the caption in with:
+  (`image` elements, `kind: "bitmap"|"vector"`, `asset: "assets/..."`,
+  `bbox: [x0, y0, x1, y1]`) — even when a page has no images, so a retry
+  can tell "checked, found nothing" apart from "never checked". This shard
+  is independent of whatever text/OCR/vision shard the page has; `merge.py`
+  combines them, interleaving image elements with text elements by `bbox`
+  y-position (Task A5) rather than always trailing them after.
+- A vector-region `image` element also carries `figure_text` — the
+  region's own text-layer lines (if any), newline-joined — whenever the
+  region has a text layer at all; absent/`null` when it doesn't (e.g. a
+  pure-raster chart with no underlying text), which is the signal a later
+  vision-fallback step uses to fill it in instead. These lines are excluded
+  from `extract-text`'s paragraph/heading output for the same page, so they
+  never appear twice.
+- Every `image` element (bitmap or vector-region) also gets a
+  script-authoritative `caption`: `lib/figures.py`'s `find_caption_line`
+  searches the text layer within 60pt directly above or below the
+  element's own bbox for a line matching `Figure n[.:]`/`Fig. n`/`Table n`
+  (case-insensitive) and, if found, sets `caption` to that line's text
+  verbatim; absent/`null` if nothing nearby matches. Follow-up R17: the
+  number may end the line (`Fig. 11`), and a lone caption-number line is
+  joined with the text line at its y (within 3 pt) into one caption, so
+  a caption printed as two spans is still found; the nearest figure
+  caption wins over a `Table n` caption, which is used only when no
+  figure caption is near. That same line (both source lines, when joined) is
+  excluded from `extract-text`'s paragraph/heading output on the same page
+  — same "shared detection, no ordering dependency" pattern as
+  `figure_text` above, so the two scripts can never disagree about which
+  line is the caption. This only applies to PDF image elements — pptx/docx/
+  xlsx/html images have no text-layer/bbox convention to search and keep
+  `caption` agent-authored via `describe_image.py`'s `--caption` (below).
+- If `work/<doc>/triage.json` has a `furniture` section (`pdf-triage`'s
+  furniture detection), a bitmap whose xref is in `image_xrefs` (e.g. a logo
+  repeated on every page) is skipped entirely — no `image` element is
+  written for it. `frame_tables` entries are also excluded from
+  `lib/figures.py`'s real-table lookup (`page_tables`), so a
+  page whose only pdfplumber-detected table is the page frame doesn't
+  suppress vector-region detection on that page, and a real ruled table
+  never itself becomes a vector-region `image` element. No
+  `triage.json`/`furniture` section => no filtering, same output as before.
+- **`excluded_regions` (Task A5b, "no silent drops")**: the page's image
+  shard also carries `excluded_regions: [{"bbox": [...], "reason":
+  "frame_drawing"|"repeated_drawing"|"tiny"|"text_box"|"furniture_band"|
+  "table_overlap"|"grid_table"}]` — every candidate a filter dropped on this page (the
+  page's `repeated_drawings` matches give ONE `repeated_drawing` entry with
+  their union bbox and a `count`, not one entry per line), always present (an empty list
+  when nothing was dropped), so a large region that a filter removes is
+  never simply invisible. `merge.py` passes it through to the merged page
+  dict the same way `skipped` already does. `grade-output`'s
+  `large_region_excluded` gate flags (as a warning, not a hard failure) any
+  entry here whose reason isn't `frame_drawing`/`repeated_drawing`/`tiny`/`text_box`/`grid_table` and whose area is
+  more than 20% of the page — see `grade-output`'s SKILL.md.
+- If `work/<doc>/triage.json` marks a given page `"role": "toc"`
+  (`pdf-triage`'s printed-TOC-page detection), that page's shard is written
+  as `{"page_number": n, "elements": [], "skipped": "toc"}` immediately,
+  with no bitmap/vector-region extraction attempted. Applies per-page even
+  when `--pages` mixes a TOC page in with body pages.
+- Interpretation is intentionally **not** done here — a script can't judge
+  what an image shows, whether it encodes tabular data, or whether it's a
+  diagram simple enough to redraw. The calling agent (the `extractor` role)
+  looks at the saved PNG (with the Read tool) and fills these in with
+  `describe_image.py` (generalized from the old `caption_image.py` — Task
+  A6, since `caption` is script-authoritative for a PDF element now, per
+  above):
 
   ```bash
   uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
-    "${CLAUDE_PLUGIN_ROOT}/skills/extract-images/scripts/caption_image.py" \
-    --doc <doc-name> --page 2 --asset assets/page2_bitmap1.png --caption "..."
+    "${CLAUDE_PLUGIN_ROOT}/skills/extract-images/scripts/describe_image.py" \
+    --doc <doc-name> --page 2 --asset assets/page2_bitmap1.png \
+    --description "A bar chart showing quarterly revenue." \
+    [--data-table '[["Q1", 10], ["Q2", 14]]'] \
+    [--mermaid 'flowchart TD
+  A --> B']
   ```
 
+  - `--description` is always given, for any figure.
+  - `--data-table` (optional) is a JSON array of rows — only for a
+    chart-like figure; it's parsed and stored as a structure, not kept as a
+    raw string.
+  - `--mermaid` (optional) is only for a diagram/flowchart the agent can
+    faithfully reconstruct — validated the same way `mermaid_image.py`
+    validates its own stdin-read source (must start with a recognized
+    diagram keyword).
+  - `--caption` still exists as a backward-compatible alias — deprecated
+    and warned-about for a PDF element (whose `caption` `extract-images`
+    already set), but still the real way to set `caption` for a pptx/docx/
+    xlsx/html image element, which has no script-side caption detection.
+  - `--figure-text` (optional, PDF vector-region elements only) lands a
+    vision transcription — only used when the region's script-side
+    `figure_text` (above) came back null/absent, i.e. the region had no
+    text layer at all. Enforced, not just documented: `describe_image.py`
+    refuses (exits 1) to overwrite an element that already has a non-empty
+    `figure_text`, since that precondition is deterministic and
+    code-checkable, unlike the other agent-judgment fields.
+  - `--no-visible-text` (Task A9 fix round 1) sets `"no_visible_text":
+    true`: the agent checked the render and the image has no printed
+    caption and no visible text. It is refused (exit 1) when the element
+    has a caption or figure_text, together with `--caption`/
+    `--figure-text`, or for a document that is not pdf or image (fix
+    round 2): for pptx/docx/xlsx/html the agent writes `--caption`. It is not rendered in the output; the description
+    already renders inside the interpretation markers.
+
+  `mermaid_image.py` (below) still exists standalone too, for a
+  stdin-based, `describe_image.py`-independent call.
+
 - For a diagram/flowchart the agent can faithfully reconstruct, it can
-  additionally set a `mermaid` field on the same `image` element — optional,
-  in addition to the caption, never a replacement for the saved PNG:
+  alternatively set `mermaid` on its own via `mermaid_image.py` — same
+  effect as `describe_image.py`'s `--mermaid`, useful when the agent wants
+  to land the diagram separately from the description/data_table call:
 
   ```bash
   echo 'flowchart TD

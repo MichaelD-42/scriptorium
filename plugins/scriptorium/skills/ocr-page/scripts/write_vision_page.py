@@ -29,6 +29,10 @@ def main() -> None:
     parser.add_argument("--page", required=True, type=int)
     args = parser.parse_args()
 
+    # Follow-up R8: stdin is UTF-8, whatever the locale (a test may pass a
+    # StringIO, which is already text).
+    if hasattr(sys.stdin, "reconfigure"):
+        sys.stdin.reconfigure(encoding="utf-8")
     page_elements = json.load(sys.stdin)
 
     shard_path = paths.shard_path(args.doc, args.page, "vision")

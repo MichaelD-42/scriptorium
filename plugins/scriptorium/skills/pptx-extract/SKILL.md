@@ -36,7 +36,8 @@ produced for a slide. It only ever writes **its own** shard files.
 - **Pictures** (`shape.shape_type == PICTURE`) are saved to
   `output/<doc>/assets/page{N}_bitmap{idx}.<ext>` and become `image`
   elements with an empty caption — same contract as `extract-images`, so
-  the same `caption_image.py` script fills them in afterward.
+  the same `describe_image.py` script (its `--caption` alias — pptx has no
+  script-side caption detection) fills them in afterward.
 - **Speaker notes**, if present, become a trailing `paragraph` prefixed
   `"Speaker notes: "` so they're preserved without being confused for
   on-slide content.
