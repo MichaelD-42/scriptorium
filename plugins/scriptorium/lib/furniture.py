@@ -197,18 +197,38 @@ def band_limits(page_height: float, rect: list[float] | None = None) -> tuple[fl
     border. Every stage that tests the band (triage, extract_text, the merge
     filter, the gates, lib/figures.py's cluster band test) calls this
     function."""
-    if rect and rect[3] <= page_height:
+    if _rect_bands(page_height, rect):
         return rect[1], rect[3]
     return FURNITURE_EDGE_BAND * page_height, (1 - FURNITURE_EDGE_BAND) * page_height
+
+
+def _rect_bands(page_height: float, rect: list[float] | None) -> bool:
+    """True when band_limits uses `rect` (it fits the page height)."""
+    return bool(rect) and rect[3] <= page_height
 
 
 def furniture_edge(y0: float, y1: float, page_height: float, rect: list[float] | None = None) -> str | None:
     """ "top" when the span y0..y1 lies in the top band, "bottom" when it
     lies in the bottom band, else None. `rect` is the content rect
-    (band_limits)."""
+    (band_limits).
+
+    With the 12% bands, the whole span must lie in the band. With a content
+    rect (re-review 2 M1), the span's vertical center is tested against
+    the rect's edges: a title-block line whose glyph bbox crosses the frame
+    rule by a point is still furniture, and a body line whose descenders
+    cross it is still body. A line that leaks in some other way on one
+    page only is not caught here; the output scan of `furniture_absent`
+    (follow-up R14) is the backstop for a leak that repeats."""
     if not page_height or page_height <= 0:
         return None
     top, bottom = band_limits(page_height, rect)
+    if _rect_bands(page_height, rect):
+        center = (y0 + y1) / 2
+        if center <= top:
+            return "top"
+        if center >= bottom:
+            return "bottom"
+        return None
     if y1 <= top:
         return "top"
     if y0 >= bottom:
