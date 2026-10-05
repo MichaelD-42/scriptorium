@@ -128,3 +128,22 @@ class TestCellReadingOrder:
         page.insert_text((xw, 312.5), "W", fontname="symb", fontsize=9.6)
         doc = fitz.open("pdf", pdf.tobytes())
         assert glyphs.cell_texts(glyphs.page_chars(doc[0]), [[70, 300, 200, 320]]) == ["Ri (Ω)"]
+
+
+class TestStrayMarks:
+    """Follow-up R23: an Arial subset maps a space-like glyph to U+0BD7
+    (TAMIL AU LENGTH MARK). A non-Latin combining mark after Latin text is
+    dropped, and between two letters it becomes a space."""
+
+    def test_mark_between_words_becomes_a_space(self):
+        assert glyphs.repair_text("theௗrequired") == "the required"
+
+    def test_mark_at_line_end_is_dropped(self):
+        assert glyphs.repair_text("shall be metௗ") == "shall be met"
+        assert glyphs.repair_text("met.ௗ Next") == "met. Next"
+
+    def test_latin_combining_accent_is_kept(self):
+        assert glyphs.repair_text("é") == "é"
+
+    def test_mark_on_its_own_script_is_kept(self):
+        assert glyphs.repair_text("கௗ") == "கௗ"

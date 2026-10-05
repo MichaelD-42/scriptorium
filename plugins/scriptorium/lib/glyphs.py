@@ -17,10 +17,16 @@ match. Two repairs:
    elsewhere, so `fix_ligatures` decodes them only inside a word: U+019F
    and U+01A9 next to a lowercase letter, U+014C after one. The Unicode
    presentation ligatures (U+FB00..U+FB06) are always decoded.
+3. Stray marks (follow-up R23). A combining mark of a non-Latin script
+   after Latin text is a glyph the font mapped to a wrong code point (an
+   Arial subset uses U+0BD7 for a space-like glyph). `drop_stray_marks`
+   removes it, or turns it into a space between two letters.
 
 The furniture key (`furniture.furniture_key`) stays on the raw text, so the
 triage line patterns keep matching.
 """
+
+import unicodedata
 
 import fitz  # PyMuPDF
 
@@ -215,6 +221,42 @@ def fix_ligatures(text: str) -> str:
     return "".join(out)
 
 
+def _is_stray_mark(ch: str, before: str) -> bool:
+    """Follow-up R23: True for a combining mark of a non-Latin script
+    (its Unicode name does not start with "COMBINING") that follows Latin
+    or ASCII text, a space, or nothing -- a glyph the font mapped to a
+    wrong code point, not a mark on its own script's letter."""
+    if unicodedata.category(ch) not in ("Mn", "Mc", "Me"):
+        return False
+    if unicodedata.name(ch, "").startswith("COMBINING"):
+        return False
+    return not before or ord(before) < 0x250 or before.isspace()
+
+
+def drop_stray_marks(text: str) -> str:
+    """Follow-up R23: `text` with stray combining marks removed. One
+    between two letters becomes a space (the glyph was drawn as a gap,
+    e.g. "the" + U+0BD7 + "required"); any other is dropped."""
+    if not any(unicodedata.category(ch).startswith("M") for ch in text):
+        return text
+    out: list[str] = []
+    for i, ch in enumerate(text):
+        before = out[-1] if out else ""
+        if _is_stray_mark(ch, before):
+            after = text[i + 1] if i + 1 < len(text) else ""
+            if before.isalnum() and after.isalnum():
+                out.append(" ")
+            continue
+        out.append(ch)
+    return "".join(out)
+
+
+def repair_text(text: str) -> str:
+    """Every text repair of this module that does not need the font:
+    ligature glyphs (`fix_ligatures`) and stray marks (`drop_stray_marks`)."""
+    return drop_stray_marks(fix_ligatures(text))
+
+
 def _is_symbol_font(doc, xref: int, basefont: str) -> bool:
     key = (doc.name or str(id(doc)), xref)
     if key in _symbol_font_cache:
@@ -257,7 +299,7 @@ def span_text(span: dict, symbol_fonts: set[str]) -> str:
 def line_text(line: dict, symbol_fonts: set[str]) -> str:
     """A PyMuPDF "dict" line's text: its spans joined, each decoded, then
     the ligatures fixed. Not stripped."""
-    return fix_ligatures(
+    return repair_text(
         "".join(span_text(span, symbol_fonts) for span in line.get("spans", []))
     )
 
@@ -350,6 +392,6 @@ def cell_texts(chars: list[tuple], cell_bboxes: list) -> list[str]:
             continue
         x0, y0, x1, y1 = bbox
         inside = [ch for ch in chars if x0 <= ch[0] <= x1 and y0 <= ch[1] <= y1]
-        parts = [" ".join(fix_ligatures(_line_string(line)).split()) for line in _visual_lines(inside)]
+        parts = [" ".join(repair_text(_line_string(line)).split()) for line in _visual_lines(inside)]
         texts.append("\n".join(p for p in parts if p))
     return texts

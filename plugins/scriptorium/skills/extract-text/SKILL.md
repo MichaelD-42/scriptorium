@@ -68,13 +68,28 @@ document.
   page's top or bottom edge (column rules with an open end beyond the
   first or last word, no horizontal rule) gets a cap rule, so a continued
   table keeps its first row.
+- Follow-up R27: a paragraph block made of label/value rows and a body
+  (for example "HWC requirement | REQ ..." and "ASIL Value: | To Be /
+  Selected" above the requirement text) is split into one paragraph per
+  row and one for the body, so the label's value is its own element. A
+  row is two or more lines side by side at one y; a line indented past
+  the block's left edge continues the row.
+- Follow-up R24: a block that mostly overlaps a table loses only its lines
+  inside the table; a caption line printed right above the table stays.
+- Follow-up R25: a block that opens with the last wrapped line of the
+  previous bullet item and then starts a new bullet item is read as list
+  content; the leading line is appended to the open item when it sits
+  right of that item's marker. Only bullet-glyph markers count in that
+  position, not enumerators.
 - Follow-up R18 (`lib/glyphs.py`): every line's text is decoded before it
   is used. A Symbol-font span (PDF font name, or embedded font program
   name, "Symbol") is mapped with the Adobe Symbol encoding ("£" → "≤",
   "W" → "Ω", U+F028 → "("), keeping the list-marker glyphs as printed.
   The Calibri ligature glyphs U+019F/U+01A9/U+014C become "ti"/"tt"/"ft"
-  inside a word, and U+FB00..U+FB06 are expanded. The furniture key stays
-  on the raw text.
+  inside a word, and U+FB00..U+FB06 are expanded. Follow-up R23: a
+  combining mark of a non-Latin script after Latin text (an Arial subset
+  maps a space-like glyph to U+0BD7) is dropped, or becomes a space
+  between two letters. The furniture key stays on the raw text.
 - Reading order follows PyMuPDF's block order top-to-bottom, left-to-right.
 - Every `heading`/`paragraph`/`table` element carries a `"bbox": [x0, y0,
   x1, y1]` field (fitz/pdfplumber-style, top-left origin, y down).
