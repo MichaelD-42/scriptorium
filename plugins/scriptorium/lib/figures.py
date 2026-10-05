@@ -265,6 +265,11 @@ CAPTION_SEARCH_DISTANCE = 60.0
 # bbox (line_in_region), or it is figure text.
 CAPTION_EDGE_SLACK = REGION_PADDING
 
+# Re-review 2 M2: a lone caption number ("Fig. 11") is joined with a title
+# line at its y only when the title starts at most this far to its right (a
+# tab stop), and in the caption's column. See _join_split_captions.
+CAPTION_JOIN_MAX_GAP = 72.0  # pt
+
 
 def page_tables(
     pdf_path: Path, page_number: int, frame_tables: list[dict] | None = None,
@@ -756,7 +761,7 @@ def _page_lines(page) -> list[dict]:
             if not stripped:
                 continue
             lines.append({"text": stripped, "bbox": list(line["bbox"])})
-    return _join_split_captions(lines)
+    return lines
 
 
 def _is_lone_caption_number(text: str) -> bool:
@@ -766,13 +771,30 @@ def _is_lone_caption_number(text: str) -> bool:
     return bool(match) and not text[match.end():].strip()
 
 
-def _join_split_captions(lines: list[dict]) -> list[dict]:
+def _gap_bridged(lines: list[dict], left: dict, right: dict) -> bool:
+    """True when a line of `lines` other than `left` and `right` spans the
+    horizontal gap between them: the two are in one text column, with no
+    column gutter between them."""
+    return any(
+        line is not left and line is not right
+        and line["bbox"][0] <= left["bbox"][2] and line["bbox"][2] >= right["bbox"][0]
+        for line in lines
+    )
+
+
+def _join_split_captions(lines: list[dict], image_bbox: list[float] | None = None) -> list[dict]:
     """Follow-up R17: a lone caption-number line ("Fig. 11") joined with
     the nearest text line to its right at the same y (tops within
     toc.SAME_Y_TOLERANCE) into one caption line: text "Fig. 11 <title>",
     the union bbox, and `parts`, the two source line bboxes (extract_text
     excludes those from the body). A lone number with no such line stays as
-    it is."""
+    it is.
+
+    Re-review 2 M2: the partner must start at most CAPTION_JOIN_MAX_GAP to
+    the right of the number, and be in the caption's column: it overlaps
+    `image_bbox`'s x-range (the image the caption is searched for), or
+    another line bridges the gap (`_gap_bridged`). The right column's
+    body line on a two-column page is never joined."""
     used: set[int] = set()
     joined: dict[int, dict] = {}
     for i, line in enumerate(lines):
@@ -783,7 +805,12 @@ def _join_split_captions(lines: list[dict]) -> list[dict]:
             if j != i and j not in used
             and abs(other["bbox"][1] - line["bbox"][1]) <= toc_lib.SAME_Y_TOLERANCE
             and other["bbox"][0] >= line["bbox"][2]
+            and other["bbox"][0] - line["bbox"][2] <= CAPTION_JOIN_MAX_GAP
             and not CAPTION_PATTERN.match(other["text"])
+            and (
+                (image_bbox is not None and _x_overlaps(other["bbox"], image_bbox))
+                or _gap_bridged(lines, line, other)
+            )
         ]
         if not partners:
             continue
@@ -836,7 +863,9 @@ def find_caption_line(page, bbox: list[float], distance: float = CAPTION_SEARCH_
     as long as it is not majority-inside `bbox` (then it is figure text).
     A vector region's bbox is padded by REGION_PADDING, so a caption printed
     closer than that to the drawing reaches into the padding."""
-    lines = _page_lines(page)
+    # Follow-up R17, re-review 2 M2: split captions are joined for this
+    # image (its x-range is the caption's column).
+    lines = _join_split_captions(_page_lines(page), bbox)
     # Follow-up R17: the nearest figure caption wins over a "Table n"
     # caption; a table caption is used only when no figure caption is near.
     return _nearest_caption_line(

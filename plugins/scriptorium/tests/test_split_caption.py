@@ -3,7 +3,7 @@
 Some documents print "Fig. 11" and the caption title as two spans at the
 same y (a tab between them), which PyMuPDF returns as two lines.
 `CAPTION_PATTERN` now also accepts "Fig. n" / "Figure n" at the end of a
-line, and `figures._page_lines` joins a lone caption-number line with the
+line, and `figures.find_caption_line` joins a lone caption-number line with the
 text line at its y (within `toc.SAME_Y_TOLERANCE`) into one caption line,
 before claiming and before the orphan check. An image's caption search
 prefers the nearest figure caption over a "Table n" caption.
