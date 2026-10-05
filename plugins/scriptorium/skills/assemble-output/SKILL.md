@@ -52,8 +52,15 @@ The one place all three extraction tiers converge. Three scripts:
    (verbatim — no de-hyphenation, no other character changes), the first
    gains `"pages": [n, n+1]` (additive, absent everywhere else) and stays
    under page `n`, and the second is removed from page `n+1`. Pairwise
-   only (no 3+ page chains); a table cut by a page break always stays two
-   tables — never joined.
+   only (no 3+ page chains). Follow-up R21: a table cut by a page break IS
+   joined — page `n`'s last body element a `table`, page `n+1`'s first body
+   element a `table` with the same column count and the same left and
+   right edges (within 3 pt): page `n+1`'s rows are appended (leading rows
+   equal to page `n`'s first rows are a repeated header and are dropped),
+   page `n`'s table gains `"pages"`, and page `n+1`'s table is removed. A
+   table join chains across a page that held only the continued table.
+   `gates.py`'s `no_empty_pages` counts a page listed in another
+   element's `"pages"` as filled.
 2. **`assemble.py`** reads that merged file and writes the final deliverable
    (`--format reqif`/`reqifz` delegates the XML build to `reqif_builder.py`,
    an internal helper module, not a script run on its own).

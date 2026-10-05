@@ -1,7 +1,7 @@
 {
   "name": "scriptorium",
   "displayName": "Scriptorium",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Elastic-loop document extraction team: tiered text/OCR/image extraction agents run in parallel page batches, an independent quality grader, and a queue orchestrator. PDF, pptx, docx, xlsx, HTML, and standalone images in (Markdown, HTML, OKF multi-file bundle, or ReqIF out); more formats arrive as sibling skills.",
   "author": {
     "name": "Michael Dold"

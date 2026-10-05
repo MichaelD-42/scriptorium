@@ -19,6 +19,24 @@ PDF, PowerPoint (`.pptx`), Word (`.docx`), Excel (`.xlsx`), HTML (`.html`),
 and standalone images (`.png`/`.jpg`/`.jpeg`/`.webp`/`.tiff`) are
 implemented today.
 
+## 0.4.1
+
+Fixes from the first golden-document run (follow-ups R18–R22):
+
+- **Glyph decoding**: Symbol-font text ("£" for "≤", "W" for "Ω") and the
+  Calibri "ti"/"tt"/"ft" ligature glyphs are decoded in body text, table
+  cells, captions, figure text and the TOC match. Table cell text is read
+  from PyMuPDF by visual line, so subscripts and footnote markers stay in
+  place ("Us (V)", "LW 1)").
+- **Invisible drawings**: a white, unstroked rectangle behind body text is
+  no longer taken for a figure (`invisible_drawing` excluded region).
+- **Open table rows**: a continued table keeps the first row on its new
+  page when that row has no top rule.
+- **Tables across page breaks** are joined into one table, a repeated
+  header is dropped, and a join can span several pages.
+- **Captions and labels**: a caption that wraps keeps its second line, and
+  short labels just outside a figure go into its figure text and crop.
+
 ## 0.4.0
 
 PDF extraction quality, for documents with running headers/footers, a

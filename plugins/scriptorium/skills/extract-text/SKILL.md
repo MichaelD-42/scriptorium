@@ -61,7 +61,20 @@ document.
     across separate invocations of this script for different page batches
     of the same document.
 - Tables are detected with `pdfplumber` and emitted as `table` elements
-  (row-major list of lists).
+  (row-major list of lists). Follow-up R18: cell text is read from
+  PyMuPDF's characters (a character belongs to the cell holding its
+  center), so it gets the same decoding as body text and a subscript
+  stays on its line ("UN = 12V"). Follow-up R20: a row left open at the
+  page's top or bottom edge (column rules with an open end beyond the
+  first or last word, no horizontal rule) gets a cap rule, so a continued
+  table keeps its first row.
+- Follow-up R18 (`lib/glyphs.py`): every line's text is decoded before it
+  is used. A Symbol-font span (PDF font name, or embedded font program
+  name, "Symbol") is mapped with the Adobe Symbol encoding ("£" → "≤",
+  "W" → "Ω", U+F028 → "("), keeping the list-marker glyphs as printed.
+  The Calibri ligature glyphs U+019F/U+01A9/U+014C become "ti"/"tt"/"ft"
+  inside a word, and U+FB00..U+FB06 are expanded. The furniture key stays
+  on the raw text.
 - Reading order follows PyMuPDF's block order top-to-bottom, left-to-right.
 - Every `heading`/`paragraph`/`table` element carries a `"bbox": [x0, y0,
   x1, y1]` field (fitz/pdfplumber-style, top-left origin, y down).
