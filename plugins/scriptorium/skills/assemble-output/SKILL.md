@@ -55,8 +55,8 @@ The one place all three extraction tiers converge. Three scripts:
    only (no 3+ page chains). Follow-up R21: a table cut by a page break IS
    joined — page `n`'s last body element a `table`, page `n+1`'s first body
    element a `table` with the same column count and the same left and
-   right edges (within 3 pt): page `n+1`'s rows are appended (a first row
-   equal to page `n`'s first row is a repeated header and is dropped),
+   right edges (within 3 pt): page `n+1`'s rows are appended (leading rows
+   equal to page `n`'s first rows are a repeated header and are dropped),
    page `n`'s table gains `"pages"`, and page `n+1`'s table is removed. A
    table join chains across a page that held only the continued table.
    `gates.py`'s `no_empty_pages` counts a page listed in another

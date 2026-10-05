@@ -263,9 +263,10 @@ def line_text(line: dict, symbol_fonts: set[str]) -> str:
 
 
 def page_chars(page) -> list[tuple]:
-    """Every character on `page` as `(cx, cy, line_key, char)`: its bbox
-    center, the (block, line) it belongs to, and the character with the
-    Symbol decoding applied. `cell_texts` reads cells from this list."""
+    """Every character on `page` as `(cx, cy, line_key, char, x0, x1,
+    height)`: its bbox center, the (block, line) it belongs to, the
+    character with the Symbol decoding applied, and its bbox x-range and
+    height. `cell_texts` reads cells from this list."""
     symbol_fonts = page_symbol_fonts(page)
     chars = []
     for b_index, block in enumerate(page.get_text("rawdict").get("blocks", [])):
@@ -277,29 +278,78 @@ def page_chars(page) -> list[tuple]:
                 for ch in span.get("chars", []):
                     x0, y0, x1, y1 = ch["bbox"]
                     c = decode_symbol(ch["c"]) if is_symbol else ch["c"]
-                    chars.append(((x0 + x1) / 2, (y0 + y1) / 2, (b_index, l_index), c))
+                    chars.append(((x0 + x1) / 2, (y0 + y1) / 2, (b_index, l_index), c, x0, x1, y1 - y0))
     return chars
+
+
+# A character joins a visual line when its center is within this fraction
+# of the line's character height of the line's center (a subscript stays
+# on its line; the next text line is a full line height away).
+VISUAL_LINE_FRACTION = 0.5
+# Two characters from different PyMuPDF lines on one visual line get a
+# space between them when the gap is wider than this fraction of the
+# character height.
+CROSS_LINE_SPACE_FRACTION = 0.15
+
+
+def _visual_lines(chars: list[tuple]) -> list[list[tuple]]:
+    """`chars` grouped into visual lines (top to bottom), each sorted by
+    x. PyMuPDF can put a glyph of another font in a line of its own (a
+    Symbol "Ω" between the brackets of "Ri ( )"), so its own line order is
+    not the reading order inside a table cell."""
+    lines: list[list[tuple]] = []
+    for ch in sorted(chars, key=lambda c: c[1]):
+        height = ch[6] or 1.0
+        if lines:
+            last = lines[-1]
+            center = sum(c[1] for c in last) / len(last)
+            if abs(ch[1] - center) <= VISUAL_LINE_FRACTION * max(height, max(c[6] for c in last)):
+                last.append(ch)
+                continue
+        lines.append([ch])
+    return [sorted(line, key=lambda c: c[0]) for line in lines]
+
+
+def _line_string(line: list[tuple]) -> str:
+    """One visual line's text. A space character that another line's
+    glyph sits on is dropped (the glyph fills the gap PyMuPDF spaced), and
+    a space is added between characters of different PyMuPDF lines that
+    have a real gap between them."""
+    out: list[str] = []
+    prev = None
+    for ch in line:
+        if ch[3].isspace() and any(
+            other[2] != ch[2] and not other[3].isspace() and ch[4] <= other[0] <= ch[5] for other in line
+        ):
+            continue
+        if (
+            prev is not None
+            and prev[2] != ch[2]
+            and not prev[3].isspace()
+            and not ch[3].isspace()
+            and ch[4] - prev[5] > CROSS_LINE_SPACE_FRACTION * max(ch[6], prev[6])
+        ):
+            out.append(" ")
+        out.append(ch[3])
+        prev = ch
+    return "".join(out)
 
 
 def cell_texts(chars: list[tuple], cell_bboxes: list) -> list[str]:
     """Text per cell bbox (None gives ""), from `page_chars(page)`: a
-    character belongs to the cell that holds its center, characters keep
-    their line order, and a cell's lines are joined with newlines. The
-    same decoding as `line_text`. Used for pdfplumber's table cells, so a
-    cell's text matches the body text readers (and a subscript stays on its
-    line: "UN", not "U", "N" on two lines)."""
+    character belongs to the cell that holds its center, the cell's
+    characters are read by visual line and x (`_visual_lines`), and a
+    cell's lines are joined with newlines (runs of spaces collapsed). The same decoding as
+    `line_text`. Used for pdfplumber's table cells, so a cell's text
+    matches the body text readers (and a subscript stays on its line:
+    "UN", not "U", "N" on two lines)."""
     texts = []
     for bbox in cell_bboxes:
         if bbox is None:
             texts.append("")
             continue
         x0, y0, x1, y1 = bbox
-        lines: dict[tuple, list[str]] = {}
-        for cx, cy, key, c in chars:
-            if x0 <= cx <= x1 and y0 <= cy <= y1:
-                lines.setdefault(key, []).append(c)
-        parts = [
-            fix_ligatures("".join(cs)).strip() for _key, cs in sorted(lines.items())
-        ]
+        inside = [ch for ch in chars if x0 <= ch[0] <= x1 and y0 <= ch[1] <= y1]
+        parts = [" ".join(fix_ligatures(_line_string(line)).split()) for line in _visual_lines(inside)]
         texts.append("\n".join(p for p in parts if p))
     return texts

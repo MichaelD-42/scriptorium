@@ -62,6 +62,15 @@ class TestTableJoin:
             ["B", "Beta"],
         ]
 
+    def test_repeated_two_row_header_is_dropped(self):
+        header = [["Band", "Frequency", "Limit"], ["", "", "Peak"]]
+        pages = _pages(
+            [_table([*header, ["1", "0.15-0.3", "70"]])],
+            [_table([*header, ["2", "0.3-0.5", "66"]], y0=32)],
+        )
+        elements_lib.apply_page_break_joins(pages)
+        assert pages[1]["elements"][0]["rows"] == [*header, ["1", "0.15-0.3", "70"], ["2", "0.3-0.5", "66"]]
+
     def test_other_column_count_is_not_joined(self):
         pages = _pages(
             [_table([["A", "Alpha"]])], [_table([["B", "Beta", "x"]], y0=32)]

@@ -106,3 +106,25 @@ class TestExtractTextDecodes:
         tables = [e for e in elements if e["type"] == "table"]
         assert len(tables) == 1
         assert tables[0]["rows"] == [["Ri (Ω)", "after"], ["20", "50"]]
+
+
+class TestCellReadingOrder:
+    def test_glyph_in_its_own_line_is_read_in_place(self):
+        """PyMuPDF puts the Symbol "W" (drawn after the brackets) in a line
+        of its own; the cell still reads "Ri (Ω)"."""
+        pdf = fitz.open()
+        page = pdf.new_page(width=W, height=H)
+
+        def length(text, font, size=10):
+            return fitz.get_text_length(text, fontname=font, fontsize=size)
+
+        x0 = 76
+        xp = x0 + length("Ri ", "helv")
+        xw = xp + length("(", "symb", 11)
+        xc = xw + length("W", "symb", 9.6)
+        page.insert_text((x0, 314), "Ri ", fontname="helv", fontsize=10)
+        page.insert_text((xp, 314), "(", fontname="symb", fontsize=11)
+        page.insert_text((xc, 314), ")", fontname="symb", fontsize=11)
+        page.insert_text((xw, 312.5), "W", fontname="symb", fontsize=9.6)
+        doc = fitz.open("pdf", pdf.tobytes())
+        assert glyphs.cell_texts(glyphs.page_chars(doc[0]), [[70, 300, 200, 320]]) == ["Ri (Ω)"]

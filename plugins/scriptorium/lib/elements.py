@@ -211,7 +211,7 @@ def apply_page_break_joins(pages: dict[int, dict]) -> None:
     body element a `table`, page n+1's first body element a `table` with
     the same column count and the same left and right edges (within
     `JOIN_X_TOLERANCE`). Page n+1's rows are appended (a first row equal to
-    page n's first row is a repeated header and is dropped), page n's
+    page n's first rows is a repeated header and is dropped), page n's
     table gains `"pages"`, and page n+1's table is removed. A table join
     chains: when page n+1 has no body element left, page n's table stays
     the open table for page n+2. Paragraph joins stay pairwise
@@ -296,12 +296,15 @@ def _tables_continue(prev_el: dict, next_el: dict) -> bool:
 
 
 def _join_tables(prev_el: dict, next_el: dict, next_page: int) -> None:
-    """Follow-up R21: append `next_el`'s rows to `prev_el` (dropping a
-    repeated header row) and record the page in `prev_el["pages"]`. The
+    """Follow-up R21: append `next_el`'s rows to `prev_el` (dropping the
+    repeated header: the leading rows equal to `prev_el`'s first rows, so
+    a two-row header goes too) and record the page in `prev_el["pages"]`. The
     bbox stays page n's: page n+1's coordinates are another page's."""
     rows = next_el["rows"]
-    if rows and rows[0] == prev_el["rows"][0]:
-        rows = rows[1:]
+    repeated = 0
+    while repeated < min(len(rows), len(prev_el["rows"])) and rows[repeated] == prev_el["rows"][repeated]:
+        repeated += 1
+    rows = rows[repeated:]
     prev_el["rows"] = prev_el["rows"] + rows
     first_page = prev_el.get("pages", [next_page - 1])
     prev_el["pages"] = sorted(set(first_page) | {next_page})
