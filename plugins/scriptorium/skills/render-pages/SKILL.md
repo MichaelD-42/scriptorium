@@ -34,6 +34,16 @@ uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
   "${CLAUDE_PLUGIN_ROOT}/skills/render-pages/scripts/render.py" --doc <doc-name> [--pages 1,3,5] [--dpi 150]
 ```
 
+Follow-up R26: to read small labels in one figure, render just its bbox
+at a high resolution:
+
+```bash
+uv run --project "${CLAUDE_PLUGIN_ROOT}" python   "${CLAUDE_PLUGIN_ROOT}/skills/render-pages/scripts/render_region.py" --doc <doc-name> --page <n> --bbox x0,y0,x1,y1 [--dpi 400]
+```
+
+It writes `work/<doc>/zoom/page{N}_{x0}_{y0}.png` (the bbox plus 6 pt on
+each side; PDF pages only) and prints the path.
+
 Omit `--pages` to render every page. Rendering is idempotent and skips a
 page whose PNG already exists unless `--force` is passed — re-rendering
 the whole document on every retry is wasted work the loop doesn't need.

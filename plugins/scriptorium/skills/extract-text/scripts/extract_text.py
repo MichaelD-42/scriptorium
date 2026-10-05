@@ -88,6 +88,17 @@ def figure_region_filtered_lines(lines: list[dict], figure_regions: list[dict]) 
     ]
 
 
+def table_filtered_lines(lines: list[dict], tables: list[dict]) -> list[dict]:
+    """Follow-up R24: the subset of `lines` that are not majority-inside
+    any of the page's tables (the same `line_in_region` test figures use),
+    for a block that mostly overlaps a table: the table element carries
+    those lines' text, and the rest of the block stays body text."""
+    return [
+        line for line in lines
+        if not any(figures_lib.line_in_region(line["bbox"], t["bbox"]) for t in tables)
+    ]
+
+
 def caption_filtered_lines(lines: list[dict], caption_bboxes: set[tuple]) -> list[dict]:
     """The subset of `lines` whose bbox does NOT exactly match one of this
     page's caption lines (Task A6, `lib/figures.py`'s `find_caption_line`,
@@ -275,6 +286,10 @@ _ENUMERATOR_RE = re.compile(
     r"^(?:\d{1,3}[.)]|\(\d{1,3}\)|\([A-Za-z]\)|" + _ROMAN_NUMERAL_MARKER + r"|[A-Za-z]\))(?=\s)"
 )
 
+# Follow-up R27: a lead line (see split_row_groups) ends before this
+# fraction of the block's width.
+ROW_LEAD_MAX_WIDTH_FRACTION = 0.6
+
 # Marker x-positions within this many points count as the same indent level
 # (Task A4b) -- same tolerance convention as FRAME_MATCH_TOLERANCE/A5's
 # other ~3pt geometry tolerances elsewhere in this pipeline.
@@ -384,6 +399,19 @@ def _block_marker_start(kept_lines: list[dict], i: int) -> tuple[str, str, dict,
     return None
 
 
+# Follow-up R25: the bullet glyphs that may start an item in the middle of
+# a block. Not the dashes: a wrapped line can start with "– PT)".
+MID_BLOCK_BULLET_GLYPHS = "·•▪"
+
+
+def _is_glyph_marker_start(kept_lines: list[dict], i: int) -> bool:
+    """Follow-up R25: True when `kept_lines[i]` starts a list item with a
+    bullet glyph of MID_BLOCK_BULLET_GLYPHS (a lone glyph line paired with
+    its text, or an inline glyph), not with a dash or an enumerator."""
+    start = _block_marker_start(kept_lines, i)
+    return start is not None and start[0] in MID_BLOCK_BULLET_GLYPHS
+
+
 def parse_block_list_items(kept_lines: list[dict], list_level_lookup: list[float]) -> list[dict] | None:
     """Task A4b: a single block can hold ONE OR SEVERAL list items end to
     end (glyph, text, glyph, text, ... -- fix round 1's reviewer repro
@@ -413,8 +441,32 @@ def parse_block_list_items(kept_lines: list[dict], list_level_lookup: list[float
     marker). Otherwise returns a list of `list_item`/`paragraph` elements
     in document order (never headings -- the caller already ruled that out
     before calling this)."""
-    if not kept_lines or _block_marker_start(kept_lines, 0) is None:
+    if not kept_lines:
         return None
+    if _block_marker_start(kept_lines, 0) is None:
+        # Follow-up R25: the block may open with the last wrapped line(s) of
+        # the previous block's item and then start a new item. Only a
+        # bullet-glyph marker counts here, not an enumerator: a wrapped
+        # line can start with "10. " by chance.
+        later = next(
+            (i for i in range(1, len(kept_lines)) if _is_glyph_marker_start(kept_lines, i)),
+            None,
+        )
+        if later is None:
+            return None
+        lead_paragraphs = []
+        # Follow-up R27: label/value rows before the list are their own
+        # paragraphs here too.
+        for group in split_row_groups(kept_lines[:later]):
+            group_bbox = list(group[0]["bbox"])
+            for line in group[1:]:
+                group_bbox = _union_bbox(group_bbox, line["bbox"])
+            lead_paragraph = {"type": "paragraph", "text": " ".join(line["text"] for line in group), "bbox": group_bbox}
+            if row_value_x(group) is not None:
+                lead_paragraph["row_value_x"] = row_value_x(group)
+            lead_paragraphs.append(lead_paragraph)
+        rest = parse_block_list_items(kept_lines[later:], list_level_lookup) or []
+        return [*lead_paragraphs, *rest]
 
     elements: list[dict] = []
     open_item: dict | None = None
@@ -550,6 +602,74 @@ def _union_bbox(a: list[float], b: list[float]) -> list[float]:
     return [min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3])]
 
 
+def _same_row(a: dict, b: dict) -> bool:
+    """Follow-up R27: two lines on one visual line, side by side."""
+    return (
+        abs(a["bbox"][1] - b["bbox"][1]) <= LIST_MARKER_Y_TOLERANCE
+        and (a["bbox"][2] <= b["bbox"][0] or b["bbox"][2] <= a["bbox"][0])
+    )
+
+
+def split_row_groups(kept_lines: list[dict]) -> list[list[dict]]:
+    """Follow-up R27: `kept_lines` split at label/value rows.
+
+    A row is two or more lines at one y, side by side ("HWC requirement" |
+    "REQ ..."; "ASIL Value:" | "To Be"). Each row starts a group. A line
+    after a row that is indented past the block's left edge continues the
+    row (a value wrapped in its column, "Selected"); the next line back at
+    the left edge starts a body group, which runs until the next row. A
+    block with no row is returned as one group, unchanged."""
+    if len(kept_lines) < 2:
+        return [kept_lines]
+    left = min(line["bbox"][0] for line in kept_lines)
+    right = max(line["bbox"][2] for line in kept_lines)
+    groups: list[list[dict]] = []
+    kind = None  # "row", "lead" or "body"
+    # A short line at the top of the block, indented past its left edge
+    # and followed by a line at the left edge, is its own group: the end
+    # of a value continued from the previous page ("Selected"). A first
+    # line indented as a paragraph indent runs to the margin and stays.
+    first, second = kept_lines[0], kept_lines[1]
+    if (
+        first["bbox"][0] > left + LIST_MARKER_X_TOLERANCE
+        and first["bbox"][2] < left + ROW_LEAD_MAX_WIDTH_FRACTION * (right - left)
+        and abs(second["bbox"][0] - left) <= LIST_MARKER_X_TOLERANCE
+        and not _same_row(first, second)
+    ):
+        groups.append([first])
+        kind = "lead"
+        kept_lines = kept_lines[1:]
+        start_offset = 1
+    else:
+        start_offset = 0
+    for i, line in enumerate(kept_lines):
+        prev = kept_lines[i - 1] if i > 0 else None
+        nxt = kept_lines[i + 1] if i + 1 < len(kept_lines) else None
+        if prev is not None and _same_row(prev, line):
+            groups[-1].append(line)
+        elif nxt is not None and _same_row(line, nxt):
+            groups.append([line])
+            kind = "row"
+        elif kind == "row" and line["bbox"][0] > left + LIST_MARKER_X_TOLERANCE:
+            groups[-1].append(line)
+        elif kind == "body":
+            groups[-1].append(line)
+        else:
+            groups.append([line])
+            kind = "body"
+    if not start_offset and not any(len(g) > 1 and _same_row(g[0], g[1]) for g in groups):
+        return [kept_lines]
+    return groups
+
+
+def row_value_x(group: list[dict]) -> float | None:
+    """Follow-up R27: the value column's x of a row group (the x0 of the
+    second line on the row's y), or None for a group that is not a row."""
+    if len(group) > 1 and _same_row(group[0], group[1]):
+        return group[1]["bbox"][0]
+    return None
+
+
 def merge_list_and_paragraph_blocks(
     blocks_and_lines: list[tuple[dict, list[dict]]],
     body_size: float,
@@ -646,6 +766,18 @@ def merge_list_and_paragraph_blocks(
         if classify_heading_level(block_text, block_is_bold, block_max_size, body_size, toc_lookup, heading_size_ranks) is None:
             block_items = parse_block_list_items(kept_lines, list_level_lookup)
             if block_items is not None:
+                # Follow-up R25: leading lines that sit right of the open
+                # item's marker are that item's last wrapped line(s).
+                first = block_items[0]
+                if (
+                    first["type"] == "paragraph"
+                    and elements
+                    and elements[-1]["type"] == "list_item"
+                    and first["bbox"][0] > elements[-1]["bbox"][0] + LIST_MARKER_X_TOLERANCE
+                ):
+                    elements[-1]["text"] = elements[-1]["text"] + " " + first["text"]
+                    elements[-1]["bbox"] = _union_bbox(elements[-1]["bbox"], first["bbox"])
+                    block_items = block_items[1:]
                 elements.extend(block_items)
                 # Same restriction as the cross-block case's own
                 # open_item_text_x handling below: only a real, distinct
@@ -665,6 +797,25 @@ def merge_list_and_paragraph_blocks(
                 continue
 
         element = build_block_element(block, kept_lines, body_size, toc_lookup, heading_size_ranks, list_level_lookup)
+
+        # Follow-up R27: a paragraph block made of label/value rows and a
+        # body becomes one paragraph per group.
+        if element is not None and element["type"] == "paragraph":
+            groups = split_row_groups(kept_lines)
+            if len(groups) > 1:
+                for group in groups:
+                    paragraph = {
+                        "type": "paragraph",
+                        "text": " ".join(line["text"] for line in group),
+                        "bbox": compute_kept_bbox({"bbox": block["bbox"], "lines": []}, group),
+                    }
+                    value_x = row_value_x(group)
+                    if value_x is not None:
+                        paragraph["row_value_x"] = value_x
+                    elements.append(paragraph)
+                open_item, open_item_text_x = None, None
+                i += 1
+                continue
 
         if (
             element is not None
@@ -978,9 +1129,15 @@ def main() -> None:
         # special-case an empty entry.
         filtered_blocks: list[tuple[dict, list[dict]]] = []
         for block in text_blocks:
+            kept_lines = block["lines"]
             if any(furniture_lib.overlap_ratio(block["bbox"], t["bbox"]) > 0.5 for t in tables):
-                continue
-            kept_lines = furniture_filtered_lines(block, furniture_masked, page_height, content_rect)
+                # Follow-up R24: drop only the lines inside a table. A
+                # caption printed right above the table can share the block
+                # with the header cells, and is not table text.
+                kept_lines = table_filtered_lines(kept_lines, tables)
+                if not kept_lines:
+                    continue
+            kept_lines = furniture_filtered_lines({**block, "lines": kept_lines}, furniture_masked, page_height, content_rect)
             kept_lines = figure_region_filtered_lines(kept_lines, figure_regions)
             kept_lines = caption_filtered_lines(kept_lines, caption_bboxes)
             if kept_lines:

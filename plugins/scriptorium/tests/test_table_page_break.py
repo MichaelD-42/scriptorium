@@ -126,3 +126,28 @@ class TestNoEmptyPages:
             [{"type": "paragraph", "text": "Only.", "bbox": [46, 20, 300, 30]}], []
         )
         assert not gates.check_no_empty_pages({"pages": pages})["passed"]
+
+
+
+class TestRowJoins:
+    """Follow-up R27: a label/value row at the bottom of a page joins only a
+    paragraph that starts in its value column."""
+
+    def test_row_value_continues_in_the_value_column(self):
+        pages = _pages(
+            [{"type": "paragraph", "text": "ASIL Value: To Be", "bbox": [46, 698, 135, 709], "row_value_x": 109.0}],
+            [{"type": "paragraph", "text": "Selected", "bbox": [109, 32, 148, 43]},
+             {"type": "paragraph", "text": "The component shall work.", "bbox": [46, 43, 520, 54]}],
+        )
+        elements_lib.apply_page_break_joins(pages)
+        assert pages[1]["elements"][0]["text"] == "ASIL Value: To Be Selected"
+        assert [e["text"] for e in pages[2]["elements"]] == ["The component shall work."]
+
+    def test_row_does_not_join_the_body(self):
+        pages = _pages(
+            [{"type": "paragraph", "text": "ASIL Value: To Be Selected", "bbox": [46, 681, 148, 703], "row_value_x": 109.0}],
+            [{"type": "paragraph", "text": "Each delivery unit shall pass the test.", "bbox": [46, 32, 520, 43]}],
+        )
+        elements_lib.apply_page_break_joins(pages)
+        assert pages[1]["elements"][0]["text"] == "ASIL Value: To Be Selected"
+        assert len(pages[2]["elements"]) == 1

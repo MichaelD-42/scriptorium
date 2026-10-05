@@ -164,10 +164,17 @@ fill `figure_text` yourself via vision, and only when it comes back
 null/absent (a bitmap, or a vector region with no text layer at all — e.g.
 a pure-raster chart with no underlying text): read the
 rendered crop, transcribe the visible text faithfully (this is
-transcription, not interpretation — say so plainly if something's
-illegible rather than inventing a plausible guess, same rule as OCR
-escalation above), and land it with `describe_image.py --figure-text`
-alongside your `--description` for the same element. `describe_image.py`
+transcription, not interpretation), and land it with `describe_image.py
+--figure-text` alongside your `--description` for the same element.
+Follow-up R26: when labels in the crop are small, first render the
+element's bbox at a high resolution and read that instead:
+`render-pages/scripts/render_region.py --doc <doc> --page <n> --bbox
+x0,y0,x1,y1 [--dpi 400]` prints the PNG's path. `figure_text` holds only
+text printed in the image, one label per line — never a remark about
+legibility. If a label stays unreadable after zooming, leave it out of
+`figure_text` and say so in `--description` rather than inventing a
+plausible guess (same rule as OCR escalation above);
+`describe_image.py` refuses a `--figure-text` that carries such a note. `describe_image.py`
 enforces this precondition itself — it refuses (exits 1) if the element
 already has a non-empty `figure_text`, so calling `--figure-text` on an
 element that didn't need it is a hard error, not a silent overwrite. This

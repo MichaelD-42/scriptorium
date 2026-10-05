@@ -19,6 +19,24 @@ PDF, PowerPoint (`.pptx`), Word (`.docx`), Excel (`.xlsx`), HTML (`.html`),
 and standalone images (`.png`/`.jpg`/`.jpeg`/`.webp`/`.tiff`) are
 implemented today.
 
+## 0.4.2
+
+Second round of fixes from the golden-document run (follow-ups R23–R27):
+
+- **Label/value rows**: a block made of two-column header rows ("HWC
+  requirement | REQ …", "ASIL Value: | To Be Selected") and a body is split
+  into one paragraph per row, so a downstream tagger finds the label's
+  value.
+- **Stray marks**: a non-Latin combining mark after Latin text (a font's
+  space-like glyph mapped to U+0BD7) is dropped or becomes a space.
+- **Table captions**: a caption line that shares a text block with the
+  table's header cells is kept.
+- **List continuation**: a block that opens with the previous bullet's
+  last line and then starts a new bullet is read as list content.
+- **Figure text**: `render_region.py` renders one figure at a high dpi for
+  reading small labels, and `describe_image.py` refuses a `--figure-text`
+  that holds a legibility note instead of a transcription.
+
 ## 0.4.1
 
 Fixes from the first golden-document run (follow-ups R18–R22):

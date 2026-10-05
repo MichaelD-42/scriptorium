@@ -261,7 +261,10 @@ def apply_page_break_joins(pages: dict[int, dict]) -> None:
             continue
         if "bbox" not in prev_el or "bbox" not in next_el:
             continue  # defensive: real elements always carry bbox (Task A2); a hand-built fixture without one just never joins
-        if abs(next_el["bbox"][0] - prev_el.get("text_x", prev_el["bbox"][0])) > JOIN_X_TOLERANCE:
+        # Follow-up R27: a label/value row continues only in its value
+        # column ("To Be" | "Selected"); the body after it is not the row.
+        join_x = prev_el.get("row_value_x", prev_el.get("text_x", prev_el["bbox"][0]))
+        if abs(next_el["bbox"][0] - join_x) > JOIN_X_TOLERANCE:
             continue
 
         prev_el["text"] = prev_el["text"] + " " + next_el["text"]

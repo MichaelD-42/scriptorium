@@ -52,7 +52,9 @@ The one place all three extraction tiers converge. Three scripts:
    (verbatim — no de-hyphenation, no other character changes), the first
    gains `"pages": [n, n+1]` (additive, absent everywhere else) and stays
    under page `n`, and the second is removed from page `n+1`. Pairwise
-   only (no 3+ page chains). Follow-up R21: a table cut by a page break IS
+   only (no 3+ page chains). Follow-up R27: a label/value row paragraph
+   (`row_value_x`) joins only a next-page paragraph that starts in its value
+   column, never the body after it. Follow-up R21: a table cut by a page break IS
    joined — page `n`'s last body element a `table`, page `n+1`'s first body
    element a `table` with the same column count and the same left and
    right edges (within 3 pt): page `n+1`'s rows are appended (leading rows

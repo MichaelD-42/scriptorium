@@ -73,6 +73,7 @@ whose caption is verbatim-only. For pptx/docx/xlsx/html the agent writes
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -88,6 +89,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mermaid_image  # noqa: E402
 
 NO_VISIBLE_TEXT_FORMATS = furniture_lib.NO_VISIBLE_TEXT_FORMATS
+
+
+# Follow-up R26: words that mark a note about the transcription, not text
+# printed in the image.
+FIGURE_TEXT_NOTE_RE = re.compile(
+    r"\b(too small|illegible|unreadable|not readable|not legible|cannot be read|can't be read|hard to read)\b",
+    re.IGNORECASE,
+)
+
+
+def figure_text_note(text: str) -> str | None:
+    """Follow-up R26: the note phrase in `text`, or None."""
+    match = FIGURE_TEXT_NOTE_RE.search(text)
+    return match.group(0) if match else None
 
 
 def main() -> None:
@@ -119,6 +134,18 @@ def main() -> None:
         if error:
             print(f"error: {error}", file=sys.stderr)
             sys.exit(1)
+
+    if args.figure_text is not None and figure_text_note(args.figure_text):
+        # Follow-up R26: figure_text is transcription only. A note about
+        # legibility goes in --description; zoom in with render_region.py
+        # before giving up on a label.
+        print(
+            f"error: --figure-text holds a note ({figure_text_note(args.figure_text)!r}), not a transcription -- "
+            "put it in --description, and render the region with render-pages/scripts/render_region.py "
+            "to read small labels",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     if args.no_visible_text and (args.caption is not None or args.figure_text is not None):
         print("error: --no-visible-text cannot be combined with --caption or --figure-text", file=sys.stderr)
