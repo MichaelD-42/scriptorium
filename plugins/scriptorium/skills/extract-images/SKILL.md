@@ -43,10 +43,12 @@ Handles both image kinds a PDF can contain:
     (Task A5b tightened this from "any overlap at all", so a tall real
     figure that only grazes the band survives);
   - it overlaps a real (non-frame) table's bbox — unless every overlapping
-    table is a grid table (follow-up R11: more than 60% of its cells
-    empty, or more than 40% when the cluster has curves or
-    non-axis-aligned lines). Then the cluster is a figure, the table is
-    recorded as `grid_table` and `extract-text` emits no table for it. A
+    table is a grid table (follow-up R11, re-review 2: the cluster has a
+    data series, a drawing off the table's cell boundaries that does not
+    stay inside one cell; or at most 10% of the table's cells hold text.
+    A spanned cell's positions are not empty cells). Then the cluster is a
+    figure, the table is recorded as `grid_table` with its `filled_cells`,
+    and `extract-text` emits no table for it. A
     cluster that covers more than 60% of the page (or of the content rect)
     never uses this rule (follow-up R16): a page-sized form stays a table; or
   - it's too small to be more than a stray line.

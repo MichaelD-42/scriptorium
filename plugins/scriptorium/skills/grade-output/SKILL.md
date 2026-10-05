@@ -145,6 +145,26 @@ output (a list-of-figures entry or a sentence that starts with "Figure 3"
 gets no tag); `merge_grades.py` lifts it to `grade-report.json`; and
 `commands/extract.md`'s Decide step records it and reports it to the human.
 
+## `table_as_figure` (warning, not a gate)
+
+`gates.py` also appends a `{"name": "table_as_figure", "page": ...,
+"detail": ...}` entry to the same `warnings` list when a table may have
+become an image:
+
+- a `grid_table` excluded region with `filled_cells` above 0 (the entry
+  also has `bbox` and `filled_cells`): its table had text, and that text is
+  now only the image's `figure_text`;
+- an `image` element whose `caption` is a "Table n" caption (the entry has
+  `caption`).
+
+`extract-images` makes a table a `grid_table` only with chart evidence (a
+data series across the cells, or almost no text in them), so the warning is
+often a correct chart. It is wired exactly like `large_region_excluded`: it
+never flips `passed`; the `grader` subagent looks at the page and tags it
+`table_corruption` only when a real table became an image;
+`merge_grades.py` lifts it to `grade-report.json`; and
+`commands/extract.md`'s Decide step records it and reports it to the human.
+
 ## Notes for the calling agent
 
 - A rubric verdict of "pass" cannot rescue a failed gate — gates are the

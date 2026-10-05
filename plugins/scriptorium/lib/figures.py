@@ -97,8 +97,9 @@ Detection pipeline, per page:
      `pdfplumber` and filtered the same way `extract_text.py`'s
      `furniture_lib.matches_any_frame()` filters `frame_tables` out of its own table query.
      Follow-up R11: not when every overlapping table is a grid table
-     (`is_grid_table`: mostly empty cells, a chart's grid). Then the
-     cluster is a figure and each such table is recorded as "grid_table".
+     (`is_grid_table`: a chart's grid, with a data series drawn across its
+     cells or almost no text in them). Then the cluster is a figure and
+     each such table is recorded as "grid_table".
      Follow-up R16: a cluster that covers more than
      GRID_TABLE_MAX_CLUSTER_FRACTION of the page (or content rect) never
      uses the grid-table rule; a page-sized form stays a table.
@@ -174,15 +175,23 @@ MIN_CLUSTER_AREA_FRACTION = 0.01
 TABLE_OVERLAP_THRESHOLD = 0.3
 LINE_OVERLAP_THRESHOLD = 0.5
 
-# Follow-up R11: pdfplumber reads a chart's grid lines as a table. Before the
-# table_overlap exclusion, the overlapping table is tested: with more than
-# GRID_TABLE_EMPTY_FRACTION of its cells empty, or more than
-# GRID_TABLE_EMPTY_FRACTION_WITH_CURVES when the cluster has curves or
-# non-axis-aligned lines, it is a grid table (is_grid_table). The cluster is
-# then a figure, the table is recorded in excluded_regions as "grid_table",
-# and extract_text emits no table for it.
-GRID_TABLE_EMPTY_FRACTION = 0.60
-GRID_TABLE_EMPTY_FRACTION_WITH_CURVES = 0.40
+# Follow-up R11, re-review 2 I1: pdfplumber reads a chart's grid lines as a
+# table. Before the table_overlap exclusion, the overlapping table is
+# tested (is_grid_table). It is a grid table only with real chart evidence:
+# (a) a data series, a drawing of the cluster with segments off the table's
+# cell boundaries (within FRAME_MATCH_TOLERANCE) that does not stay inside
+# one cell; or (b) at most GRID_TABLE_MAX_FILLED_FRACTION of its cells hold
+# text. The share of empty cells alone is not enough: a sparse requirements
+# matrix ("X" in a few variant cells) is a table. A spanned (merged)
+# position is not a cell, so it never counts as empty. A grid table's
+# cluster is a figure, the table is recorded in excluded_regions as
+# "grid_table" (with its `filled_cells`), and extract_text emits no table
+# for it. gates.py warns (`table_as_figure`) when such a table had text.
+GRID_TABLE_MAX_FILLED_FRACTION = 0.10
+
+# A curve within this distance of a table corner, and no larger than this on
+# either side, is a rounded corner of the table's border, not a data series.
+GRID_CORNER_ARC_MAX = 12.0  # pt
 
 # Follow-up R16: the grid-table rule is skipped for a cluster that covers
 # more than this fraction of the page area (or of the content rect, when
@@ -265,10 +274,12 @@ def page_tables(
     -- not read from any shard, on purpose: extract_images.py and
     extract_text.py may run in either order, or in parallel, for the same
     page (see module docstring), so neither script can assume the other's
-    shard already exists. Each entry is `{"bbox", "rows", "empty_fraction"}`:
-    `rows` with None cells as "", and the fraction of cells that are empty
-    (follow-up R11, `is_grid_table`). extract_text builds its `table`
-    elements from this same list.
+    shard already exists. Each entry is `{"bbox", "rows", "cells",
+    "filled_cells", "filled_fraction"}`: `rows` with None positions as "",
+    the real cell bboxes, and how many real cells hold text (re-review 2
+    I1, `is_grid_table`). A None position is covered by a spanned cell, so
+    it is not a cell and never counts as empty. extract_text builds its
+    `table` elements from this same list.
 
     Follow-up R12: with a `content_rect` (triage's
     `furniture["content_rect"]`), tables are detected on the page cropped
@@ -295,13 +306,15 @@ def page_tables(
                 continue
             if crop is not None and _is_content_frame(table.bbox, crop):
                 continue
-            rows = [[cell if cell is not None else "" for cell in row] for row in table.extract()]
-            cells = [cell for row in rows for cell in row]
-            empty = sum(1 for cell in cells if not str(cell).strip())
+            raw_rows = table.extract()
+            real = [cell for row in raw_rows for cell in row if cell is not None]
+            filled = sum(1 for cell in real if str(cell).strip())
             found.append({
                 "bbox": list(table.bbox),
-                "rows": rows,
-                "empty_fraction": empty / len(cells) if cells else 1.0,
+                "rows": [[cell if cell is not None else "" for cell in row] for row in raw_rows],
+                "cells": [list(c) for c in table.cells],
+                "filled_cells": filled,
+                "filled_fraction": filled / len(real) if real else 0.0,
             })
     return found
 
@@ -322,29 +335,101 @@ def real_table_bboxes(
     return [t["bbox"] for t in page_tables(pdf_path, page_number, frame_tables, content_rect)]
 
 
-def is_grid_table(table: dict, cluster_has_curves: bool) -> bool:
-    """Follow-up R11: True when `table` is a chart's grid, not a table: more
-    than GRID_TABLE_EMPTY_FRACTION of its cells are empty, or the
-    overlapping drawing cluster has curves or non-axis-aligned lines and
-    more than GRID_TABLE_EMPTY_FRACTION_WITH_CURVES are empty."""
-    empty = table["empty_fraction"]
-    if empty > GRID_TABLE_EMPTY_FRACTION:
+def is_grid_table(table: dict, drawings: list[dict] | None = None) -> bool:
+    """Follow-up R11, re-review 2 I1: True when `table` (a `page_tables`
+    entry) is a chart's grid, not a table: at most
+    GRID_TABLE_MAX_FILLED_FRACTION of its cells hold text, or `drawings`
+    (the overlapping cluster's drawings) hold a data series
+    (`_has_data_series`)."""
+    if table["filled_fraction"] <= GRID_TABLE_MAX_FILLED_FRACTION:
         return True
-    return cluster_has_curves and empty > GRID_TABLE_EMPTY_FRACTION_WITH_CURVES
+    return _has_data_series(table, drawings or [])
 
 
-def _has_curves_or_diagonals(drawings: list[dict]) -> bool:
-    """True when any path item of `drawings` is a curve or a line that is
-    not axis-aligned (within TEXT_BOX_AXIS_TOLERANCE)."""
+def _near_any(value: float, grid: list[float], tolerance: float) -> bool:
+    return any(abs(value - g) <= tolerance for g in grid)
+
+
+def _inside(bbox, rect, tolerance: float) -> bool:
+    return (
+        bbox[0] >= rect[0] - tolerance and bbox[1] >= rect[1] - tolerance
+        and bbox[2] <= rect[2] + tolerance and bbox[3] <= rect[3] + tolerance
+    )
+
+
+def _is_corner_arc(bbox, table_bbox, tolerance: float) -> bool:
+    """True when `bbox` (a curve's) is at most GRID_CORNER_ARC_MAX on each
+    side and lies at a corner of `table_bbox`: a rounded table corner."""
+    if bbox[2] - bbox[0] > GRID_CORNER_ARC_MAX or bbox[3] - bbox[1] > GRID_CORNER_ARC_MAX:
+        return False
+    m = GRID_CORNER_ARC_MAX
+    return any(
+        _inside(bbox, [cx - m, cy - m, cx + m, cy + m], tolerance)
+        for cx in (table_bbox[0], table_bbox[2])
+        for cy in (table_bbox[1], table_bbox[3])
+    )
+
+
+def _off_grid_item_bbox(item, xs: list[float], ys: list[float], table_bbox, tolerance: float) -> list[float] | None:
+    """The bbox of one path item when it is NOT on the table's cell
+    boundaries (`xs`, `ys`, within `tolerance`), else None. An
+    axis-aligned line is on them when it lies on a boundary y (horizontal)
+    or x (vertical); a rect when all four edges do; a small curve at a
+    table corner is a rounded corner (`_is_corner_arc`). Anything else (a
+    diagonal, a curve, a bar) is off the grid."""
+    op = item[0]
+    if op == "l":
+        p1, p2 = item[1], item[2]
+        if abs(p1.y - p2.y) <= TEXT_BOX_AXIS_TOLERANCE and _near_any(p1.y, ys, tolerance):
+            return None
+        if abs(p1.x - p2.x) <= TEXT_BOX_AXIS_TOLERANCE and _near_any(p1.x, xs, tolerance):
+            return None
+        return [min(p1.x, p2.x), min(p1.y, p2.y), max(p1.x, p2.x), max(p1.y, p2.y)]
+    if op == "re" or (op == "qu" and item[1].is_rectangular):
+        r = item[1] if op == "re" else item[1].rect
+        on_grid = (
+            _near_any(r.x0, xs, tolerance) and _near_any(r.x1, xs, tolerance)
+            and _near_any(r.y0, ys, tolerance) and _near_any(r.y1, ys, tolerance)
+        )
+        return None if on_grid else [r.x0, r.y0, r.x1, r.y1]
+    if op == "qu":
+        points = [item[1].ul, item[1].ur, item[1].ll, item[1].lr]
+    else:
+        points = [p for p in item[1:] if hasattr(p, "x")]
+    if not points:
+        return None
+    bbox = [min(p.x for p in points), min(p.y for p in points), max(p.x for p in points), max(p.y for p in points)]
+    if op == "c" and _is_corner_arc(bbox, table_bbox, tolerance):
+        return None
+    return bbox
+
+
+def _has_data_series(
+    table: dict, drawings: list[dict], tolerance: float = furniture_lib.FRAME_MATCH_TOLERANCE
+) -> bool:
+    """Re-review 2 I1, rule (a): True when one drawing of `drawings` has
+    path items off the table's cell boundaries (`_off_grid_item_bbox`),
+    and their union reaches into the table but does not stay inside one
+    cell. A data series crosses cells; a check mark, a cross or a diagonal
+    "n/a" stroke stays inside its cell."""
+    cells = table.get("cells") or []
+    if not cells:
+        return False
+    xs = sorted({c[0] for c in cells} | {c[2] for c in cells})
+    ys = sorted({c[1] for c in cells} | {c[3] for c in cells})
+    table_bbox = table["bbox"]
     for d in drawings:
-        for item in d.get("items", []):
-            op = item[0]
-            if op == "c":
-                return True
-            if op == "l":
-                p1, p2 = item[1], item[2]
-                if abs(p1.x - p2.x) > TEXT_BOX_AXIS_TOLERANCE and abs(p1.y - p2.y) > TEXT_BOX_AXIS_TOLERANCE:
-                    return True
+        off = [
+            b for b in (_off_grid_item_bbox(item, xs, ys, table_bbox, tolerance) for item in d.get("items", []))
+            if b is not None
+        ]
+        if not off:
+            continue
+        union = _union_bbox(off)
+        if furniture_lib.overlap_ratio(union, table_bbox) <= 0:
+            continue
+        if not any(_inside(union, cell, tolerance) for cell in cells):
+            return True
     return False
 
 
@@ -586,14 +671,15 @@ def detect_figure_regions_with_exclusions(
             # Follow-up R11: a chart's grid read as a table does not hide
             # the chart. Only when every overlapping table is a grid table,
             # and (R16) the cluster is not page-sized.
-            curves = _has_curves_or_diagonals(members or [])
             area = max(0.0, bbox[2] - bbox[0]) * max(0.0, bbox[3] - bbox[1])
             page_sized = area / reference_area > GRID_TABLE_MAX_CLUSTER_FRACTION
-            if page_sized or not all(is_grid_table(t, curves) for t in overlapping):
+            if page_sized or not all(is_grid_table(t, members) for t in overlapping):
                 excluded_regions.append({"bbox": bbox, "reason": "table_overlap"})
                 return
             for t in overlapping:
-                excluded_regions.append({"bbox": list(t["bbox"]), "reason": "grid_table"})
+                excluded_regions.append(
+                    {"bbox": list(t["bbox"]), "reason": "grid_table", "filled_cells": t["filled_cells"]}
+                )
         regions.append({"bbox": bbox})
 
     box_candidates = []  # raw [x0, y0, x1, y1] of each would-be text box

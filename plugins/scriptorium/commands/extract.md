@@ -182,8 +182,8 @@ subagent output.
 ### 5. Decide
 
 - **`grade-report.json["warnings"]` is non-empty** (Task A5b fix round 1,
-  controller finding 2 — e.g. a `large_region_excluded` or
-  `orphan_figure_caption` entry): record the
+  controller finding 2 — e.g. a `large_region_excluded`,
+  `orphan_figure_caption` or `table_as_figure` entry): record the
   list verbatim in this document's `runs/state.json` queue entry as
   `warnings`, and include it in the loop summary you report to the human,
   **regardless of `overall_passed`** — a warning never blocks the pass/fail

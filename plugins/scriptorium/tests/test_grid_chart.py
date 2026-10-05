@@ -2,13 +2,13 @@
 
 pdfplumber reads a chart's grid lines as a table, so the chart's drawing
 cluster used to be excluded as `table_overlap` and lost. Before that
-exclusion, `lib/figures.py` now tests the overlapping table: when more than
-`GRID_TABLE_EMPTY_FRACTION` (60%) of its cells are empty, or the cluster has
-curves or non-axis-aligned lines and more than
-`GRID_TABLE_EMPTY_FRACTION_WITH_CURVES` (40%) are empty, it is a grid table.
-The cluster is then a figure, the table is dropped (recorded in
-`excluded_regions` as `grid_table`), and extract_text emits no table for
-it. A table whose cells are mostly filled stays a table.
+exclusion, `lib/figures.py` now tests the overlapping table: when at most
+`GRID_TABLE_MAX_FILLED_FRACTION` (10%) of its cells hold text, or the
+cluster has a data series across its cells (re-review 2 I1, see
+test_table_as_figure.py), it is a grid table. The cluster is then a figure,
+the table is dropped (recorded in `excluded_regions` as `grid_table`), and
+extract_text emits no table for it. A table whose cells are mostly filled
+stays a table.
 """
 
 import json

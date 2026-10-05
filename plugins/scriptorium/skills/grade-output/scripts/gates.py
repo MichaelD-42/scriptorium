@@ -205,6 +205,51 @@ def check_orphan_figure_caption(doc_data: dict) -> list[dict]:
     return warnings
 
 
+def check_table_as_figure(doc_data: dict) -> list[dict]:
+    """Re-review 2 I1: a WARNING (never a hard gate failure, like
+    check_large_region_excluded) when a table may have become an image:
+
+    - a `grid_table` excluded region whose `filled_cells` is above 0. Its
+      table had text, so its cell structure is now only `figure_text`;
+    - an `image` element whose `caption` is a "Table n" caption
+      (`figures.CAPTION_PATTERN` in its "Table" form).
+
+    `lib/figures.py`'s `is_grid_table` asks for a data series or almost no
+    text, so either case can still be a correct chart. The grader looks at
+    the page and decides."""
+    warnings = []
+    for page in sorted(doc_data.get("pages", {}).values(), key=lambda p: p.get("page_number") or 0):
+        page_number = page.get("page_number")
+        for region in page.get("excluded_regions", []):
+            if region.get("reason") == "grid_table" and region.get("filled_cells", 0) > 0:
+                warnings.append({
+                    "name": "table_as_figure",
+                    "page": page_number,
+                    "bbox": region["bbox"],
+                    "filled_cells": region["filled_cells"],
+                    "detail": (
+                        f"page {page_number}: a table with {region['filled_cells']} filled cells was read as "
+                        f"a chart's grid and became part of an image -- verify it is not a real table"
+                    ),
+                })
+        for el in page.get("elements", []):
+            if el.get("type") != "image":
+                continue
+            caption = (el.get("caption") or "").strip()
+            match = figures_lib.CAPTION_PATTERN.match(caption)
+            if match and match.group(1).lower() == "table":
+                warnings.append({
+                    "name": "table_as_figure",
+                    "page": page_number,
+                    "caption": caption,
+                    "detail": (
+                        f"page {page_number}: an image has the table caption {caption!r} -- "
+                        f"verify the table was not turned into an image"
+                    ),
+                })
+    return warnings
+
+
 def _output_line_candidates(line: str) -> list[str]:
     """The text pieces of one assembled-output line: the line with HTML tags
     removed, and each Markdown table cell, each with leading Markdown
@@ -558,9 +603,13 @@ def main() -> None:
     # Task A5b: large_region_excluded is a WARNING, not one of the checks
     # above -- it never affects `passed`. See check_large_region_excluded's
     # docstring for why. Follow-up R1: orphan_figure_caption is a warning
-    # for the same reason.
+    # for the same reason, and so is re-review 2's table_as_figure.
     page_areas = _pdf_page_areas(input_path) if input_format == "pdf" else {}
-    warnings = check_large_region_excluded(doc_data, page_areas) + check_orphan_figure_caption(doc_data)
+    warnings = (
+        check_large_region_excluded(doc_data, page_areas)
+        + check_orphan_figure_caption(doc_data)
+        + check_table_as_figure(doc_data)
+    )
 
     result = {"doc": args.doc, "passed": all(c["passed"] for c in checks), "checks": checks, "warnings": warnings}
 

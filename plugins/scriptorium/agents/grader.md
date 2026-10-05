@@ -57,6 +57,11 @@ the assembled output's format/location.
    image for it, tag that page `missing_image` the same way. If no
    figure belongs to the line (a list-of-figures entry, or a body
    sentence that starts with "Figure 3"), add no tag.
+   For each `table_as_figure` entry (a `"bbox"` or a `"caption"`): look
+   at that table or caption on the page's rendered PNG. If it is a real
+   table (rows and columns of values, not a chart's grid) and the
+   assembled output has only an image for it, tag that page
+   `table_corruption`. A chart on a grid gets no tag.
 3. For each page in your batch, follow `grade-output/rubric.md` exactly:
    look at the rendered PNG (Read tool) side by side with that page's
    content in the assembled output, score it 0-1 against the seven
