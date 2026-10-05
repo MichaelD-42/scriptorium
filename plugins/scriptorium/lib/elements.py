@@ -207,9 +207,14 @@ def apply_page_break_joins(pages: dict[int, dict]) -> None:
     element this doesn't touch) and stays under page n, and the second
     element is removed from page n+1's own list.
 
-    Never joins two tables (page n's last element being a `table` always
-    fails the type check above) -- a table cut by a page break stays two
-    tables, a known, documented, out-of-scope risk per the brief. Pairwise
+    Follow-up R21: two tables ARE joined (`_join_tables`): page n's last
+    body element a `table`, page n+1's first body element a `table` with
+    the same column count and the same left and right edges (within
+    `JOIN_X_TOLERANCE`). Page n+1's rows are appended (a first row equal to
+    page n's first row is a repeated header and is dropped), page n's
+    table gains `"pages"`, and page n+1's table is removed. A table join
+    chains: when page n+1 has no body element left, page n's table stays
+    the open table for page n+2. Paragraph joins stay pairwise
     only, one pass, ascending page order -- a 3+ page chain (page n's
     element joins page n+1's, and the COMBINED text still lacks terminal
     punctuation, and page n+2's first element would also qualify) is not
@@ -224,16 +229,29 @@ def apply_page_break_joins(pages: dict[int, dict]) -> None:
     An element without `text_x` (a paragraph, or a list item from an older
     shard) uses `bbox[0]`, as before."""
     page_numbers = sorted(pages)
+    open_table: dict | None = None  # R21: a table whose page has no body element left
     for n in page_numbers:
         n_next = n + 1
         if n_next not in pages:
+            open_table = None
             continue
         prev_body = _body_elements(pages[n])
         next_body = _body_elements(pages[n_next])
+        if not prev_body and open_table is not None:
+            prev_body = [open_table]
+        open_table = None
         if not prev_body or not next_body:
             continue
         prev_el = prev_body[-1]
         next_el = next_body[0]
+
+        if prev_el["type"] == "table" and next_el["type"] == "table":
+            if _tables_continue(prev_el, next_el):
+                _join_tables(prev_el, next_el, n_next)
+                pages[n_next]["elements"] = [el for el in pages[n_next]["elements"] if el is not next_el]
+                if not _body_elements(pages[n_next]):
+                    open_table = prev_el
+            continue
 
         if prev_el["type"] not in ("paragraph", "list_item"):
             continue
@@ -255,6 +273,38 @@ def apply_page_break_joins(pages: dict[int, dict]) -> None:
             max(prev_el["bbox"][3], next_el["bbox"][3]),
         ]
         pages[n_next]["elements"] = [el for el in pages[n_next]["elements"] if el is not next_el]
+
+
+def _column_count(table: dict) -> int:
+    return max((len(row) for row in table.get("rows", [])), default=0)
+
+
+def _tables_continue(prev_el: dict, next_el: dict) -> bool:
+    """Follow-up R21: True when `next_el` (first body element of page
+    n+1) continues `prev_el` (last body element of page n): same column
+    count, same left and right edges within JOIN_X_TOLERANCE."""
+    if "bbox" not in prev_el or "bbox" not in next_el:
+        return False
+    if not prev_el.get("rows") or not next_el.get("rows"):
+        return False
+    if _column_count(prev_el) != _column_count(next_el):
+        return False
+    return (
+        abs(prev_el["bbox"][0] - next_el["bbox"][0]) <= JOIN_X_TOLERANCE
+        and abs(prev_el["bbox"][2] - next_el["bbox"][2]) <= JOIN_X_TOLERANCE
+    )
+
+
+def _join_tables(prev_el: dict, next_el: dict, next_page: int) -> None:
+    """Follow-up R21: append `next_el`'s rows to `prev_el` (dropping a
+    repeated header row) and record the page in `prev_el["pages"]`. The
+    bbox stays page n's: page n+1's coordinates are another page's."""
+    rows = next_el["rows"]
+    if rows and rows[0] == prev_el["rows"][0]:
+        rows = rows[1:]
+    prev_el["rows"] = prev_el["rows"] + rows
+    first_page = prev_el.get("pages", [next_page - 1])
+    prev_el["pages"] = sorted(set(first_page) | {next_page})
 
 
 def load_doc(elements_path: Path) -> dict:

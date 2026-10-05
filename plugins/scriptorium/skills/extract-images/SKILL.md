@@ -39,6 +39,9 @@ Handles both image kinds a PDF can contain:
     a group or a single box with a "Figure n" caption line within 36 pt
     directly below or above it is a figure region instead (a box diagram
     drawn without connectors);
+  - it is invisible (follow-up R19): a fill with no stroke, the fill
+    white — Word paints these behind body text. Recorded as
+    `invisible_drawing`, and left out before clustering;
   - *more than half* its own area lies inside the furniture edge band
     (Task A5b tightened this from "any overlap at all", so a tall real
     figure that only grazes the band survives);
@@ -90,7 +93,11 @@ For an image document, `--pages` is always `1` — there's only ever page 1.
   pure-raster chart with no underlying text), which is the signal a later
   vision-fallback step uses to fill it in instead. These lines are excluded
   from `extract-text`'s paragraph/heading output for the same page, so they
-  never appear twice.
+  never appear twice. Follow-up R22: a short label line (at most 16
+  characters, 2 words, not a caption) within 6 pt of a region and beside
+  it (its y-range overlaps the region's) grows the region first, so the
+  label lands in `figure_text` and in the crop. Known limit: a short body
+  line printed that close to a drawing is taken too.
 - Every `image` element (bitmap or vector-region) also gets a
   script-authoritative `caption`: `lib/figures.py`'s `find_caption_line`
   searches the text layer within 60pt directly above or below the
@@ -101,7 +108,11 @@ For an image document, `--pages` is always `1` — there's only ever page 1.
   joined with the text line at its y (within 3 pt) into one caption, so
   a caption printed as two spans is still found; the nearest figure
   caption wins over a `Table n` caption, which is used only when no
-  figure caption is near. That same line (both source lines, when joined) is
+  figure caption is near. Follow-up R22: a caption that wraps keeps its
+  continuation line(s) — directly below (at most 1.2 caption-line heights),
+  inside the caption's x-span, centred under it or starting at its title's
+  x, not ending with a colon, while the caption does not end with a full
+  stop. That same line (every source line, when joined) is
   excluded from `extract-text`'s paragraph/heading output on the same page
   — same "shared detection, no ordering dependency" pattern as
   `figure_text` above, so the two scripts can never disagree about which
@@ -120,14 +131,14 @@ For an image document, `--pages` is always `1` — there's only ever page 1.
 - **`excluded_regions` (Task A5b, "no silent drops")**: the page's image
   shard also carries `excluded_regions: [{"bbox": [...], "reason":
   "frame_drawing"|"repeated_drawing"|"tiny"|"text_box"|"furniture_band"|
-  "table_overlap"|"grid_table"}]` — every candidate a filter dropped on this page (the
+  "table_overlap"|"grid_table"|"invisible_drawing"}]` — every candidate a filter dropped on this page (the
   page's `repeated_drawings` matches give ONE `repeated_drawing` entry with
   their union bbox and a `count`, not one entry per line), always present (an empty list
   when nothing was dropped), so a large region that a filter removes is
   never simply invisible. `merge.py` passes it through to the merged page
   dict the same way `skipped` already does. `grade-output`'s
   `large_region_excluded` gate flags (as a warning, not a hard failure) any
-  entry here whose reason isn't `frame_drawing`/`repeated_drawing`/`tiny`/`text_box`/`grid_table` and whose area is
+  entry here whose reason isn't `frame_drawing`/`repeated_drawing`/`tiny`/`text_box`/`grid_table`/`invisible_drawing` and whose area is
   more than 20% of the page — see `grade-output`'s SKILL.md.
 - If `work/<doc>/triage.json` marks a given page `"role": "toc"`
   (`pdf-triage`'s printed-TOC-page detection), that page's shard is written

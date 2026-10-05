@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 import elements as elements_lib  # noqa: E402
 import figures as figures_lib  # noqa: E402
 import furniture as furniture_lib  # noqa: E402
+import glyphs  # noqa: E402
 import paths  # noqa: E402
 import toc as toc_lib  # noqa: E402
 
@@ -817,6 +818,9 @@ def extract_page_text_blocks(page, body_size: float | None) -> tuple[list[dict],
     per-page fallback exists only for standalone/manual use of this script
     without triage having run first."""
     raw = page.get_text("dict")
+    # Follow-up R18: line text is decoded (Symbol font, ligature glyphs);
+    # the furniture key stays on the raw text so triage's patterns match.
+    symbol_fonts = glyphs.page_symbol_fonts(page)
     text_blocks = []
     sizes = []
     for block in raw.get("blocks", []):
@@ -824,8 +828,8 @@ def extract_page_text_blocks(page, body_size: float | None) -> tuple[list[dict],
             continue
         lines = []
         for line in block.get("lines", []):
-            spans_text = "".join(span["text"] for span in line.get("spans", []))
-            stripped = spans_text.strip()
+            raw_stripped = "".join(span["text"] for span in line.get("spans", [])).strip()
+            stripped = glyphs.line_text(line, symbol_fonts).strip()
             if not stripped:
                 continue
             line_max_size = 0.0
@@ -835,7 +839,7 @@ def extract_page_text_blocks(page, body_size: float | None) -> tuple[list[dict],
                 line_max_size = max(line_max_size, span["size"])
             lines.append({
                 "text": stripped,
-                "masked": furniture_lib.furniture_key(stripped),
+                "masked": furniture_lib.furniture_key(raw_stripped),
                 "bbox": line["bbox"],
                 "max_size": line_max_size,
                 "bold": bool(line_spans) and all(is_bold_span(s) for s in line_spans),

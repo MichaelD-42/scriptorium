@@ -49,6 +49,8 @@ own.
 
 import re
 
+import glyphs
+
 # A page qualifies as a printed TOC page once it has at least this many
 # lines matching DOT_LEADER_RE. This is the brief's original spec'd value.
 #
@@ -156,19 +158,20 @@ def toc_from_outline(document) -> list[dict]:
 
 
 def _page_lines(page) -> list[str]:
-    return [line.strip() for line in page.get_text("text").splitlines() if line.strip()]
+    return _page_line_records(page)[0]
 
 
 def _page_line_records(page) -> tuple[list[str], list[float]]:
     """The same lines as `_page_lines` (PyMuPDF's "text" output is its
     "dict" lines in order, each line's spans joined), plus each line's top
     y, for the same-y checks of follow-up R9."""
+    symbol_fonts = glyphs.page_symbol_fonts(page)  # follow-up R18
     lines, ys = [], []
     for block in page.get_text("dict").get("blocks", []):
         if block.get("type") != 0:
             continue
         for line in block.get("lines", []):
-            text = "".join(span["text"] for span in line.get("spans", [])).strip()
+            text = glyphs.line_text(line, symbol_fonts).strip()
             if text:
                 lines.append(text)
                 ys.append(line["bbox"][1])

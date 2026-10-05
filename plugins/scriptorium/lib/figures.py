@@ -129,9 +129,11 @@ about which line is the caption.
 import re
 from pathlib import Path
 
+import fitz  # PyMuPDF
 import pdfplumber
 
 import furniture as furniture_lib
+import glyphs
 import toc as toc_lib
 
 # The furniture band (FURNITURE_EDGE_BAND) and the frame matching tolerance
@@ -269,6 +271,12 @@ CAPTION_EDGE_SLACK = REGION_PADDING
 # line at its y only when the title starts at most this far to its right (a
 # tab stop), and in the caption's column. See _join_split_captions.
 CAPTION_JOIN_MAX_GAP = 72.0  # pt
+# Follow-up R22: a caption continuation line may stick out this far past
+# the caption's own x-span.
+CAPTION_CONTINUATION_X_SLACK = 3.0  # pt
+# Follow-up R22: a continuation line starts at most this many caption-line
+# heights below the caption's last line.
+CAPTION_CONTINUATION_GAP_FACTOR = 1.2
 
 
 def page_tables(
@@ -295,10 +303,14 @@ def page_tables(
     a frame table whose bbox is a few points off the repeated
     `frame_tables` entry on one page. Re-review 2 I2: the caller passes
     `furniture.page_content_rect` for this page, and a rect that does not
-    fit the page is not used here either (no crop)."""
+    fit the page is not used here either (no crop).
+
+    Follow-up R20: `_open_edge_caps` closes a row left open at the page's
+    top or bottom edge, so a continued table keeps its first (or last)
+    row."""
     frame_tables = frame_tables or []
     found = []
-    with pdfplumber.open(pdf_path) as pl_doc:
+    with pdfplumber.open(pdf_path) as pl_doc, fitz.open(pdf_path) as fitz_doc:
         pl_page = pl_doc.pages[page_number - 1]
         crop = None
         content_rect = furniture_lib.page_content_rect(
@@ -311,12 +323,22 @@ def page_tables(
                 pl_page = pl_page.crop(crop)
             else:
                 crop = None
-        for table in pl_page.find_tables():
+        caps = _open_edge_caps(pl_page, crop)
+        chars = None
+        for table in pl_page.find_tables({"explicit_horizontal_lines": caps} if caps else {}):
             if furniture_lib.matches_any_frame(table.bbox, frame_tables):
                 continue
             if crop is not None and _is_content_frame(table.bbox, crop):
                 continue
-            raw_rows = table.extract()
+            # Follow-up R18: cell text from PyMuPDF's characters, decoded
+            # like the body text (pdfplumber leaves "(cid:415)" and Symbol
+            # codes, and splits a subscript onto its own line).
+            if chars is None:
+                chars = glyphs.page_chars(fitz_doc[page_number - 1])
+            raw_rows = []
+            for row in table.rows:
+                texts = glyphs.cell_texts(chars, row.cells)
+                raw_rows.append([None if cell is None else text for cell, text in zip(row.cells, texts)])
             real = [cell for row in raw_rows for cell in row if cell is not None]
             filled = sum(1 for cell in real if str(cell).strip())
             found.append({
@@ -327,6 +349,62 @@ def page_tables(
                 "filled_fraction": filled / len(real) if real else 0.0,
             })
     return found
+
+
+# Follow-up R20: rule ends within this many points count as one y, and a
+# horizontal rule within it closes them.
+OPEN_EDGE_TOLERANCE = 1.0  # pt
+
+
+def _end_is_open(h_edges: list[dict], x: float, y: float) -> bool:
+    """True when no horizontal edge touches the point (`x`, `y`): a
+    vertical rule's end there closes no cell."""
+    return not any(
+        abs(e["top"] - y) <= OPEN_EDGE_TOLERANCE
+        and e["x0"] - OPEN_EDGE_TOLERANCE <= x <= e["x1"] + OPEN_EDGE_TOLERANCE
+        for e in h_edges
+    )
+
+
+def _open_edge_caps(pl_page, crop: list[float] | None = None) -> list[dict]:
+    """Follow-up R20: cap rules for a table row left open at the page edge.
+
+    A vertical rule's end is open when no horizontal edge touches it. Where
+    at least two vertical rules have an open top end at one y at or above
+    the page's first word (or an open bottom end at or below its last
+    word), the row between that y and the next rule has no closing edge,
+    and pdfplumber drops it. Each such y gives an explicit horizontal line
+    across just those vertical rules (so it can not cut another table). A
+    box whose sides end on its own top edge has no open end. A y on the
+    crop's own top or bottom edge is the content frame, not a row edge,
+    and gets no cap."""
+    v_edges = [e for e in pl_page.edges if e["orientation"] == "v"]
+    h_edges = [e for e in pl_page.edges if e["orientation"] == "h"]
+    words = pl_page.extract_words()
+    if len(v_edges) < 2 or not words:
+        return []
+    text_top = min(w["top"] for w in words)
+    text_bottom = max(w["bottom"] for w in words)
+    caps = []
+    for key, beyond_text in (
+        ("top", lambda y: y <= text_top + OPEN_EDGE_TOLERANCE),
+        ("bottom", lambda y: y >= text_bottom - OPEN_EDGE_TOLERANCE),
+    ):
+        groups: dict[int, list[dict]] = {}
+        for e in v_edges:
+            if _end_is_open(h_edges, e["x0"], e[key]):
+                groups.setdefault(round(e[key]), []).append(e)
+        for y, group in groups.items():
+            if len(group) < 2 or not beyond_text(y):
+                continue
+            if crop is not None and (abs(y - crop[1]) <= OPEN_EDGE_TOLERANCE or abs(y - crop[3]) <= OPEN_EDGE_TOLERANCE):
+                continue
+            x0, x1 = min(e["x0"] for e in group), max(e["x1"] for e in group)
+            caps.append({
+                "x0": x0, "x1": x1, "top": y, "bottom": y, "width": x1 - x0, "height": 0,
+                "orientation": "h", "object_type": "line",
+            })
+    return caps
 
 
 def _is_content_frame(table_bbox, rect) -> bool:
@@ -599,6 +677,20 @@ def line_in_region(line_bbox, region_bbox, threshold: float = LINE_OVERLAP_THRES
     return _overlap_ratio(line_bbox, region_bbox) > threshold
 
 
+# Follow-up R19: a fill channel at or above this counts as white.
+INVISIBLE_FILL_MIN = 0.98
+
+
+def is_invisible_drawing(drawing: dict) -> bool:
+    """Follow-up R19: True for a drawing that paints nothing visible on a
+    white page -- a fill with no stroke, and the fill white. Word paints
+    such rects behind body text; they are not figure evidence."""
+    fill = drawing.get("fill")
+    if drawing.get("color") is not None or not fill:
+        return False
+    return all(channel >= INVISIBLE_FILL_MIN for channel in fill)
+
+
 def detect_figure_regions_with_exclusions(
     page, page_number: int, pdf_path: Path,
     frame_tables: list[dict] | None = None,
@@ -614,7 +706,8 @@ def detect_figure_regions_with_exclusions(
 
     `excluded_regions`: Task A5b -- every drawing/cluster a filter removed,
     `[{"bbox": [...], "reason": "frame_drawing"|"repeated_drawing"|"tiny"|
-    "text_box"|"furniture_band"|"table_overlap"|"grid_table"}]`, sorted the same way.
+    "text_box"|"furniture_band"|"table_overlap"|"grid_table"|"invisible_drawing"}]`,
+    sorted the same way.
     A "grid_table" entry is a pdfplumber table that is a chart's grid; its
     cluster is in `regions`. The page's
     repeated drawings give one summary entry (union bbox plus `count`), not
@@ -646,6 +739,9 @@ def detect_figure_regions_with_exclusions(
             continue
         if _matches_repeated_drawing(d, bbox, repeated_drawings):
             repeated_bboxes.append(bbox)
+            continue
+        if is_invisible_drawing(d):
+            excluded_regions.append({"bbox": bbox, "reason": "invisible_drawing"})
             continue
         significant.append(d)
     if repeated_bboxes:
@@ -718,9 +814,56 @@ def detect_figure_regions_with_exclusions(
             for raw in group:
                 excluded_regions.append({"bbox": padded(raw), "reason": "text_box"})
 
+    _absorb_edge_labels(regions, page_lines)
     regions.sort(key=lambda r: r["bbox"][1])
     excluded_regions.sort(key=lambda r: r["bbox"][1])
     return regions, excluded_regions
+
+
+# Follow-up R22: a label line is at most this long, and within this gap of
+# a region's edge.
+EDGE_LABEL_MAX_CHARS = 16
+EDGE_LABEL_MAX_WORDS = 2
+EDGE_LABEL_MAX_GAP = 6.0  # pt
+
+
+def _rect_gap(a, b) -> float:
+    """The distance between two bboxes (0 when they touch or overlap)."""
+    dx = max(0.0, max(a[0], b[0]) - min(a[2], b[2]))
+    dy = max(0.0, max(a[1], b[1]) - min(a[3], b[3]))
+    return max(dx, dy)
+
+
+def _absorb_edge_labels(regions: list[dict], page_lines: list[dict]) -> None:
+    """Follow-up R22: grow each region over the short label lines printed
+    just outside it ("CW", "Unom", "10%"). A label line has at most
+    EDGE_LABEL_MAX_CHARS characters and EDGE_LABEL_MAX_WORDS words, is not
+    a caption, is not already majority-inside a region, lies within
+    EDGE_LABEL_MAX_GAP of the region, and its y-range overlaps the
+    region's. The region is the drawing padded by REGION_PADDING, so a
+    label under an axis that reaches into the padding qualifies. Known
+    limit: a short body line printed that close to a drawing qualifies
+    too; a line at normal spacing above or below a figure does not. A
+    label goes to the nearest region. Changes `regions` in place."""
+    if not regions:
+        return
+    for line in page_lines:
+        text = line["text"]
+        if len(text) > EDGE_LABEL_MAX_CHARS or len(text.split()) > EDGE_LABEL_MAX_WORDS:
+            continue
+        if CAPTION_PATTERN.match(text):
+            continue
+        if any(line_in_region(line["bbox"], r["bbox"]) for r in regions):
+            continue
+        beside = [
+            r for r in regions
+            if line["bbox"][1] < r["bbox"][3] and line["bbox"][3] > r["bbox"][1]
+            and _rect_gap(line["bbox"], r["bbox"]) <= EDGE_LABEL_MAX_GAP
+        ]
+        if not beside:
+            continue
+        region = min(beside, key=lambda r: _rect_gap(line["bbox"], r["bbox"]))
+        region["bbox"] = _union_bbox([region["bbox"], list(line["bbox"])])
 
 
 def detect_figure_regions(
@@ -751,13 +894,13 @@ def _page_lines(page) -> list[dict]:
     state with extract_text.py's own block/line extraction), matching this
     codebase's existing convention of small independent derivations over
     cross-script imports."""
+    symbol_fonts = glyphs.page_symbol_fonts(page)  # follow-up R18
     lines = []
     for block in page.get_text("dict").get("blocks", []):
         if block.get("type") != 0:
             continue
         for line in block.get("lines", []):
-            spans_text = "".join(span["text"] for span in line.get("spans", []))
-            stripped = spans_text.strip()
+            stripped = glyphs.line_text(line, symbol_fonts).strip()
             if not stripped:
                 continue
             lines.append({"text": stripped, "bbox": list(line["bbox"])})
@@ -868,9 +1011,78 @@ def find_caption_line(page, bbox: list[float], distance: float = CAPTION_SEARCH_
     lines = _join_split_captions(_page_lines(page), bbox)
     # Follow-up R17: the nearest figure caption wins over a "Table n"
     # caption; a table caption is used only when no figure caption is near.
-    return _nearest_caption_line(
+    caption = _nearest_caption_line(
         lines, bbox, distance, is_figure_caption, edge_slack=CAPTION_EDGE_SLACK
     ) or _nearest_caption_line(lines, bbox, distance, CAPTION_PATTERN.match, edge_slack=CAPTION_EDGE_SLACK)
+    # Follow-up R22: a caption that wraps keeps its next line(s).
+    return _extend_caption(caption, lines, bbox) if caption else None
+
+
+# Follow-up R22: at most this many continuation lines join a caption.
+CAPTION_MAX_CONTINUATION_LINES = 2
+
+
+# Follow-up R22: a centred continuation line's center is within this
+# fraction of the caption's width of the caption's center.
+CAPTION_CENTER_FRACTION = 0.25
+
+
+def _continues_caption_layout(caption: dict, line: dict) -> bool:
+    """Follow-up R22: True when `line` is laid out as a caption's wrapped
+    line -- centred under the caption, or starting at the caption title's
+    x (a hanging indent after "Fig. 11"; the title's x is known when the
+    caption was joined from a number line and a title line, R17). A line
+    flush with the caption's left edge is body text, not a continuation."""
+    x0, _y0, x1, _y1 = caption["bbox"]
+    width = x1 - x0
+    caption_center = (x0 + x1) / 2
+    line_center = (line["bbox"][0] + line["bbox"][2]) / 2
+    if abs(line["bbox"][0] - x0) > CAPTION_CONTINUATION_X_SLACK and abs(line_center - caption_center) <= CAPTION_CENTER_FRACTION * width:
+        return True
+    parts = caption.get("parts", [])
+    return len(parts) >= 2 and abs(line["bbox"][0] - parts[1][0]) <= CAPTION_CONTINUATION_X_SLACK
+
+
+def _extend_caption(caption: dict, lines: list[dict], image_bbox: list[float]) -> dict:
+    """Follow-up R22: `caption` with its wrapped continuation lines joined.
+
+    A continuation line starts at most CAPTION_CONTINUATION_GAP_FACTOR
+    caption-line heights below the
+    caption's last line (line boxes may overlap by the same slack), lies inside the caption's x-span
+    (CAPTION_CONTINUATION_X_SLACK slack), is laid out as a wrapped caption
+    line (`_continues_caption_layout`), does not end with a colon (a
+    lead-in such as "Acceptance criteria:"), is not itself a caption, and
+    does not lie in the image's y-range. It is taken only while the caption text does not
+    end with a full stop. The result keeps `parts` (every source line
+    bbox), which extract_text excludes from the body. Returns `caption`
+    unchanged when no line qualifies."""
+    current = caption
+    for _ in range(CAPTION_MAX_CONTINUATION_LINES):
+        if current["text"].rstrip().endswith("."):
+            break
+        x0, _y0, x1, y1 = current["bbox"]
+        last_part = current.get("parts", [current["bbox"]])[-1]
+        max_gap = CAPTION_CONTINUATION_GAP_FACTOR * (last_part[3] - last_part[1])
+        candidates = [
+            line for line in lines
+            if line is not caption
+            and -CAPTION_CONTINUATION_X_SLACK <= line["bbox"][1] - y1 <= max_gap
+            and line["bbox"][0] >= x0 - CAPTION_CONTINUATION_X_SLACK
+            and line["bbox"][2] <= x1 + CAPTION_CONTINUATION_X_SLACK
+            and not CAPTION_PATTERN.match(line["text"])
+            and not line["text"].rstrip().endswith(":")
+            and (line["bbox"][1] >= image_bbox[3] or line["bbox"][3] <= image_bbox[1])
+            and _continues_caption_layout(caption, line)
+        ]
+        if not candidates:
+            break
+        nxt = min(candidates, key=lambda line: line["bbox"][1])
+        current = {
+            "text": f"{current['text'].rstrip()} {nxt['text']}",
+            "bbox": [min(x0, nxt["bbox"][0]), current["bbox"][1], max(x1, nxt["bbox"][2]), nxt["bbox"][3]],
+            "parts": [*current.get("parts", [current["bbox"]]), list(nxt["bbox"])],
+        }
+    return current
 
 
 def _nearest_caption_line(
