@@ -110,7 +110,7 @@ class TestUnparsedNumberedLines:
         assert unparsed == ["4 Orphan title with nothing after it"]
 
     def test_footer_lines_are_not_numbered_lines(self):
-        lines = ["12345678", "04", "2 ( 1 2 0 )", "1 Intro .......... 3"]
+        lines = ["12345678", "07", "2 ( 1 2 0 )", "1 Intro .......... 3"]
         entries, unparsed = toc.parse_toc_page_lines(
             lines, [780.0, 780.0, 784.0, 100.0]
         )
