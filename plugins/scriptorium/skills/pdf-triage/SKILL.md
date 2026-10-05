@@ -48,7 +48,8 @@ the same JSON to stdout.
       {"bbox": [24.0, 24.0, 588.0, 768.0], "type": "s", "page_count": 11}
     ],
     "image_xrefs": [4],
-    "content_rect": null
+    "content_rect": null,
+    "content_rect_page_size": null
   },
   "furniture_text": "Doc No. SYN-FUR-0001\nRev. B\npage 1 (11)"
 }
@@ -183,6 +184,13 @@ no printed TOC found.
     triage, `extract-text`, `lib/figures.py`'s cluster band test, the
     merge filter and the gates all use it. Without a content rect the
     bands are the top and bottom 12% of the page.
+  - `content_rect_page_size` (re-review 2 I2): `[width, height]` of the
+    most common body page size, the size `content_rect` was measured on,
+    or `null` with no content rect. `lib/furniture.py`'s
+    `page_content_rect` gives a page the rect only when the page has this
+    size (within 3 pt) and the rect fits inside it. A page of another size
+    (a landscape page in a portrait document) has the 12% bands and its
+    tables are not cropped to the rect.
 - `furniture_text`: the verbatim (unmasked) text of the matched furniture
   lines on the document's first page, top-to-bottom, newline-joined. `null`
   if no line furniture was detected.

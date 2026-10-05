@@ -278,7 +278,10 @@ def output_repeat_threshold(doc_data: dict) -> int:
     return max(OUTPUT_REPEAT_MIN_COUNT, math.ceil(OUTPUT_REPEAT_MIN_FRACTION * body))
 
 
-def check_furniture_absent(doc_data: dict, furniture: dict, output_dir: Path, page_heights: dict[int, float] | None = None) -> dict:
+def check_furniture_absent(
+    doc_data: dict, furniture: dict, output_dir: Path, page_heights: dict[int, float] | None = None,
+    page_widths: dict[int, float] | None = None,
+) -> dict:
     """Task A9: no page furniture (pdf-triage's `triage.json["furniture"]`)
     survived into the merged elements or the assembled output.
 
@@ -309,6 +312,7 @@ def check_furniture_absent(doc_data: dict, furniture: dict, output_dir: Path, pa
     all_patterns = {p["masked"] for p in furniture.get("line_patterns", [])}
     masked_patterns = {m for m in all_patterns if not furniture_lib.is_digit_only_pattern(m)}
     page_heights = page_heights or {}
+    page_widths = page_widths or {}
     frame_bboxes = [f["bbox"] for f in furniture.get("frame_tables", [])]
     offenders = []
 
@@ -321,7 +325,10 @@ def check_furniture_absent(doc_data: dict, furniture: dict, output_dir: Path, pa
             for el in page.get("elements", []):
                 el_type = el.get("type")
                 patterns = furniture_lib.patterns_for_element(
-                    all_patterns, el.get("bbox"), page_heights.get(page_number), furniture_lib.content_rect(furniture)
+                    all_patterns, el.get("bbox"), page_heights.get(page_number),
+                    furniture_lib.page_content_rect(
+                        furniture, page_widths.get(page_number), page_heights.get(page_number)
+                    ),
                 )
                 if el_type in ("heading", "paragraph", "list_item"):
                     for hit in furniture_lib.furniture_line_hits(el.get("text") or "", patterns):
@@ -577,6 +584,7 @@ def main() -> None:
         print(f"error: {elements_path} not found — run extraction first", file=sys.stderr)
         sys.exit(1)
     doc_data = elements_lib.load_doc(elements_path)
+    page_sizes = furniture_lib.pdf_page_sizes(input_path) if input_format == "pdf" else {}
 
     checks = [
         check_page_count_match(doc_data, true_page_count),
@@ -590,7 +598,8 @@ def main() -> None:
             doc_data,
             _load_json(paths.triage_json(args.doc)).get("furniture") or furniture_lib.empty_furniture(),
             paths.output_dir(args.doc),
-            furniture_lib.pdf_page_heights(input_path) if input_format == "pdf" else {},
+            {n: s[1] for n, s in page_sizes.items()},
+            {n: s[0] for n, s in page_sizes.items()},
         ),
         check_toc_headings_match(
             doc_data,

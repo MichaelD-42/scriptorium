@@ -99,10 +99,12 @@ def classify_page(page) -> dict:
     }
 
 
-def _find_repeated_lines(document, content_rect: list[float] | None = None) -> tuple[list[dict], dict]:
+def _find_repeated_lines(document, rect_furniture: dict | None = None) -> tuple[list[dict], dict]:
     """Text lines whose furniture key (`furniture_lib.furniture_key`: no
     whitespace, digit runs as "#") repeats, at the same document edge, on at
-    least LINE_PATTERN_MIN_PAGE_FRACTION of pages.
+    least LINE_PATTERN_MIN_PAGE_FRACTION of pages. `rect_furniture` holds
+    `content_rect` and `content_rect_page_size`; each page's bands use
+    `furniture_lib.page_content_rect` (re-review 2 I2).
 
     Returns `(line_patterns, occurrences)` -- `occurrences` maps each kept
     (masked_text, edge) key to its per-page raw text and y-position, so
@@ -114,6 +116,7 @@ def _find_repeated_lines(document, content_rect: list[float] | None = None) -> t
         height = page.rect.height
         if height <= 0:
             continue
+        content_rect = furniture_lib.page_content_rect(rect_furniture, page.rect.width, height)
         for block in page.get_text("dict").get("blocks", []):
             if block.get("type") != 0:
                 continue
@@ -383,6 +386,22 @@ def _page_line_bboxes(document, body_pages: set[int] | None) -> dict[int, list[l
     return found
 
 
+def _body_page_size(document, body_pages: set[int] | None) -> tuple[float, float] | None:
+    """The most common (width, height) of the body pages (all pages when
+    `body_pages` is None, the first such size on a tie), or None for an
+    empty document."""
+    counts: dict[tuple[float, float], int] = {}
+    for page_number, page in enumerate(document, start=1):
+        if body_pages is not None and page_number not in body_pages:
+            continue
+        size = (round(page.rect.width, 1), round(page.rect.height, 1))
+        counts[size] = counts.get(size, 0) + 1
+    if not counts and document.page_count:
+        first = document[0].rect
+        return first.width, first.height
+    return max(counts, key=counts.get) if counts else None
+
+
 def detect_furniture(document, pdf_path: Path, body_pages: set[int] | None = None) -> tuple[dict, str | None]:
     """Runs once per document (not per page): finds repeated header/footer
     lines, repeated full-page-covering tables and drawings, repeated
@@ -395,18 +414,23 @@ def detect_furniture(document, pdf_path: Path, body_pages: set[int] | None = Non
     image_xrefs = _find_repeated_images(document)
     # Follow-up R10: a repeated inner frame rect moves the bands to the page
     # area outside it, so the line search runs after the drawing search.
-    first = document[0].rect if document.page_count else None
+    # Re-review 2 I2: the rect is measured on the most common body page
+    # size, and that size is stored with it (furniture.page_content_rect).
+    page_size = _body_page_size(document, body_pages)
     content_rect = (
         furniture_lib.find_content_rect(
             frame_drawings, repeated_drawings,
             len(body_pages) if body_pages is not None else document.page_count,
-            first.width, first.height,
+            page_size[0], page_size[1],
             _page_line_bboxes(document, body_pages),
         )
-        if first is not None
+        if page_size is not None
         else None
     )
-    line_patterns, line_occurrences = _find_repeated_lines(document, content_rect)
+    content_rect_page_size = [page_size[0], page_size[1]] if content_rect else None
+    line_patterns, line_occurrences = _find_repeated_lines(
+        document, {"content_rect": content_rect, "content_rect_page_size": content_rect_page_size}
+    )
 
     furniture = {
         "line_patterns": line_patterns,
@@ -415,6 +439,7 @@ def detect_furniture(document, pdf_path: Path, body_pages: set[int] | None = Non
         "repeated_drawings": repeated_drawings,
         "image_xrefs": image_xrefs,
         "content_rect": content_rect,
+        "content_rect_page_size": content_rect_page_size,
     }
     furniture_text = _furniture_text_for_first_page(line_occurrences)
     return furniture, furniture_text

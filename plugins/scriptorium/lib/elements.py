@@ -103,6 +103,7 @@ def merge_shards(
     page_count: int,
     furniture: dict | None = None,
     page_heights: dict[int, float] | None = None,
+    page_widths: dict[int, float] | None = None,
 ) -> dict[int, dict]:
     """Combine every page's shards into {page_number: page_dict}. A page
     with no body shard yet (extraction incomplete or still in flight) gets
@@ -112,9 +113,12 @@ def merge_shards(
     `furniture` (triage.json["furniture"]) and `page_heights` (PDF page
     heights in points) are optional. With them, an `ocr`/`vision` body
     loses its furniture lines (`remove_furniture_lines`), and the page
-    records `furniture_lines_removed` when that count is above zero."""
+    records `furniture_lines_removed` when that count is above zero.
+    `page_widths` (optional) lets `furniture.page_content_rect` test the
+    page width too."""
     all_patterns = {p["masked"] for p in (furniture or {}).get("line_patterns", [])}
     page_heights = page_heights or {}
+    page_widths = page_widths or {}
     pages: dict[int, dict] = {}
     for n in range(1, page_count + 1):
         body_tier, body_shard = None, None
@@ -147,7 +151,8 @@ def merge_shards(
             furniture_removed = 0
             if all_patterns and body_tier in UNFILTERED_BODY_TIERS:
                 body_elements, furniture_removed = remove_furniture_lines(
-                    body_elements, all_patterns, page_heights.get(n), furniture_lib.content_rect(furniture)
+                    body_elements, all_patterns, page_heights.get(n),
+                    furniture_lib.page_content_rect(furniture, page_widths.get(n), page_heights.get(n)),
                 )
             combined = body_elements + image_elements
             combined.sort(key=lambda e: e.get("bbox", [0, 0, 0, 0])[1])

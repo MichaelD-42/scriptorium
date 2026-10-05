@@ -146,9 +146,43 @@ def find_content_rect(
 
 def content_rect(furniture: dict | None) -> list[float] | None:
     """`furniture["content_rect"]`, or None (no frame, or a triage.json that
-    predates follow-up R10)."""
+    predates follow-up R10). A stage that works on one page asks
+    `page_content_rect` instead."""
     rect = (furniture or {}).get("content_rect")
     return list(rect) if rect and len(rect) == 4 else None
+
+
+def page_content_rect(furniture: dict | None, page_width: float | None, page_height: float | None) -> list[float] | None:
+    """Re-review 2 I2: the content rect for one page, or None.
+
+    Triage measures `content_rect` on the body page size and stores that
+    size as `furniture["content_rect_page_size"]` ([width, height]). The
+    rect is returned only when this page has that size (within
+    FRAME_MATCH_TOLERANCE) and the rect fits inside the page. A landscape
+    page in a portrait document, or a page of another paper size, gets
+    None, so its bands are the 12% bands and its tables are not cropped.
+    A triage.json without the stored size gets the fit test only. An
+    unknown `page_width` (None) skips the width tests.
+
+    Every stage that uses the rect on a page calls this function:
+    `figures.page_tables` and the grid-table reference area, every band
+    caller (triage's line search, extract_text, the merge filter, the
+    gates) and triage."""
+    rect = content_rect(furniture)
+    if rect is None or not page_height or page_height <= 0:
+        return None
+    tolerance = FRAME_MATCH_TOLERANCE
+    size = (furniture or {}).get("content_rect_page_size")
+    if size and len(size) == 2:
+        if abs(size[1] - page_height) > tolerance:
+            return None
+        if page_width and abs(size[0] - page_width) > tolerance:
+            return None
+    if rect[0] < -tolerance or rect[1] < -tolerance or rect[3] > page_height + tolerance:
+        return None
+    if page_width and rect[2] > page_width + tolerance:
+        return None
+    return rect
 
 
 def band_limits(page_height: float, rect: list[float] | None = None) -> tuple[float, float]:
@@ -257,13 +291,18 @@ def strip_furniture_lines(text: str, masked_patterns: set[str]) -> tuple[str, in
     return "\n".join(kept).strip(), removed
 
 
-def pdf_page_heights(pdf_path) -> dict[int, float]:
-    """{page_number: height in points} for a PDF, the geometry the band
-    rule needs."""
+def pdf_page_sizes(pdf_path) -> dict[int, tuple[float, float]]:
+    """{page_number: (width, height) in points} for a PDF, the geometry the
+    band rule and `page_content_rect` need."""
     import fitz  # PyMuPDF
 
     with fitz.open(pdf_path) as doc:
-        return {i: page.rect.height for i, page in enumerate(doc, start=1)}
+        return {i: (page.rect.width, page.rect.height) for i, page in enumerate(doc, start=1)}
+
+
+def pdf_page_heights(pdf_path) -> dict[int, float]:
+    """{page_number: height in points} for a PDF (`pdf_page_sizes`)."""
+    return {n: size[1] for n, size in pdf_page_sizes(pdf_path).items()}
 
 
 def bbox_matches(a, b, tolerance: float = FRAME_MATCH_TOLERANCE) -> bool:

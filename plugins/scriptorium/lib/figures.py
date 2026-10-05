@@ -288,12 +288,17 @@ def page_tables(
     FRAME_TABLE_CONTENT_FRACTION of the rect and matches it within
     FRAME_MATCH_TOLERANCE is the frame again, and is dropped. This catches
     a frame table whose bbox is a few points off the repeated
-    `frame_tables` entry on one page."""
+    `frame_tables` entry on one page. Re-review 2 I2: the caller passes
+    `furniture.page_content_rect` for this page, and a rect that does not
+    fit the page is not used here either (no crop)."""
     frame_tables = frame_tables or []
     found = []
     with pdfplumber.open(pdf_path) as pl_doc:
         pl_page = pl_doc.pages[page_number - 1]
         crop = None
+        content_rect = furniture_lib.page_content_rect(
+            {"content_rect": content_rect}, pl_page.width, pl_page.height
+        )
         if content_rect:
             x0, top, x1, bottom = pl_page.bbox
             crop = [max(content_rect[0], x0), max(content_rect[1], top), min(content_rect[2], x1), min(content_rect[3], bottom)]
@@ -620,6 +625,9 @@ def detect_figure_regions_with_exclusions(
     page_area = page_width * page_height
     if page_area <= 0:
         return [], []
+    # Re-review 2 I2: a rect that does not fit this page is not used for
+    # the band test, the tables or the reference area.
+    content_rect = furniture_lib.page_content_rect({"content_rect": content_rect}, page_width, page_height)
 
     drawings = page.get_drawings()
     significant = []

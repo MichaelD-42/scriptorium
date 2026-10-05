@@ -43,13 +43,15 @@ def main() -> None:
     # Fix wave I5: ocr/vision bodies lose their furniture lines here, with
     # the same band plus pattern rule gates.py checks (lib/furniture.py).
     furniture = furniture_lib.load_furniture(args.doc)
-    page_heights = (
-        furniture_lib.pdf_page_heights(input_path)
+    page_sizes = (
+        furniture_lib.pdf_page_sizes(input_path)
         if input_format == "pdf" and furniture.get("line_patterns")
         else {}
     )
     pages = elements_lib.merge_shards(
-        paths.shards_dir(args.doc), page_count, furniture=furniture, page_heights=page_heights
+        paths.shards_dir(args.doc), page_count, furniture=furniture,
+        page_heights={n: s[1] for n, s in page_sizes.items()},
+        page_widths={n: s[0] for n, s in page_sizes.items()},
     )
     removed = sum(p.get("furniture_lines_removed", 0) for p in pages.values())
     if removed:

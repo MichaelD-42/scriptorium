@@ -170,7 +170,6 @@ def main() -> None:
     frame_tables = furniture.get("frame_tables", [])
     frame_drawings = furniture.get("frame_drawings", [])
     repeated_drawings = furniture.get("repeated_drawings", [])
-    content_rect = furniture_lib.content_rect(furniture)
     furniture_xrefs = set(furniture.get("image_xrefs", []))
     page_roles = furniture_lib.load_page_roles(args.doc)
 
@@ -186,6 +185,7 @@ def main() -> None:
             continue
 
         page = fitz_doc[page_number - 1]
+        content_rect = furniture_lib.page_content_rect(furniture, page.rect.width, page.rect.height)
         image_elements = extract_bitmaps(fitz_doc, page, page_number, assets_dir, furniture_xrefs)
         vector_elements, excluded_regions = extract_vector_regions(
             page, page_number, assets_dir, pdf_path, frame_tables, frame_drawings,

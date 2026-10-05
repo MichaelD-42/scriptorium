@@ -475,7 +475,7 @@ def document_list_marker_levels(
     toc_lookup: dict[str, int],
     heading_size_ranks: dict[float, int],
     page_roles: dict[int, str],
-    content_rect: list[float] | None = None,
+    furniture: dict | None = None,
 ) -> list[float]:
     """Document-wide list-marker x-position clusters (Task A4b's "collect
     the distinct marker x-positions ... across the whole document, sort
@@ -514,6 +514,7 @@ def document_list_marker_levels(
         if page_roles.get(page_number) == "toc":
             continue
         page_height = page.rect.height
+        content_rect = furniture_lib.page_content_rect(furniture, page.rect.width, page_height)
         text_blocks, _ = extract_page_text_blocks(page, body_size)
         for block in text_blocks:
             kept_lines = furniture_filtered_lines(block, furniture_masked, page_height, content_rect)
@@ -736,7 +737,7 @@ def list_item_text_x(item: dict, words: list[tuple]) -> float:
 
 
 def document_heading_size_ranks(
-    fitz_doc, body_size: float, furniture_masked: set[str], content_rect: list[float] | None = None
+    fitz_doc, body_size: float, furniture_masked: set[str], furniture: dict | None = None
 ) -> dict[float, int]:
     """Fallback-path (no TOC) heading-level ranking: every DISTINCT font
     size used by a fallback-candidate bold block anywhere in the document
@@ -767,6 +768,7 @@ def document_heading_size_ranks(
     sizes = set()
     for page in fitz_doc:
         page_height = page.rect.height
+        content_rect = furniture_lib.page_content_rect(furniture, page.rect.width, page_height)
         text_blocks, _ = extract_page_text_blocks(page, body_size)
         for block in text_blocks:
             kept_lines = furniture_filtered_lines(block, furniture_masked, page_height, content_rect)
@@ -885,7 +887,6 @@ def main() -> None:
     frame_drawings = furniture.get("frame_drawings", [])
     repeated_drawings = furniture.get("repeated_drawings", [])
     furniture_masked = {p["masked"] for p in furniture.get("line_patterns", [])}
-    content_rect = furniture_lib.content_rect(furniture)
     furniture_xrefs = set(furniture.get("image_xrefs", []))
     page_roles = furniture_lib.load_page_roles(args.doc)
     toc_lookup = build_toc_heading_lookup(load_toc_entries(args.doc))
@@ -900,7 +901,7 @@ def main() -> None:
     ranking_body_size = args.body_size or 0.0
     if not toc_lookup:
         ranking_body_size = args.body_size if args.body_size else resolve_document_body_size(fitz_doc)
-        heading_size_ranks = document_heading_size_ranks(fitz_doc, ranking_body_size, furniture_masked, content_rect)
+        heading_size_ranks = document_heading_size_ranks(fitz_doc, ranking_body_size, furniture_masked, furniture)
 
     # Task A4b: list-marker x-position levels are document-wide too, for the
     # same cross-batch-consistency reason as heading_size_ranks above --
@@ -911,7 +912,7 @@ def main() -> None:
     # above is harmless in that case.
     list_level_lookup = document_list_marker_levels(
         fitz_doc, ranking_body_size, furniture_masked, toc_lookup, heading_size_ranks, page_roles,
-        content_rect=content_rect,
+        furniture=furniture,
     )
 
     for page_number in page_numbers:
@@ -925,6 +926,8 @@ def main() -> None:
 
         page = fitz_doc[page_number - 1]
         page_height = page.rect.height
+        # Re-review 2 I2: the content rect only on a page it was measured on.
+        content_rect = furniture_lib.page_content_rect(furniture, page.rect.width, page_height)
         text_blocks, body_size = extract_page_text_blocks(page, args.body_size)
         # Page-frame tables (furniture, not real content) are left out by
         # the shared query -- before the overlap-drop below, or a frame
