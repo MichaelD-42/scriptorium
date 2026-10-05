@@ -110,3 +110,30 @@ def test_rows_before_a_bullet_list_are_split():
         "Information",
     ]
     assert elements[-1]["type"] == "list_item"
+
+
+
+def test_short_indented_lead_line_is_its_own_group():
+    """The top of a page that continues a value from the page before:
+    "Selected" in the value column, then the body at the left edge."""
+    def line(x0, y0, x1, text):
+        return {"text": text, "bbox": [x0, y0, x1, y0 + 11], "max_size": 10.0, "bold": False, "masked": text}
+
+    lines = [
+        line(109, 32, 148, "Selected"),
+        line(46, 43, 520, "The component shall not emit compounds that cause fogging in the"),
+        line(46, 54, 90, "cab."),
+    ]
+    groups = extract_text.split_row_groups(lines)
+    assert [" ".join(x["text"] for x in g) for g in groups] == [
+        "Selected",
+        "The component shall not emit compounds that cause fogging in the cab.",
+    ]
+
+
+def test_indented_first_line_of_a_paragraph_stays():
+    def line(x0, y0, x1, text):
+        return {"text": text, "bbox": [x0, y0, x1, y0 + 11], "max_size": 10.0, "bold": False, "masked": text}
+
+    lines = [line(70, 100, 520, "An indented first line that runs to the margin"), line(46, 111, 300, "and goes on.")]
+    assert extract_text.split_row_groups(lines) == [lines]

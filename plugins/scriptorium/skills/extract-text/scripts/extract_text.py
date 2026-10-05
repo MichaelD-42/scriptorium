@@ -286,6 +286,10 @@ _ENUMERATOR_RE = re.compile(
     r"^(?:\d{1,3}[.)]|\(\d{1,3}\)|\([A-Za-z]\)|" + _ROMAN_NUMERAL_MARKER + r"|[A-Za-z]\))(?=\s)"
 )
 
+# Follow-up R27: a lead line (see split_row_groups) ends before this
+# fraction of the block's width.
+ROW_LEAD_MAX_WIDTH_FRACTION = 0.6
+
 # Marker x-positions within this many points count as the same indent level
 # (Task A4b) -- same tolerance convention as FRAME_MATCH_TOLERANCE/A5's
 # other ~3pt geometry tolerances elsewhere in this pipeline.
@@ -457,7 +461,10 @@ def parse_block_list_items(kept_lines: list[dict], list_level_lookup: list[float
             group_bbox = list(group[0]["bbox"])
             for line in group[1:]:
                 group_bbox = _union_bbox(group_bbox, line["bbox"])
-            lead_paragraphs.append({"type": "paragraph", "text": " ".join(line["text"] for line in group), "bbox": group_bbox})
+            lead_paragraph = {"type": "paragraph", "text": " ".join(line["text"] for line in group), "bbox": group_bbox}
+            if row_value_x(group) is not None:
+                lead_paragraph["row_value_x"] = row_value_x(group)
+            lead_paragraphs.append(lead_paragraph)
         rest = parse_block_list_items(kept_lines[later:], list_level_lookup) or []
         return [*lead_paragraphs, *rest]
 
@@ -615,8 +622,26 @@ def split_row_groups(kept_lines: list[dict]) -> list[list[dict]]:
     if len(kept_lines) < 2:
         return [kept_lines]
     left = min(line["bbox"][0] for line in kept_lines)
+    right = max(line["bbox"][2] for line in kept_lines)
     groups: list[list[dict]] = []
-    kind = None  # "row" or "body"
+    kind = None  # "row", "lead" or "body"
+    # A short line at the top of the block, indented past its left edge
+    # and followed by a line at the left edge, is its own group: the end
+    # of a value continued from the previous page ("Selected"). A first
+    # line indented as a paragraph indent runs to the margin and stays.
+    first, second = kept_lines[0], kept_lines[1]
+    if (
+        first["bbox"][0] > left + LIST_MARKER_X_TOLERANCE
+        and first["bbox"][2] < left + ROW_LEAD_MAX_WIDTH_FRACTION * (right - left)
+        and abs(second["bbox"][0] - left) <= LIST_MARKER_X_TOLERANCE
+        and not _same_row(first, second)
+    ):
+        groups.append([first])
+        kind = "lead"
+        kept_lines = kept_lines[1:]
+        start_offset = 1
+    else:
+        start_offset = 0
     for i, line in enumerate(kept_lines):
         prev = kept_lines[i - 1] if i > 0 else None
         nxt = kept_lines[i + 1] if i + 1 < len(kept_lines) else None
@@ -632,9 +657,17 @@ def split_row_groups(kept_lines: list[dict]) -> list[list[dict]]:
         else:
             groups.append([line])
             kind = "body"
-    if not any(len(g) > 1 and _same_row(g[0], g[1]) for g in groups):
+    if not start_offset and not any(len(g) > 1 and _same_row(g[0], g[1]) for g in groups):
         return [kept_lines]
     return groups
+
+
+def row_value_x(group: list[dict]) -> float | None:
+    """Follow-up R27: the value column's x of a row group (the x0 of the
+    second line on the row's y), or None for a group that is not a row."""
+    if len(group) > 1 and _same_row(group[0], group[1]):
+        return group[1]["bbox"][0]
+    return None
 
 
 def merge_list_and_paragraph_blocks(
@@ -771,11 +804,15 @@ def merge_list_and_paragraph_blocks(
             groups = split_row_groups(kept_lines)
             if len(groups) > 1:
                 for group in groups:
-                    elements.append({
+                    paragraph = {
                         "type": "paragraph",
                         "text": " ".join(line["text"] for line in group),
                         "bbox": compute_kept_bbox({"bbox": block["bbox"], "lines": []}, group),
-                    })
+                    }
+                    value_x = row_value_x(group)
+                    if value_x is not None:
+                        paragraph["row_value_x"] = value_x
+                    elements.append(paragraph)
                 open_item, open_item_text_x = None, None
                 i += 1
                 continue

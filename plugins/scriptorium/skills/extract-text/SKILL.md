@@ -73,7 +73,10 @@ document.
   Selected" above the requirement text) is split into one paragraph per
   row and one for the body, so the label's value is its own element. A
   row is two or more lines side by side at one y; a line indented past
-  the block's left edge continues the row.
+  the block's left edge continues the row. A short line at the top of a
+  block, indented past its left edge and followed by a line at the left
+  edge, is its own paragraph (a value continued from the previous page).
+  A row paragraph records `row_value_x`, its value column's x.
 - Follow-up R24: a block that mostly overlaps a table loses only its lines
   inside the table; a caption line printed right above the table stays.
 - Follow-up R25: a block that opens with the last wrapped line of the
