@@ -19,6 +19,14 @@ PDF, PowerPoint (`.pptx`), Word (`.docx`), Excel (`.xlsx`), HTML (`.html`),
 and standalone images (`.png`/`.jpg`/`.jpeg`/`.webp`/`.tiff`) are
 implemented today.
 
+## 0.4.3
+
+- **Explicit line breaks** (R28): a line the source broke on purpose (it
+  ends a sentence, or is a short line, and the next word would have fit)
+  ends its paragraph, instead of being joined like wrapped text.
+- **Taller bullet glyphs** (R28): a bullet drawn in a larger font than its
+  text is paired with the text by their common baseline.
+
 ## 0.4.2
 
 Second round of fixes from the golden-document run (follow-ups R23–R27):
