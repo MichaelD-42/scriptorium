@@ -19,6 +19,26 @@ PDF, PowerPoint (`.pptx`), Word (`.docx`), Excel (`.xlsx`), HTML (`.html`),
 and standalone images (`.png`/`.jpg`/`.jpeg`/`.webp`/`.tiff`) are
 implemented today.
 
+## 0.4.4
+
+Line breaks the R28 rule still missed or added, from the golden-document
+run of 2026-10-06 (follow-up R29):
+
+- **Bold label lines**: a whole bold line after a plain line (or the
+  reverse) is its own paragraph ("… 0,6 V" / "Verification method").
+- **List-item lines**: a line that starts a list item ("1. …", "- …",
+  "– …") is a new paragraph after a line that ends a sentence (also before
+  a closing bracket: "etc.)") or leaves room for the marker.
+- **Inline bullets**: an item printed inline with its bullet and no hanging
+  indent no longer absorbs the paragraph after the list.
+- **Line-end hyphens**: "10-" + "second" joins as "10-second", not
+  "10- second".
+- **Paragraphs split into blocks**: a paragraph that PyMuPDF splits into one
+  block per line is joined again when the line before is full and the gap
+  is a line gap.
+- **List indent**: a run of list items is indented relative to its first
+  item, so a list that starts at level 3 is no longer a Markdown code block.
+
 ## 0.4.3
 
 - **Explicit line breaks** (R28): a line the source broke on purpose (it
