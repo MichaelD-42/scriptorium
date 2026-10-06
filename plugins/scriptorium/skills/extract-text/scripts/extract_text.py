@@ -775,6 +775,50 @@ def split_hard_breaks(lines: list[dict], right_edge: float | None) -> list[list[
     return groups
 
 
+# Follow-up R29: PyMuPDF can put each line of one paragraph in a block of
+# its own (golden run p71: 3.8 pt between those lines, 14.2 pt between
+# paragraphs, line height 11.2 pt). A gap of at most this fraction of a line
+# height is a line gap, not a paragraph gap.
+SPLIT_BLOCK_MAX_GAP_FRACTION = 0.5
+
+
+def continues_paragraph(last: dict, first: dict, right_edge: float | None) -> bool:
+    """Follow-up R29: whether `first`, the first line of a block, continues
+    the paragraph whose last line is `last` (the previous block's): same x,
+    a line gap (SPLIT_BLOCK_MAX_GAP_FRACTION), `last` is full (`first`'s
+    first word did not fit on it) and does not end a sentence, and no
+    explicit break (`is_hard_break`: bold change, list marker). A full line
+    that ends a sentence can end a paragraph: the page's longest line is
+    always "full"."""
+    if right_edge is None or abs(first["bbox"][0] - last["bbox"][0]) > LIST_MARKER_X_TOLERANCE:
+        return False
+    if _ends_sentence(last["text"]):
+        return False
+    gap = first["bbox"][1] - last["bbox"][3]
+    if gap < 0 or gap > SPLIT_BLOCK_MAX_GAP_FRACTION * (last["bbox"][3] - last["bbox"][1]):
+        return False
+    if right_edge - last["bbox"][2] > HARD_BREAK_WORD_FACTOR * _first_word_width(first) + HARD_BREAK_SLACK:
+        return False
+    return not is_hard_break(last, first, right_edge, right_edge, max(right_edge - last["bbox"][0], 1.0))
+
+
+def _join_paragraph(elements: list[dict], last_line: dict | None, lines: list[dict], right_edge: float | None) -> bool:
+    """Follow-up R29: append `lines` to the paragraph that ends `elements`
+    when they continue it (`continues_paragraph`); True when joined."""
+    if (
+        last_line is None
+        or not elements
+        or elements[-1]["type"] != "paragraph"
+        or "row_value_x" in elements[-1]
+        or not continues_paragraph(last_line, lines[0], right_edge)
+    ):
+        return False
+    elements[-1]["text"] = elements_lib.join_text(elements[-1]["text"], join_line_texts(lines))
+    for line in lines:
+        elements[-1]["bbox"] = _union_bbox(elements[-1]["bbox"], line["bbox"])
+    return True
+
+
 def paragraph_groups(kept_lines: list[dict], right_edge: float | None) -> list[list[dict]]:
     """The paragraphs of a paragraph block: label/value rows first
     (`split_row_groups`, R27), then explicit line breaks inside every group
@@ -852,11 +896,16 @@ def merge_list_and_paragraph_blocks(
     open_item: dict | None = None
     open_item_text_x: float | None = None
 
+    # Follow-up R29: the last line of the plain paragraph that ends
+    # `elements`, set only by a block that ends in one (see _join_paragraph).
+    last_paragraph_line: dict | None = None
+
     i, n = 0, len(blocks_and_lines)
     while i < n:
         block, kept_lines = blocks_and_lines[i]
         first_line = kept_lines[0]
         stripped_first = first_line["text"].strip()
+        prev_paragraph_line, last_paragraph_line = last_paragraph_line, None
 
         if (
             len(kept_lines) == 1
@@ -930,6 +979,8 @@ def merge_list_and_paragraph_blocks(
         if element is not None and element["type"] == "paragraph":
             groups = paragraph_groups(kept_lines, right_edge)
             if len(groups) > 1:
+                if _join_paragraph(elements, prev_paragraph_line, groups[0], right_edge):
+                    groups = groups[1:]
                 for group in groups:
                     paragraph = {
                         "type": "paragraph",
@@ -940,6 +991,8 @@ def merge_list_and_paragraph_blocks(
                     if value_x is not None:
                         paragraph["row_value_x"] = value_x
                     elements.append(paragraph)
+                if "row_value_x" not in elements[-1]:
+                    last_paragraph_line = groups[-1][-1] if groups else kept_lines[-1]
                 open_item, open_item_text_x = None, None
                 i += 1
                 continue
@@ -956,7 +1009,11 @@ def merge_list_and_paragraph_blocks(
             i += 1
             continue
 
-        if element is not None:
+        if element is not None and element["type"] == "paragraph":
+            if not _join_paragraph(elements, prev_paragraph_line, kept_lines, right_edge):
+                elements.append(element)
+            last_paragraph_line = kept_lines[-1]
+        elif element is not None:
             elements.append(element)
 
         if element is not None and element["type"] == "list_item":
