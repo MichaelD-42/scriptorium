@@ -488,6 +488,14 @@ def parse_block_list_items(
     elements: list[dict] = []
     open_item: dict | None = None
     open_item_text_x: float | None = None
+    # Follow-up R29: an item whose marker is printed inline with its text
+    # ("• Shrink hoses ...") and that has no hanging indent has its wrapped
+    # lines at the marker's own x, the same x as a paragraph after the list.
+    # There, a line at that x continues the item only when the line before
+    # it wraps (is_hard_break is false).
+    open_item_inline = False
+    block_right = max(line["bbox"][2] for line in kept_lines)
+    block_width = max(block_right - min(line["bbox"][0] for line in kept_lines), 1.0)
     paragraph_lines: list[dict] = []
 
     def flush_paragraph() -> None:
@@ -517,11 +525,21 @@ def parse_block_list_items(
             item = {"type": "list_item", "marker": marker, "level": level, "text": first_text, "bbox": item_bbox}
             elements.append(item)
             open_item, open_item_text_x = item, text_x
+            open_item_inline = consumed == 1
             i += consumed
             continue
 
         line = kept_lines[i]
-        if open_item is not None and abs(line["bbox"][0] - open_item_text_x) <= LIST_MARKER_X_TOLERANCE:
+        breaks_inline_item = (
+            open_item_inline
+            and right_edge is not None
+            and is_hard_break(kept_lines[i - 1], line, right_edge, block_right, block_width)
+        )
+        if (
+            open_item is not None
+            and abs(line["bbox"][0] - open_item_text_x) <= LIST_MARKER_X_TOLERANCE
+            and not breaks_inline_item
+        ):
             open_item["text"] = elements_lib.join_text(open_item["text"], line["text"])
             open_item["bbox"] = _union_bbox(open_item["bbox"], line["bbox"])
             i += 1
