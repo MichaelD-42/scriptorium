@@ -780,6 +780,13 @@ def split_hard_breaks(lines: list[dict], right_edge: float | None) -> list[list[
 # paragraphs, line height 11.2 pt). A gap of at most this fraction of a line
 # height is a line gap, not a paragraph gap.
 SPLIT_BLOCK_MAX_GAP_FRACTION = 0.5
+# The line before must also fill at least this fraction of the width from
+# its x to the page's right edge. On a page that is mostly table, the right
+# edge comes from a few short lines (golden run p91: "1)Broadcast",
+# "2)Free band" fill 53 %), and each of them would otherwise look full. A
+# real wrap before a long word can leave a fifth empty (p76: 83 % before
+# "component/system,").
+SPLIT_BLOCK_MIN_FILL = 0.6
 
 
 def continues_paragraph(last: dict, first: dict, right_edge: float | None) -> bool:
@@ -793,6 +800,8 @@ def continues_paragraph(last: dict, first: dict, right_edge: float | None) -> bo
     if right_edge is None or abs(first["bbox"][0] - last["bbox"][0]) > LIST_MARKER_X_TOLERANCE:
         return False
     if _ends_sentence(last["text"]):
+        return False
+    if last["bbox"][2] - last["bbox"][0] < SPLIT_BLOCK_MIN_FILL * (right_edge - last["bbox"][0]):
         return False
     gap = first["bbox"][1] - last["bbox"][3]
     if gap < 0 or gap > SPLIT_BLOCK_MAX_GAP_FRACTION * (last["bbox"][3] - last["bbox"][1]):

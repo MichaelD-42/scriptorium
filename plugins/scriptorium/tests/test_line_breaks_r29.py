@@ -296,6 +296,19 @@ class TestSplitParagraphBlocks:
             "Transients are measured when opening or closing switch S1, and when switching S2 between its different states.",
         ]
 
+    def test_wrap_before_a_long_word_joins(self):
+        # p76: the line fills 83 % of the width; "component/system," did
+        # not fit on it.
+        first = _line(46.2, 81.6, 468.5, "Scope: This pulse originates from the switching off of an inductive load in parallel with the tested")
+        second = _line(46.2, 96.6, 318.4, "component/system, e.g. electric valves without clamp diodes.")
+        first["bbox"][3], second["bbox"][3] = 92.8, 107.8
+        blocks = [
+            ({"bbox": list(first["bbox"]), "lines": [first]}, [first]),
+            ({"bbox": list(second["bbox"]), "lines": [second]}, [second]),
+        ]
+        elements = extract_text.merge_list_and_paragraph_blocks(blocks, 10.0, {}, {}, [46.2], right_edge=553.5)
+        assert len(elements) == 1
+
     def test_full_line_followed_by_paragraph_gap_stays_split(self):
         first = _line(
             46.2,
@@ -312,6 +325,19 @@ class TestSplitParagraphBlocks:
             blocks, 10.0, {}, {}, [46.2], right_edge=530.5
         )
         assert len(elements) == 2
+
+
+class TestSplitParagraphBlocksSparsePage:
+    def test_short_lines_on_a_table_page_stay_apart(self):
+        # p91: the page is a table; the right edge comes from these three
+        # footnote lines alone, so each one looks "full" against it.
+        rows = [(539.7, 113.4, "1)Broadcast"), (554.7, 113.9, "2)Free band"), (569.7, 157.6, "3)Mobile services band")]
+        blocks = []
+        for y0, x1, text in rows:
+            line = _line(64.2, y0, x1, text)
+            blocks.append(({"bbox": list(line["bbox"]), "lines": [line]}, [line]))
+        elements = extract_text.merge_list_and_paragraph_blocks(blocks, 10.0, {}, {}, [46.2], right_edge=157.6)
+        assert [e["text"] for e in elements] == ["1)Broadcast", "2)Free band", "3)Mobile services band"]
 
 
 class TestListIndentRelativeToRun:
