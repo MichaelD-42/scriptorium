@@ -127,6 +127,13 @@ def compute_kept_bbox(block: dict, kept_lines: list[dict]) -> list[float]:
     ]
 
 
+def join_line_texts(lines: list[dict]) -> str:
+    """Follow-up R29: the text of consecutive `lines`, joined the way the
+    source reads (`elements_lib.join_text`: no space after a line-end
+    hyphen)."""
+    return elements_lib.join_texts(line["text"] for line in lines)
+
+
 def build_block_element(
     block: dict,
     kept_lines: list[dict],
@@ -158,7 +165,7 @@ def build_block_element(
         return None
     bbox = compute_kept_bbox(block, kept_lines)
     first_line = kept_lines[0]
-    text = " ".join(line["text"] for line in kept_lines)
+    text = join_line_texts(kept_lines)
     max_size = max(line["max_size"] for line in kept_lines)
     is_bold_block = all(line["bold"] for line in kept_lines)
 
@@ -188,7 +195,7 @@ def build_block_element(
                 if abs(line["bbox"][0] - text_x) > LIST_MARKER_X_TOLERANCE:
                     break
                 absorbed.append(line)
-            item_text = " ".join([rest] + [line["text"] for line in absorbed[1:]])
+            item_text = elements_lib.join_texts([rest] + [line["text"] for line in absorbed[1:]])
             item_level = level_for_x(first_line["bbox"][0], list_level_lookup)
             item_bbox = compute_kept_bbox(block, absorbed)
             return {"type": "list_item", "marker": marker, "level": item_level, "text": item_text, "bbox": item_bbox}
@@ -471,7 +478,7 @@ def parse_block_list_items(
             group_bbox = list(group[0]["bbox"])
             for line in group[1:]:
                 group_bbox = _union_bbox(group_bbox, line["bbox"])
-            lead_paragraph = {"type": "paragraph", "text": " ".join(line["text"] for line in group), "bbox": group_bbox}
+            lead_paragraph = {"type": "paragraph", "text": join_line_texts(group), "bbox": group_bbox}
             if row_value_x(group) is not None:
                 lead_paragraph["row_value_x"] = row_value_x(group)
             lead_paragraphs.append(lead_paragraph)
@@ -491,7 +498,7 @@ def parse_block_list_items(
             p_bbox = _union_bbox(p_bbox, p_line["bbox"])
         elements.append({
             "type": "paragraph",
-            "text": " ".join(p_line["text"] for p_line in paragraph_lines),
+            "text": join_line_texts(paragraph_lines),
             "bbox": p_bbox,
         })
         paragraph_lines.clear()
@@ -515,7 +522,7 @@ def parse_block_list_items(
 
         line = kept_lines[i]
         if open_item is not None and abs(line["bbox"][0] - open_item_text_x) <= LIST_MARKER_X_TOLERANCE:
-            open_item["text"] = open_item["text"] + " " + line["text"]
+            open_item["text"] = elements_lib.join_text(open_item["text"], line["text"])
             open_item["bbox"] = _union_bbox(open_item["bbox"], line["bbox"])
             i += 1
             continue
@@ -584,7 +591,7 @@ def document_list_marker_levels(
             if not kept_lines:
                 continue
             first_line = kept_lines[0]
-            text = " ".join(line["text"] for line in kept_lines)
+            text = join_line_texts(kept_lines)
             max_size = max(line["max_size"] for line in kept_lines)
             is_bold_block = all(line["bold"] for line in kept_lines)
             if classify_heading_level(text, is_bold_block, max_size, body_size, toc_lookup, heading_size_ranks):
@@ -818,7 +825,7 @@ def merge_list_and_paragraph_blocks(
             same_line = _same_visual_line(next_first["bbox"], first_line["bbox"])
             further_right = next_block["bbox"][0] > block["bbox"][0]
             if same_line and further_right and parse_list_marker(next_first["text"]) is None:
-                item_text = " ".join(line["text"] for line in next_kept_lines)
+                item_text = join_line_texts(next_kept_lines)
                 bbox = _union_bbox(block["bbox"], next_block["bbox"])
                 item_level = level_for_x(block["bbox"][0], list_level_lookup)
                 item = {"type": "list_item", "marker": stripped_first, "level": item_level, "text": item_text, "bbox": bbox}
@@ -837,7 +844,7 @@ def merge_list_and_paragraph_blocks(
         # runs FIRST (same as build_block_element's own ordering, reused
         # here rather than duplicated) so a TOC-matched/fallback heading
         # still always wins over marker-shaped text.
-        block_text = " ".join(line["text"] for line in kept_lines)
+        block_text = join_line_texts(kept_lines)
         block_max_size = max(line["max_size"] for line in kept_lines)
         block_is_bold = all(line["bold"] for line in kept_lines)
         if classify_heading_level(block_text, block_is_bold, block_max_size, body_size, toc_lookup, heading_size_ranks) is None:
@@ -852,7 +859,7 @@ def merge_list_and_paragraph_blocks(
                     and elements[-1]["type"] == "list_item"
                     and first["bbox"][0] > elements[-1]["bbox"][0] + LIST_MARKER_X_TOLERANCE
                 ):
-                    elements[-1]["text"] = elements[-1]["text"] + " " + first["text"]
+                    elements[-1]["text"] = elements_lib.join_text(elements[-1]["text"], first["text"])
                     elements[-1]["bbox"] = _union_bbox(elements[-1]["bbox"], first["bbox"])
                     block_items = block_items[1:]
                 elements.extend(block_items)
@@ -883,7 +890,7 @@ def merge_list_and_paragraph_blocks(
                 for group in groups:
                     paragraph = {
                         "type": "paragraph",
-                        "text": " ".join(line["text"] for line in group),
+                        "text": join_line_texts(group),
                         "bbox": compute_kept_bbox({"bbox": block["bbox"], "lines": []}, group),
                     }
                     value_x = row_value_x(group)
@@ -901,7 +908,7 @@ def merge_list_and_paragraph_blocks(
             and open_item_text_x is not None
             and abs(block["bbox"][0] - open_item_text_x) <= LIST_MARKER_X_TOLERANCE
         ):
-            open_item["text"] = open_item["text"] + " " + element["text"]
+            open_item["text"] = elements_lib.join_text(open_item["text"], element["text"])
             open_item["bbox"] = _union_bbox(open_item["bbox"], element["bbox"])
             i += 1
             continue
@@ -1003,7 +1010,7 @@ def document_heading_size_ranks(
             kept_lines = furniture_filtered_lines(block, furniture_masked, page_height, content_rect)
             if not kept_lines:
                 continue
-            text = " ".join(line["text"] for line in kept_lines)
+            text = join_line_texts(kept_lines)
             max_size = max(line["max_size"] for line in kept_lines)
             is_bold_block = all(line["bold"] for line in kept_lines)
             if is_fallback_heading_candidate(text, is_bold_block, max_size, body_size):

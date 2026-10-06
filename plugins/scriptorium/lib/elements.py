@@ -186,6 +186,34 @@ def _ends_with_terminal_punctuation(text: str) -> bool:
     return bool(stripped) and stripped[-1] in JOIN_TERMINAL_PUNCTUATION
 
 
+# Follow-up R29: a line that ends in a hyphen right after a letter or digit
+# ("10-", "h-") is a compound cut at the line end. The next line joins with
+# no space, and the hyphen stays ("10-second"). A spaced dash (" -") or an
+# en dash keeps the space.
+LINE_END_HYPHENS = "-\u2010\u2011"
+
+
+def join_text(left: str, right: str) -> str:
+    """`left` and `right`, two consecutive lines' (or line runs') text,
+    joined the way the source reads: with one space, or with none after a
+    line-end hyphen (LINE_END_HYPHENS)."""
+    if not left:
+        return right
+    if not right:
+        return left
+    if len(left) >= 2 and left[-1] in LINE_END_HYPHENS and left[-2].isalnum():
+        return left + right
+    return left + " " + right
+
+
+def join_texts(texts) -> str:
+    """`join_text` over a sequence of line texts."""
+    out = ""
+    for text in texts:
+        out = join_text(out, text)
+    return out
+
+
 def apply_page_break_joins(pages: dict[int, dict]) -> None:
     """Task A4b, controller-ruled: page-break joins are detected HERE, at
     merge time (the step that already sees every page), not in the
@@ -267,7 +295,7 @@ def apply_page_break_joins(pages: dict[int, dict]) -> None:
         if abs(next_el["bbox"][0] - join_x) > JOIN_X_TOLERANCE:
             continue
 
-        prev_el["text"] = prev_el["text"] + " " + next_el["text"]
+        prev_el["text"] = join_text(prev_el["text"], next_el["text"])
         prev_el["pages"] = [n, n_next]
         prev_el["bbox"] = [
             min(prev_el["bbox"][0], next_el["bbox"][0]),
