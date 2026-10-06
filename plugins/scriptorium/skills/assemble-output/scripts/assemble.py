@@ -96,10 +96,33 @@ def render_image_markdown(el: dict, asset_prefix: str = "") -> list[str]:
     return lines
 
 
-def render_list_item_markdown(el: dict) -> str:
+def list_item_depths(elements: list[dict]) -> list[int | None]:
+    """Follow-up R29: each `list_item`'s indent depth inside its run of
+    consecutive list items (None for any other element). `level` is
+    document-wide (Task A4b's marker-x clusters), so a run can start at
+    level 3; its first item renders at depth 0 and an item is at most one
+    step deeper than the item before it. Rendering `level - 1` instead gave
+    a run starting at level 3 four spaces, which Markdown reads as a code
+    block (golden run 2026-10-06, e.g. REQ 24453445-17, -34)."""
+    depths: list[int | None] = []
+    open_levels: list[int] = []
+    for el in elements:
+        if el["type"] != "list_item":
+            depths.append(None)
+            open_levels = []
+            continue
+        while open_levels and open_levels[-1] >= el["level"]:
+            open_levels.pop()
+        depths.append(len(open_levels))
+        open_levels.append(el["level"])
+    return depths
+
+
+def render_list_item_markdown(el: dict, depth: int | None = None) -> str:
     """Task A4b's exact, cross-repo-comparable Markdown rendering rule for
-    a `list_item`: `"  " * (level - 1)` (2 spaces per indent level below
-    the first) + the rendered marker + a space + `text`. A bullet-glyph
+    a `list_item`: `"  " * depth` (2 spaces per indent step; follow-up R29:
+    `depth` from `list_item_depths`, default `level - 1`) + the rendered
+    marker + a space + `text`. A bullet-glyph
     marker (a single character -- see `extract_text.py`'s
     LIST_BULLET_GLYPHS and LIST_LONE_BULLET_GLYPHS) always renders as a
     plain ASCII `-`, regardless of
@@ -110,19 +133,20 @@ def render_list_item_markdown(el: dict) -> str:
     not change without updating both."""
     marker = el["marker"]
     marker_render = marker if len(marker) > 1 else "-"
-    indent = "  " * (el["level"] - 1)
+    indent = "  " * (el["level"] - 1 if depth is None else depth)
     return f"{indent}{marker_render} {el['text']}"
 
 
 def elements_to_markdown(elements: list[dict], asset_prefix: str = "") -> str:
     lines = []
+    depths = list_item_depths(elements)
     for i, el in enumerate(elements):
         if el["type"] == "heading":
             lines.append(f"{'#' * el['level']} {el['text']}")
         elif el["type"] == "paragraph":
             lines.append(el["text"])
         elif el["type"] == "list_item":
-            lines.append(render_list_item_markdown(el))
+            lines.append(render_list_item_markdown(el, depths[i]))
             # Consecutive list items render with no blank line between them
             # -- only append the usual trailing blank line once the run of
             # list items ends (or the elements stream ends).
@@ -443,6 +467,7 @@ def elements_to_markdown_with_anchors(elements: list[dict], asset_prefix: str = 
     `md.startswith("## Title")`) are unaffected -- anchors are new behavior
     scoped to md-tree only."""
     lines = []
+    depths = list_item_depths(elements)
     for i, el in enumerate(elements):
         if el["type"] == "heading":
             anchor = slugify_heading(el["text"])
@@ -454,7 +479,7 @@ def elements_to_markdown_with_anchors(elements: list[dict], asset_prefix: str = 
         elif el["type"] == "list_item":
             # Same rendering/blank-line rule as elements_to_markdown -- see
             # render_list_item_markdown's docstring.
-            lines.append(render_list_item_markdown(el))
+            lines.append(render_list_item_markdown(el, depths[i]))
             if i + 1 < len(elements) and elements[i + 1]["type"] == "list_item":
                 continue
         elif el["type"] == "table":
