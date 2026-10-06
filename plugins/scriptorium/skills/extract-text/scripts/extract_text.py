@@ -300,6 +300,14 @@ LIST_MARKER_X_TOLERANCE = 3.0  # pt
 LIST_MARKER_Y_TOLERANCE = 3.0  # pt
 
 
+def _same_visual_line(a, b) -> bool:
+    """Two bboxes on one visual line: their tops, or (follow-up R28) their
+    bottoms, within LIST_MARKER_Y_TOLERANCE. A bullet glyph drawn in a
+    larger font than its text starts a few points higher, but sits on the
+    same baseline."""
+    return abs(a[1] - b[1]) <= LIST_MARKER_Y_TOLERANCE or abs(a[3] - b[3]) <= LIST_MARKER_Y_TOLERANCE
+
+
 def parse_list_marker(text: str) -> tuple[str, str] | None:
     """If `text` starts with a bullet-glyph or enumerator marker token
     followed by whitespace and more text on the same line, return
@@ -387,7 +395,7 @@ def _block_marker_start(kept_lines: list[dict], i: int) -> tuple[str, str, dict,
     stripped = line["text"].strip()
     if is_lone_bullet(stripped) and i + 1 < len(kept_lines):
         next_line = kept_lines[i + 1]
-        same_line = abs(next_line["bbox"][1] - line["bbox"][1]) <= LIST_MARKER_Y_TOLERANCE
+        same_line = _same_visual_line(next_line["bbox"], line["bbox"])
         further_right = next_line["bbox"][0] > line["bbox"][0]
         if same_line and further_right and parse_list_marker(next_line["text"]) is None:
             return stripped, next_line["text"], line, next_line["bbox"][0], 2
@@ -412,7 +420,9 @@ def _is_glyph_marker_start(kept_lines: list[dict], i: int) -> bool:
     return start is not None and start[0] in MID_BLOCK_BULLET_GLYPHS
 
 
-def parse_block_list_items(kept_lines: list[dict], list_level_lookup: list[float]) -> list[dict] | None:
+def parse_block_list_items(
+    kept_lines: list[dict], list_level_lookup: list[float], right_edge: float | None = None
+) -> list[dict] | None:
     """Task A4b: a single block can hold ONE OR SEVERAL list items end to
     end (glyph, text, glyph, text, ... -- fix round 1's reviewer repro
     shape), each recognized via `_block_marker_start`.
@@ -457,7 +467,7 @@ def parse_block_list_items(kept_lines: list[dict], list_level_lookup: list[float
         lead_paragraphs = []
         # Follow-up R27: label/value rows before the list are their own
         # paragraphs here too.
-        for group in split_row_groups(kept_lines[:later]):
+        for group in paragraph_groups(kept_lines[:later], right_edge):
             group_bbox = list(group[0]["bbox"])
             for line in group[1:]:
                 group_bbox = _union_bbox(group_bbox, line["bbox"])
@@ -465,7 +475,7 @@ def parse_block_list_items(kept_lines: list[dict], list_level_lookup: list[float
             if row_value_x(group) is not None:
                 lead_paragraph["row_value_x"] = row_value_x(group)
             lead_paragraphs.append(lead_paragraph)
-        rest = parse_block_list_items(kept_lines[later:], list_level_lookup) or []
+        rest = parse_block_list_items(kept_lines[later:], list_level_lookup, right_edge) or []
         return [*lead_paragraphs, *rest]
 
     elements: list[dict] = []
@@ -662,6 +672,72 @@ def split_row_groups(kept_lines: list[dict]) -> list[list[dict]]:
     return groups
 
 
+# Follow-up R28: slack, in points, when deciding whether the next line's
+# first word would have fit at the end of a line.
+HARD_BREAK_SLACK = 2.0
+# Follow-up R28: the word width is estimated from the line's average
+# character width, which is rough for a proportional font; a break needs
+# room for this many times that estimate.
+HARD_BREAK_WORD_FACTOR = 1.5
+# Follow-up R28: and the line either ends a sentence, or leaves more than
+# this fraction of the text width empty (a short label line).
+HARD_BREAK_END_PUNCTUATION = ".!?:"
+HARD_BREAK_SHORT_LINE_FRACTION = 0.4
+
+
+def _first_word_width(line: dict) -> float:
+    """The width of `line`'s first word plus one space, estimated from the
+    line's own average character width."""
+    text = line["text"]
+    if not text:
+        return 0.0
+    char_width = (line["bbox"][2] - line["bbox"][0]) / len(text)
+    return (len(text.split()[0]) + 1) * char_width if text.split() else 0.0
+
+
+def split_hard_breaks(lines: list[dict], right_edge: float | None) -> list[list[dict]]:
+    """Follow-up R28: `lines` split after every line that ends so early that
+    the next line's first word would have fit on it (`right_edge` is the
+    page's text right edge), when that line also ends a sentence or is a
+    short line (more than HARD_BREAK_SHORT_LINE_FRACTION of its block's
+    width empty). Text that wraps only breaks when the next word
+    does not fit, so such a break was made on purpose (a line break in the
+    source, e.g. "... in a hot air oven." then "Test with ..."). No
+    `right_edge` means no split."""
+    if right_edge is None or len(lines) < 2:
+        return [lines]
+    left_edge = min(line["bbox"][0] for line in lines)
+    block_right = max(line["bbox"][2] for line in lines)
+    block_width = max(block_right - left_edge, 1.0)
+    groups: list[list[dict]] = [[lines[0]]]
+    for prev, line in zip(lines, lines[1:]):
+        room = right_edge - prev["bbox"][2]
+        ends_sentence = prev["text"].rstrip()[-1:] in HARD_BREAK_END_PUNCTUATION
+        # A short label line is short against its own block, not the page:
+        # a narrow column's lines all end early on the page.
+        short_line = block_right - prev["bbox"][2] > HARD_BREAK_SHORT_LINE_FRACTION * block_width
+        if room > HARD_BREAK_WORD_FACTOR * _first_word_width(line) + HARD_BREAK_SLACK and (
+            ends_sentence or short_line
+        ):
+            groups.append([line])
+        else:
+            groups[-1].append(line)
+    return groups
+
+
+def paragraph_groups(kept_lines: list[dict], right_edge: float | None) -> list[list[dict]]:
+    """The paragraphs of a paragraph block: label/value rows first
+    (`split_row_groups`, R27), then explicit line breaks inside every group
+    that is not a row (`split_hard_breaks`, R28)."""
+    groups = []
+    for group in split_row_groups(kept_lines):
+        if row_value_x(group) is not None:
+            groups.append(group)
+        else:
+            groups.extend(split_hard_breaks(group, right_edge))
+    return groups
+
+
 def row_value_x(group: list[dict]) -> float | None:
     """Follow-up R27: the value column's x of a row group (the x0 of the
     second line on the row's y), or None for a group that is not a row."""
@@ -676,6 +752,7 @@ def merge_list_and_paragraph_blocks(
     toc_lookup: dict[str, int],
     heading_size_ranks: dict[float, int],
     list_level_lookup: list[float],
+    right_edge: float | None = None,
 ) -> list[dict]:
     """Second pass over a page's furniture/figure/caption/table-filtered
     blocks (Task A4b) -- `blocks_and_lines` is `[(block, kept_lines), ...]`
@@ -738,7 +815,7 @@ def merge_list_and_paragraph_blocks(
         ):
             next_block, next_kept_lines = blocks_and_lines[i + 1]
             next_first = next_kept_lines[0]
-            same_line = abs(next_first["bbox"][1] - first_line["bbox"][1]) <= LIST_MARKER_Y_TOLERANCE
+            same_line = _same_visual_line(next_first["bbox"], first_line["bbox"])
             further_right = next_block["bbox"][0] > block["bbox"][0]
             if same_line and further_right and parse_list_marker(next_first["text"]) is None:
                 item_text = " ".join(line["text"] for line in next_kept_lines)
@@ -764,7 +841,7 @@ def merge_list_and_paragraph_blocks(
         block_max_size = max(line["max_size"] for line in kept_lines)
         block_is_bold = all(line["bold"] for line in kept_lines)
         if classify_heading_level(block_text, block_is_bold, block_max_size, body_size, toc_lookup, heading_size_ranks) is None:
-            block_items = parse_block_list_items(kept_lines, list_level_lookup)
+            block_items = parse_block_list_items(kept_lines, list_level_lookup, right_edge)
             if block_items is not None:
                 # Follow-up R25: leading lines that sit right of the open
                 # item's marker are that item's last wrapped line(s).
@@ -801,7 +878,7 @@ def merge_list_and_paragraph_blocks(
         # Follow-up R27: a paragraph block made of label/value rows and a
         # body becomes one paragraph per group.
         if element is not None and element["type"] == "paragraph":
-            groups = split_row_groups(kept_lines)
+            groups = paragraph_groups(kept_lines, right_edge)
             if len(groups) > 1:
                 for group in groups:
                     paragraph = {
@@ -1143,8 +1220,10 @@ def main() -> None:
             if kept_lines:
                 filtered_blocks.append((block, kept_lines))
 
+        # Follow-up R28: the page's text right edge, for explicit line breaks.
+        right_edge = max((line["bbox"][2] for _block, lines in filtered_blocks for line in lines), default=None)
         page_elements = merge_list_and_paragraph_blocks(
-            filtered_blocks, body_size, toc_lookup, heading_size_ranks, list_level_lookup,
+            filtered_blocks, body_size, toc_lookup, heading_size_ranks, list_level_lookup, right_edge,
         )
         list_items = [el for el in page_elements if el["type"] == "list_item"]
         if list_items:

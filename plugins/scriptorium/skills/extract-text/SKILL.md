@@ -77,6 +77,12 @@ document.
   block, indented past its left edge and followed by a line at the left
   edge, is its own paragraph (a value continued from the previous page).
   A row paragraph records `row_value_x`, its value column's x.
+- Follow-up R28: a paragraph is split after a line that ends so early that
+  the next line's first word would have fit on it (with a 1.5x margin on
+  the estimated word width), when that line also ends a sentence
+  (`.!?:`) or leaves more than 40% of its block's width empty: the source
+  broke the line on purpose. A bullet glyph drawn larger than its text
+  pairs with the text when their bottoms align, too.
 - Follow-up R24: a block that mostly overlaps a table loses only its lines
   inside the table; a caption line printed right above the table stays.
 - Follow-up R25: a block that opens with the last wrapped line of the
