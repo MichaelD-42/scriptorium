@@ -702,15 +702,47 @@ def _first_word_width(line: dict) -> float:
     return (len(text.split()[0]) + 1) * char_width if text.split() else 0.0
 
 
+# Follow-up R29: closing brackets and quotes after a sentence end ("etc.)",
+# "testing.)") do not hide it.
+HARD_BREAK_CLOSERS = ")]\"'”’"
+
+
+def _ends_sentence(text: str) -> bool:
+    return text.rstrip().rstrip(HARD_BREAK_CLOSERS)[-1:] in HARD_BREAK_END_PUNCTUATION
+
+
+def is_hard_break(prev: dict, line: dict, right_edge: float, block_right: float, block_width: float) -> bool:
+    """Whether the source breaks the line between `prev` and `line` on
+    purpose rather than wrapping it.
+
+    Follow-up R28: `prev` ends so early that `line`'s first word would have
+    fit on it (`right_edge` is the page's text right edge), and `prev` also
+    ends a sentence or is a short line (more than
+    HARD_BREAK_SHORT_LINE_FRACTION of its block's width empty). Text that
+    wraps only breaks when the next word does not fit.
+
+    Follow-up R29: also when one of the two lines is bold as a whole and the
+    other is not (a bold label line: "... 0,6 V" / "Verification method"),
+    and when `line` starts a list item (`parse_list_marker`) after a line
+    that ends a sentence or leaves room for the marker's first word. A line
+    that starts with a dash after a full line with no sentence end is a
+    wrap ("... the range" / "– PT) ...")."""
+    if prev["bold"] != line["bold"]:
+        return True
+    fits = right_edge - prev["bbox"][2] > HARD_BREAK_WORD_FACTOR * _first_word_width(line) + HARD_BREAK_SLACK
+    ends_sentence = _ends_sentence(prev["text"])
+    if parse_list_marker(line["text"]) is not None and (ends_sentence or fits):
+        return True
+    # A short label line is short against its own block, not the page:
+    # a narrow column's lines all end early on the page.
+    short_line = block_right - prev["bbox"][2] > HARD_BREAK_SHORT_LINE_FRACTION * block_width
+    return fits and (ends_sentence or short_line)
+
+
 def split_hard_breaks(lines: list[dict], right_edge: float | None) -> list[list[dict]]:
-    """Follow-up R28: `lines` split after every line that ends so early that
-    the next line's first word would have fit on it (`right_edge` is the
-    page's text right edge), when that line also ends a sentence or is a
-    short line (more than HARD_BREAK_SHORT_LINE_FRACTION of its block's
-    width empty). Text that wraps only breaks when the next word
-    does not fit, so such a break was made on purpose (a line break in the
-    source, e.g. "... in a hot air oven." then "Test with ..."). No
-    `right_edge` means no split."""
+    """Follow-up R28: `lines` split at every explicit line break in the
+    source (`is_hard_break`, e.g. "... in a hot air oven." then "Test with
+    ..."). No `right_edge` means no split."""
     if right_edge is None or len(lines) < 2:
         return [lines]
     left_edge = min(line["bbox"][0] for line in lines)
@@ -718,14 +750,7 @@ def split_hard_breaks(lines: list[dict], right_edge: float | None) -> list[list[
     block_width = max(block_right - left_edge, 1.0)
     groups: list[list[dict]] = [[lines[0]]]
     for prev, line in zip(lines, lines[1:]):
-        room = right_edge - prev["bbox"][2]
-        ends_sentence = prev["text"].rstrip()[-1:] in HARD_BREAK_END_PUNCTUATION
-        # A short label line is short against its own block, not the page:
-        # a narrow column's lines all end early on the page.
-        short_line = block_right - prev["bbox"][2] > HARD_BREAK_SHORT_LINE_FRACTION * block_width
-        if room > HARD_BREAK_WORD_FACTOR * _first_word_width(line) + HARD_BREAK_SLACK and (
-            ends_sentence or short_line
-        ):
+        if is_hard_break(prev, line, right_edge, block_right, block_width):
             groups.append([line])
         else:
             groups[-1].append(line)
