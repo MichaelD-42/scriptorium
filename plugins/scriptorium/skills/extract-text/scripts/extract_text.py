@@ -127,6 +127,13 @@ def compute_kept_bbox(block: dict, kept_lines: list[dict]) -> list[float]:
     ]
 
 
+def join_line_texts(lines: list[dict]) -> str:
+    """Follow-up R29: the text of consecutive `lines`, joined the way the
+    source reads (`elements_lib.join_text`: no space after a line-end
+    hyphen)."""
+    return elements_lib.join_texts(line["text"] for line in lines)
+
+
 def build_block_element(
     block: dict,
     kept_lines: list[dict],
@@ -158,7 +165,7 @@ def build_block_element(
         return None
     bbox = compute_kept_bbox(block, kept_lines)
     first_line = kept_lines[0]
-    text = " ".join(line["text"] for line in kept_lines)
+    text = join_line_texts(kept_lines)
     max_size = max(line["max_size"] for line in kept_lines)
     is_bold_block = all(line["bold"] for line in kept_lines)
 
@@ -188,7 +195,7 @@ def build_block_element(
                 if abs(line["bbox"][0] - text_x) > LIST_MARKER_X_TOLERANCE:
                     break
                 absorbed.append(line)
-            item_text = " ".join([rest] + [line["text"] for line in absorbed[1:]])
+            item_text = elements_lib.join_texts([rest] + [line["text"] for line in absorbed[1:]])
             item_level = level_for_x(first_line["bbox"][0], list_level_lookup)
             item_bbox = compute_kept_bbox(block, absorbed)
             return {"type": "list_item", "marker": marker, "level": item_level, "text": item_text, "bbox": item_bbox}
@@ -471,7 +478,7 @@ def parse_block_list_items(
             group_bbox = list(group[0]["bbox"])
             for line in group[1:]:
                 group_bbox = _union_bbox(group_bbox, line["bbox"])
-            lead_paragraph = {"type": "paragraph", "text": " ".join(line["text"] for line in group), "bbox": group_bbox}
+            lead_paragraph = {"type": "paragraph", "text": join_line_texts(group), "bbox": group_bbox}
             if row_value_x(group) is not None:
                 lead_paragraph["row_value_x"] = row_value_x(group)
             lead_paragraphs.append(lead_paragraph)
@@ -481,6 +488,14 @@ def parse_block_list_items(
     elements: list[dict] = []
     open_item: dict | None = None
     open_item_text_x: float | None = None
+    # Follow-up R29: an item whose marker is printed inline with its text
+    # ("• Shrink hoses ...") and that has no hanging indent has its wrapped
+    # lines at the marker's own x, the same x as a paragraph after the list.
+    # There, a line at that x continues the item only when the line before
+    # it wraps (is_hard_break is false).
+    open_item_inline = False
+    block_right = max(line["bbox"][2] for line in kept_lines)
+    block_width = max(block_right - min(line["bbox"][0] for line in kept_lines), 1.0)
     paragraph_lines: list[dict] = []
 
     def flush_paragraph() -> None:
@@ -491,7 +506,7 @@ def parse_block_list_items(
             p_bbox = _union_bbox(p_bbox, p_line["bbox"])
         elements.append({
             "type": "paragraph",
-            "text": " ".join(p_line["text"] for p_line in paragraph_lines),
+            "text": join_line_texts(paragraph_lines),
             "bbox": p_bbox,
         })
         paragraph_lines.clear()
@@ -510,12 +525,22 @@ def parse_block_list_items(
             item = {"type": "list_item", "marker": marker, "level": level, "text": first_text, "bbox": item_bbox}
             elements.append(item)
             open_item, open_item_text_x = item, text_x
+            open_item_inline = consumed == 1
             i += consumed
             continue
 
         line = kept_lines[i]
-        if open_item is not None and abs(line["bbox"][0] - open_item_text_x) <= LIST_MARKER_X_TOLERANCE:
-            open_item["text"] = open_item["text"] + " " + line["text"]
+        breaks_inline_item = (
+            open_item_inline
+            and right_edge is not None
+            and is_hard_break(kept_lines[i - 1], line, right_edge, block_right, block_width)
+        )
+        if (
+            open_item is not None
+            and abs(line["bbox"][0] - open_item_text_x) <= LIST_MARKER_X_TOLERANCE
+            and not breaks_inline_item
+        ):
+            open_item["text"] = elements_lib.join_text(open_item["text"], line["text"])
             open_item["bbox"] = _union_bbox(open_item["bbox"], line["bbox"])
             i += 1
             continue
@@ -584,7 +609,7 @@ def document_list_marker_levels(
             if not kept_lines:
                 continue
             first_line = kept_lines[0]
-            text = " ".join(line["text"] for line in kept_lines)
+            text = join_line_texts(kept_lines)
             max_size = max(line["max_size"] for line in kept_lines)
             is_bold_block = all(line["bold"] for line in kept_lines)
             if classify_heading_level(text, is_bold_block, max_size, body_size, toc_lookup, heading_size_ranks):
@@ -695,15 +720,47 @@ def _first_word_width(line: dict) -> float:
     return (len(text.split()[0]) + 1) * char_width if text.split() else 0.0
 
 
+# Follow-up R29: closing brackets and quotes after a sentence end ("etc.)",
+# "testing.)") do not hide it.
+HARD_BREAK_CLOSERS = ")]\"'”’"
+
+
+def _ends_sentence(text: str) -> bool:
+    return text.rstrip().rstrip(HARD_BREAK_CLOSERS)[-1:] in HARD_BREAK_END_PUNCTUATION
+
+
+def is_hard_break(prev: dict, line: dict, right_edge: float, block_right: float, block_width: float) -> bool:
+    """Whether the source breaks the line between `prev` and `line` on
+    purpose rather than wrapping it.
+
+    Follow-up R28: `prev` ends so early that `line`'s first word would have
+    fit on it (`right_edge` is the page's text right edge), and `prev` also
+    ends a sentence or is a short line (more than
+    HARD_BREAK_SHORT_LINE_FRACTION of its block's width empty). Text that
+    wraps only breaks when the next word does not fit.
+
+    Follow-up R29: also when one of the two lines is bold as a whole and the
+    other is not (a bold label line: "... 0,6 V" / "Verification method"),
+    and when `line` starts a list item (`parse_list_marker`) after a line
+    that ends a sentence or leaves room for the marker's first word. A line
+    that starts with a dash after a full line with no sentence end is a
+    wrap ("... the range" / "– PT) ...")."""
+    if prev["bold"] != line["bold"]:
+        return True
+    fits = right_edge - prev["bbox"][2] > HARD_BREAK_WORD_FACTOR * _first_word_width(line) + HARD_BREAK_SLACK
+    ends_sentence = _ends_sentence(prev["text"])
+    if parse_list_marker(line["text"]) is not None and (ends_sentence or fits):
+        return True
+    # A short label line is short against its own block, not the page:
+    # a narrow column's lines all end early on the page.
+    short_line = block_right - prev["bbox"][2] > HARD_BREAK_SHORT_LINE_FRACTION * block_width
+    return fits and (ends_sentence or short_line)
+
+
 def split_hard_breaks(lines: list[dict], right_edge: float | None) -> list[list[dict]]:
-    """Follow-up R28: `lines` split after every line that ends so early that
-    the next line's first word would have fit on it (`right_edge` is the
-    page's text right edge), when that line also ends a sentence or is a
-    short line (more than HARD_BREAK_SHORT_LINE_FRACTION of its block's
-    width empty). Text that wraps only breaks when the next word
-    does not fit, so such a break was made on purpose (a line break in the
-    source, e.g. "... in a hot air oven." then "Test with ..."). No
-    `right_edge` means no split."""
+    """Follow-up R28: `lines` split at every explicit line break in the
+    source (`is_hard_break`, e.g. "... in a hot air oven." then "Test with
+    ..."). No `right_edge` means no split."""
     if right_edge is None or len(lines) < 2:
         return [lines]
     left_edge = min(line["bbox"][0] for line in lines)
@@ -711,18 +768,64 @@ def split_hard_breaks(lines: list[dict], right_edge: float | None) -> list[list[
     block_width = max(block_right - left_edge, 1.0)
     groups: list[list[dict]] = [[lines[0]]]
     for prev, line in zip(lines, lines[1:]):
-        room = right_edge - prev["bbox"][2]
-        ends_sentence = prev["text"].rstrip()[-1:] in HARD_BREAK_END_PUNCTUATION
-        # A short label line is short against its own block, not the page:
-        # a narrow column's lines all end early on the page.
-        short_line = block_right - prev["bbox"][2] > HARD_BREAK_SHORT_LINE_FRACTION * block_width
-        if room > HARD_BREAK_WORD_FACTOR * _first_word_width(line) + HARD_BREAK_SLACK and (
-            ends_sentence or short_line
-        ):
+        if is_hard_break(prev, line, right_edge, block_right, block_width):
             groups.append([line])
         else:
             groups[-1].append(line)
     return groups
+
+
+# Follow-up R29: PyMuPDF can put each line of one paragraph in a block of
+# its own (golden run p71: 3.8 pt between those lines, 14.2 pt between
+# paragraphs, line height 11.2 pt). A gap of at most this fraction of a line
+# height is a line gap, not a paragraph gap.
+SPLIT_BLOCK_MAX_GAP_FRACTION = 0.5
+# The line before must also fill at least this fraction of the width from
+# its x to the page's right edge. On a page that is mostly table, the right
+# edge comes from a few short lines (golden run p91: "1)Broadcast",
+# "2)Free band" fill 53 %), and each of them would otherwise look full. A
+# real wrap before a long word can leave a fifth empty (p76: 83 % before
+# "component/system,").
+SPLIT_BLOCK_MIN_FILL = 0.6
+
+
+def continues_paragraph(last: dict, first: dict, right_edge: float | None) -> bool:
+    """Follow-up R29: whether `first`, the first line of a block, continues
+    the paragraph whose last line is `last` (the previous block's): same x,
+    a line gap (SPLIT_BLOCK_MAX_GAP_FRACTION), `last` is full (`first`'s
+    first word did not fit on it) and does not end a sentence, and no
+    explicit break (`is_hard_break`: bold change, list marker). A full line
+    that ends a sentence can end a paragraph: the page's longest line is
+    always "full"."""
+    if right_edge is None or abs(first["bbox"][0] - last["bbox"][0]) > LIST_MARKER_X_TOLERANCE:
+        return False
+    if _ends_sentence(last["text"]):
+        return False
+    if last["bbox"][2] - last["bbox"][0] < SPLIT_BLOCK_MIN_FILL * (right_edge - last["bbox"][0]):
+        return False
+    gap = first["bbox"][1] - last["bbox"][3]
+    if gap < 0 or gap > SPLIT_BLOCK_MAX_GAP_FRACTION * (last["bbox"][3] - last["bbox"][1]):
+        return False
+    if right_edge - last["bbox"][2] > HARD_BREAK_WORD_FACTOR * _first_word_width(first) + HARD_BREAK_SLACK:
+        return False
+    return not is_hard_break(last, first, right_edge, right_edge, max(right_edge - last["bbox"][0], 1.0))
+
+
+def _join_paragraph(elements: list[dict], last_line: dict | None, lines: list[dict], right_edge: float | None) -> bool:
+    """Follow-up R29: append `lines` to the paragraph that ends `elements`
+    when they continue it (`continues_paragraph`); True when joined."""
+    if (
+        last_line is None
+        or not elements
+        or elements[-1]["type"] != "paragraph"
+        or "row_value_x" in elements[-1]
+        or not continues_paragraph(last_line, lines[0], right_edge)
+    ):
+        return False
+    elements[-1]["text"] = elements_lib.join_text(elements[-1]["text"], join_line_texts(lines))
+    for line in lines:
+        elements[-1]["bbox"] = _union_bbox(elements[-1]["bbox"], line["bbox"])
+    return True
 
 
 def paragraph_groups(kept_lines: list[dict], right_edge: float | None) -> list[list[dict]]:
@@ -802,11 +905,16 @@ def merge_list_and_paragraph_blocks(
     open_item: dict | None = None
     open_item_text_x: float | None = None
 
+    # Follow-up R29: the last line of the plain paragraph that ends
+    # `elements`, set only by a block that ends in one (see _join_paragraph).
+    last_paragraph_line: dict | None = None
+
     i, n = 0, len(blocks_and_lines)
     while i < n:
         block, kept_lines = blocks_and_lines[i]
         first_line = kept_lines[0]
         stripped_first = first_line["text"].strip()
+        prev_paragraph_line, last_paragraph_line = last_paragraph_line, None
 
         if (
             len(kept_lines) == 1
@@ -818,7 +926,7 @@ def merge_list_and_paragraph_blocks(
             same_line = _same_visual_line(next_first["bbox"], first_line["bbox"])
             further_right = next_block["bbox"][0] > block["bbox"][0]
             if same_line and further_right and parse_list_marker(next_first["text"]) is None:
-                item_text = " ".join(line["text"] for line in next_kept_lines)
+                item_text = join_line_texts(next_kept_lines)
                 bbox = _union_bbox(block["bbox"], next_block["bbox"])
                 item_level = level_for_x(block["bbox"][0], list_level_lookup)
                 item = {"type": "list_item", "marker": stripped_first, "level": item_level, "text": item_text, "bbox": bbox}
@@ -837,7 +945,7 @@ def merge_list_and_paragraph_blocks(
         # runs FIRST (same as build_block_element's own ordering, reused
         # here rather than duplicated) so a TOC-matched/fallback heading
         # still always wins over marker-shaped text.
-        block_text = " ".join(line["text"] for line in kept_lines)
+        block_text = join_line_texts(kept_lines)
         block_max_size = max(line["max_size"] for line in kept_lines)
         block_is_bold = all(line["bold"] for line in kept_lines)
         if classify_heading_level(block_text, block_is_bold, block_max_size, body_size, toc_lookup, heading_size_ranks) is None:
@@ -852,7 +960,7 @@ def merge_list_and_paragraph_blocks(
                     and elements[-1]["type"] == "list_item"
                     and first["bbox"][0] > elements[-1]["bbox"][0] + LIST_MARKER_X_TOLERANCE
                 ):
-                    elements[-1]["text"] = elements[-1]["text"] + " " + first["text"]
+                    elements[-1]["text"] = elements_lib.join_text(elements[-1]["text"], first["text"])
                     elements[-1]["bbox"] = _union_bbox(elements[-1]["bbox"], first["bbox"])
                     block_items = block_items[1:]
                 elements.extend(block_items)
@@ -880,16 +988,20 @@ def merge_list_and_paragraph_blocks(
         if element is not None and element["type"] == "paragraph":
             groups = paragraph_groups(kept_lines, right_edge)
             if len(groups) > 1:
+                if _join_paragraph(elements, prev_paragraph_line, groups[0], right_edge):
+                    groups = groups[1:]
                 for group in groups:
                     paragraph = {
                         "type": "paragraph",
-                        "text": " ".join(line["text"] for line in group),
+                        "text": join_line_texts(group),
                         "bbox": compute_kept_bbox({"bbox": block["bbox"], "lines": []}, group),
                     }
                     value_x = row_value_x(group)
                     if value_x is not None:
                         paragraph["row_value_x"] = value_x
                     elements.append(paragraph)
+                if "row_value_x" not in elements[-1]:
+                    last_paragraph_line = groups[-1][-1] if groups else kept_lines[-1]
                 open_item, open_item_text_x = None, None
                 i += 1
                 continue
@@ -901,12 +1013,16 @@ def merge_list_and_paragraph_blocks(
             and open_item_text_x is not None
             and abs(block["bbox"][0] - open_item_text_x) <= LIST_MARKER_X_TOLERANCE
         ):
-            open_item["text"] = open_item["text"] + " " + element["text"]
+            open_item["text"] = elements_lib.join_text(open_item["text"], element["text"])
             open_item["bbox"] = _union_bbox(open_item["bbox"], element["bbox"])
             i += 1
             continue
 
-        if element is not None:
+        if element is not None and element["type"] == "paragraph":
+            if not _join_paragraph(elements, prev_paragraph_line, kept_lines, right_edge):
+                elements.append(element)
+            last_paragraph_line = kept_lines[-1]
+        elif element is not None:
             elements.append(element)
 
         if element is not None and element["type"] == "list_item":
@@ -1003,7 +1119,7 @@ def document_heading_size_ranks(
             kept_lines = furniture_filtered_lines(block, furniture_masked, page_height, content_rect)
             if not kept_lines:
                 continue
-            text = " ".join(line["text"] for line in kept_lines)
+            text = join_line_texts(kept_lines)
             max_size = max(line["max_size"] for line in kept_lines)
             is_bold_block = all(line["bold"] for line in kept_lines)
             if is_fallback_heading_candidate(text, is_bold_block, max_size, body_size):
