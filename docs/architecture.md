@@ -18,7 +18,7 @@ implement each step, see [`tooling.md`](tooling.md). The C4 model
 | Intent opens the loop | `/scriptorium:extract` sets doc (or the whole `input/` queue), format, `--max-attempts`, optional `--batch-size` cap |
 | Context grounds it | the PDF, per-page rendered PNGs, per-page shards |
 | Backpressure (structural/hard) | `grade-output`'s `gates.py` — page count, empty pages, dangling asset refs, OCR confidence floor, plus PDF-only structure checks: furniture removed, TOC headings matched, figures complete |
-| Backpressure (product/soft) | `grade-output/rubric.md` — reading order, dropped/hallucinated/duplicated text, table integrity, headings, captions. Pass threshold (0.85) is hardcoded there, not a CLI flag |
+| Backpressure (product/soft) | `grade-output/rubric.md` — reading order, dropped/hallucinated/duplicated text, table integrity, headings, captions. Pass threshold (0.85) is hardcoded there, not a CLI flag; any content tag (wrong body text) fails the document whatever the average |
 | Verification closes it | the `grader` role — independent of `extractor`, never grades its own work |
 | Loop sizing | `pdf-triage` classifies each document `loose` (all tier-1) or `tight` (needs escalation) |
 | Elastic escalation | Tier 1 text (PyMuPDF) → Tier 2 OCR (Tesseract) → Tier 3 vision (Claude) |

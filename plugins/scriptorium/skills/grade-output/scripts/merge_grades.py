@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+import grades  # noqa: E402
 import paths  # noqa: E402
 
 THRESHOLD = 0.85
@@ -39,7 +40,10 @@ def main() -> None:
 
     score = round(sum(p["score"] for p in per_page) / len(per_page), 3)
     failure_taxonomy = sorted({issue for p in per_page for issue in p.get("issues", [])})
-    rubric_passed = score >= THRESHOLD
+    # Wrong body text on any page fails the document: an average over clean
+    # pages would let it ship without a retry.
+    content_issue_pages = [p["page_number"] for p in per_page if grades.CONTENT_ISSUES & set(p.get("issues", []))]
+    rubric_passed = score >= THRESHOLD and not content_issue_pages
 
     result = {
         "doc": args.doc,
@@ -51,6 +55,7 @@ def main() -> None:
             "threshold": THRESHOLD,
             "per_page": per_page,
             "failure_taxonomy": failure_taxonomy,
+            "content_issue_pages": content_issue_pages,
         },
         "overall_passed": gates["passed"] and rubric_passed,
         # Task A5b fix round 1 (controller finding 2): gates.py's warnings

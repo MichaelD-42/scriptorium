@@ -265,7 +265,7 @@ class TestRetryCarriesTheGradersReason:
                     "--page",
                     str(page),
                     "--score",
-                    "0.0" if bad else "1.0",
+                    "0.4" if bad else "1.0",
                     *args,
                 )
 
@@ -312,7 +312,7 @@ class TestNeedsHuman:
                     "--page",
                     str(page),
                     "--score",
-                    "0.0" if issues else "1.0",
+                    "0.3" if issues else "1.0",
                     *issues,
                 )
 

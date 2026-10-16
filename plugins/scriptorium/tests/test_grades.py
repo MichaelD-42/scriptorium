@@ -166,7 +166,7 @@ class TestMergeGrades:
     def test_overall_passed_true_when_gates_pass_and_score_meets_threshold(self, tmp_project, monkeypatch):
         _seed_gates_report(tmp_project, "doc", passed=True)
         _seed_grade_shard(tmp_project, "doc", 1, 1.0, [])
-        _seed_grade_shard(tmp_project, "doc", 2, 0.7, ["dropped_text"])
+        _seed_grade_shard(tmp_project, "doc", 2, 0.7, ["bad_caption"])  # a content tag would fail by itself
 
         monkeypatch.setattr("sys.argv", ["merge_grades.py", "--doc", "doc"])
         merge_grades.main()
@@ -175,7 +175,7 @@ class TestMergeGrades:
         assert result["rubric_verdict"]["score"] == 0.85
         assert result["rubric_verdict"]["passed"] is True
         assert result["overall_passed"] is True
-        assert result["rubric_verdict"]["failure_taxonomy"] == ["dropped_text"]
+        assert result["rubric_verdict"]["failure_taxonomy"] == ["bad_caption"]
 
     def test_overall_passed_false_when_gates_fail_even_if_rubric_passes(self, tmp_project, monkeypatch):
         _seed_gates_report(tmp_project, "doc", passed=False)
@@ -287,10 +287,38 @@ def test_write_grade_shard_refuses_an_unknown_tag(tmp_project, monkeypatch):
 def test_merge_grades_stdout_is_compact(tmp_project, monkeypatch, capsys):
     _seed_gates_report(tmp_project, "doc", passed=True)
     for n in range(1, 41):
-        _seed_grade_shard(tmp_project, "doc", n, 1.0 if n != 7 else 0.5, [] if n != 7 else ["dropped_text"])
+        _seed_grade_shard(tmp_project, "doc", n, 1.0 if n != 7 else 0.5, [] if n != 7 else ["bad_caption"])
     monkeypatch.setattr("sys.argv", ["merge_grades.py", "--doc", "doc"])
     merge_grades.main()
     summary = json.loads(capsys.readouterr().out)
     assert summary["overall_passed"] is True
     assert summary["pages_with_issues"] == [7]
     assert "rubric_verdict" not in summary
+
+
+def test_a_content_issue_fails_the_rubric_whatever_the_average(tmp_project, monkeypatch):
+    """One page with dropped text among clean pages averages above 0.85; the
+    defect would ship and never be retried."""
+    _seed_gates_report(tmp_project, "doc", passed=True)
+    for n in range(1, 6):
+        _seed_grade_shard(tmp_project, "doc", n, 0.4 if n == 3 else 1.0, ["dropped_text"] if n == 3 else [])
+    monkeypatch.setattr("sys.argv", ["merge_grades.py", "--doc", "doc"])
+    merge_grades.main()
+
+    verdict = json.loads(paths.grade_report_json("doc").read_text())
+    assert verdict["rubric_verdict"]["score"] == 0.88
+    assert verdict["rubric_verdict"]["content_issue_pages"] == [3]
+    assert verdict["rubric_verdict"]["passed"] is False
+    assert verdict["overall_passed"] is False
+
+
+def test_an_image_issue_alone_still_passes_on_the_average(tmp_project, monkeypatch):
+    _seed_gates_report(tmp_project, "doc", passed=True)
+    for n in range(1, 6):
+        _seed_grade_shard(tmp_project, "doc", n, 0.6 if n == 3 else 1.0, ["bad_caption"] if n == 3 else [])
+    monkeypatch.setattr("sys.argv", ["merge_grades.py", "--doc", "doc"])
+    merge_grades.main()
+
+    verdict = json.loads(paths.grade_report_json("doc").read_text())
+    assert verdict["rubric_verdict"]["content_issue_pages"] == []
+    assert verdict["overall_passed"] is True

@@ -58,7 +58,12 @@ Markdown/HTML body when applying the criteria below.
 ## Scoring
 
 Score each page 0-1 (1 = no issues). Document score = average of page
-scores. **Pass threshold: 0.85.**
+scores. **Pass threshold: 0.85**, and no page may carry a content tag
+(`dropped_text`, `hallucinated_text`, `wrong_reading_order`,
+`duplicated_text`, `table_corruption`, `wrong_heading_level`): wrong body
+text fails the document whatever the average, so it is retried. Image tags
+(`missing_image`, `bad_caption`, `bad_mermaid`) count through the score
+only.
 
 ## Failure taxonomy
 
@@ -89,6 +94,6 @@ is 0.0-1.0, 1.0 = no issues. A tag outside the taxonomy above is refused.
 the exact text, table or figure that is wrong.
 
 Score 1.0 = no issues. The document-level score, pass/fail against the 0.85
-threshold, and the combined `overall_passed` (gates AND rubric) are computed
+threshold and the content-tag rule, and the combined `overall_passed` (gates AND rubric) are computed
 by `merge_grades.py` after every grader batch's shards are on disk — you
 don't need to (and can't, from inside one batch) compute those yourself.
