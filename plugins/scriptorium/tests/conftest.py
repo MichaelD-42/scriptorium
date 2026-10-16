@@ -49,7 +49,7 @@ def load_script(relpath: str, name: str):
     return module
 
 
-def run_script(relpath: str, *args: str, cwd: Path) -> subprocess.CompletedProcess:
+def run_script(relpath: str, *args: str, cwd: Path, stdin: str | None = None) -> subprocess.CompletedProcess:
     """Run skills/<relpath> as a subprocess, the same way commands/extract.md
     invokes it: `uv run --project <plugin> python <script> <args>`."""
     script_path = SKILLS_ROOT / relpath
@@ -58,10 +58,11 @@ def run_script(relpath: str, *args: str, cwd: Path) -> subprocess.CompletedProce
         cwd=cwd,
         capture_output=True,
         text=True,
+        input=stdin,
     )
 
 
-def describe_all_images(doc: str, cwd: Path) -> None:
+def describe_all_images(doc: str, cwd: Path, pages: set[int] | None = None) -> None:
     """Simulate the extractor agent's describe step (agents/extractor.md)
     for a pipeline test: give every image element in every image shard a
     `description` via describe_image.py. When the element has neither a
@@ -72,7 +73,8 @@ def describe_all_images(doc: str, cwd: Path) -> None:
     description is left as it is. In the real loop the agent writes these
     fields after extraction and before merge.py, so gates.py's
     `figures_complete` check (Task A9) sees them. Run this after the
-    extract scripts and before merge.py."""
+    extract scripts and before merge.py. `pages` limits it to those pages'
+    shards, as one extractor batch would."""
     import json
 
     import paths
@@ -82,6 +84,8 @@ def describe_all_images(doc: str, cwd: Path) -> None:
     for shard_file in sorted(shards_dir.glob("page*.image.json")):
         shard = json.loads(shard_file.read_text())
         page_number = shard["page_number"]
+        if pages is not None and page_number not in pages:
+            continue
         for el in shard.get("elements", []):
             if el.get("type") != "image" or (el.get("description") or "").strip():
                 continue

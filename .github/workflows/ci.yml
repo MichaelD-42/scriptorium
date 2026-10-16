@@ -32,4 +32,6 @@ jobs:
 
       - name: Run tests
         working-directory: plugins/scriptorium
-        run: uv run pytest
+        # Coverage once, on 3.12: its sys.monitoring core keeps subprocess coverage
+        # cheap; on 3.11 the fallback tracer makes the suite ~8x slower.
+        run: uv run pytest ${{ matrix.python-version == '3.11' && '--no-cov' || '' }}
