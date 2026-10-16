@@ -10,6 +10,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 import paths  # noqa: E402
+import preflight  # noqa: E402
+
+from PIL import Image
 
 
 def main() -> None:
@@ -21,6 +24,16 @@ def main() -> None:
     if image_path is None or paths.detect_input_format(args.doc) != "image":
         print(f"error: no image input found for doc '{args.doc}' in input/", file=sys.stderr)
         sys.exit(1)
+
+    try:
+        with Image.open(image_path) as img:
+            img.load()
+            frames = getattr(img, "n_frames", 1)
+    except Exception as e:  # UnidentifiedImageError, truncated data, DecompressionBombError
+        preflight.fail(image_path, f"cannot be opened as an image ({type(e).__name__}: {e})")
+    if frames > 1:
+        # render-pages saves the first frame only.
+        preflight.fail(image_path, f"has {frames} pages; convert it to a PDF (one page per frame) instead")
 
     page_info = {
         "page_number": 1,

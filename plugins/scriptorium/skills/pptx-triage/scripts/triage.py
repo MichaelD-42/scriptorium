@@ -10,6 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 import paths  # noqa: E402
+import preflight  # noqa: E402
 
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
@@ -45,7 +46,9 @@ def main() -> None:
         print(f"error: input/{args.doc}.pptx not found", file=sys.stderr)
         sys.exit(1)
 
-    presentation = Presentation(pptx_path)
+    presentation = preflight.open_office(Presentation, pptx_path)
+    if not len(presentation.slides):
+        preflight.fail(pptx_path, "has no slides")
     pages = [classify_slide(slide, i) for i, slide in enumerate(presentation.slides, start=1)]
 
     loop_size = "tight" if any(p["has_visual"] for p in pages) else "loose"

@@ -70,7 +70,8 @@ def true_page_count(doc: str, input_format: str, root: Path = Path(".")) -> int:
     if input_format == "pdf":
         import fitz  # PyMuPDF
 
-        return fitz.open(input_file(doc, root)).page_count
+        with fitz.open(input_file(doc, root)) as pdf:
+            return pdf.page_count
     if input_format == "pptx":
         from pptx import Presentation
 

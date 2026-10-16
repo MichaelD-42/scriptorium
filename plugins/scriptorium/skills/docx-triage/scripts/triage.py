@@ -10,6 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 import docx_pages  # noqa: E402
 import paths  # noqa: E402
+import preflight  # noqa: E402
 
 from docx import Document
 from docx.table import Table
@@ -40,7 +41,7 @@ def main() -> None:
         print(f"error: input/{args.doc}.docx not found", file=sys.stderr)
         sys.exit(1)
 
-    document = Document(docx_path)
+    document = preflight.open_office(Document, docx_path)
     pages = docx_pages.split_pages(document)
 
     page_infos = [classify_page(blocks, i, document) for i, blocks in enumerate(pages, start=1)]

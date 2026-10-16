@@ -11,8 +11,8 @@ loop" step: cheap, deterministic, and it runs once per document (per attempt).
 
 ## When to use
 
-Always run this first for a new document, and again after an escalation to
-re-check only the pages that were bumped a tier (pass `--pages`).
+Always run this first for a new document. A retry does not re-triage: the
+escalated tiers come from `runs/state.json` (see `commands/extract.md`).
 
 ## How
 
