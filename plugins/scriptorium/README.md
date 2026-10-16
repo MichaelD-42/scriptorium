@@ -19,6 +19,30 @@ PDF, PowerPoint (`.pptx`), Word (`.docx`), Excel (`.xlsx`), HTML (`.html`),
 and standalone images (`.png`/`.jpg`/`.jpeg`/`.webp`/`.tiff`) are
 implemented today.
 
+## 0.5.0
+
+- **Work-sized batches**: the orchestrator runs the deterministic extract
+  scripts itself and spawns an extractor only for pages that need judgment
+  (OCR/vision bodies, undescribed images). Batches are sized by estimated
+  turns against each agent's `maxTurns` instead of a fixed `--batch-size`
+  (now an optional cap); grader batches are weighted by figure count.
+- **Scripted queue** (`queue-state`): `state.py` owns `runs/state.json` and
+  the pass / retry / needs-human rules; a failure with nothing page-level to
+  retry goes to a human instead of burning attempts. Grade shards keep the
+  grader's `--reason`, which the next extractor receives verbatim.
+- **Stricter pass rule**: any page tagged with a content issue (dropped,
+  hallucinated, duplicated or misordered text, wrong heading level, broken
+  table) fails the document, whatever the average score.
+- **Preflight in triage**: unreadable, password-protected, empty or damaged
+  inputs (every format) and multi-page TIFFs are rejected with a one-line
+  reason. A PDF page with a garbled text layer or a stamped scan starts at
+  OCR.
+- **Fixes**: a header line on a one-page PDF is no longer dropped as page
+  furniture. PDF triage is up to 2.4x faster and prints a compact summary.
+- **Docs and tests**: a Structurizr C4 model (`docs/c4/workspace.dsl`);
+  acceptance tests that drive the whole queue loop; coverage now measures
+  the scripts tests run as subprocesses (95%).
+
 ## 0.4.5
 
 - **Faster PDF extraction**: table detection no longer reopens the PDF for
