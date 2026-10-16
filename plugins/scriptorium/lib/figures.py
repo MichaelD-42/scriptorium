@@ -310,7 +310,8 @@ def page_tables(
     row."""
     frame_tables = frame_tables or []
     found = []
-    with pdfplumber.open(pdf_path) as pl_doc, fitz.open(pdf_path) as fitz_doc:
+    pl_doc = _plumber_doc(pdf_path)
+    with fitz.open(pdf_path) as fitz_doc:
         pl_page = pl_doc.pages[page_number - 1]
         crop = None
         content_rect = furniture_lib.page_content_rect(
@@ -348,7 +349,28 @@ def page_tables(
                 "filled_cells": filled,
                 "filled_fraction": filled / len(real) if real else 0.0,
             })
+    pl_doc.pages[page_number - 1].close()  # free the page's parsed objects, as closing the doc used to
     return found
+
+
+_plumber_cache: dict = {}
+
+
+def _plumber_doc(pdf_path: Path):
+    """The open pdfplumber doc for `pdf_path`, kept across calls: its first
+    `.pages` access parses every page object, so reopening it per page made
+    a whole-document run quadratic in page count. Only the most recent file
+    stays open.
+    shortcut: (mtime, size) spots a rewritten file, but not a same-size
+    rewrite within one mtime tick; key on content if that ever matters."""
+    stat = Path(pdf_path).stat()
+    key = (str(Path(pdf_path).resolve()), stat.st_mtime_ns, stat.st_size)
+    if key not in _plumber_cache:
+        for doc in _plumber_cache.values():
+            doc.close()
+        _plumber_cache.clear()
+        _plumber_cache[key] = pdfplumber.open(pdf_path)
+    return _plumber_cache[key]
 
 
 # Follow-up R20: rule ends within this many points count as one y, and a
