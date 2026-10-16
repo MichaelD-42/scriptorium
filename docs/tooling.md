@@ -23,7 +23,8 @@ Each skill is `SKILL.md` + `scripts/*.py`, run with
 | Skill | Scripts | Role |
 |---|---|---|
 | `setup-environment` | `check_env.sh` / `check_env.ps1`, `ensure_language.py` | bootstrap `uv`/Python/`tesseract`/`soffice` (LibreOffice, for pptx rendering); detect and install the OCR language pack a document actually needs |
-| `pdf-triage` | `triage.py` | classify PDF pages into tiers + document loop size (`loose`/`tight`) |
+| `queue-state` | `state.py`, `plan.py` | orchestrator only. `state.py` owns `runs/state.json` (init, next, reject, set-lang, decide, summary) and applies the pass / retry / needs-human rules to `grade-report.json`; `plan.py` lists the pages to extract by script, then batches the pages that need an agent by estimated turns against each agent's `maxTurns` |
+| `pdf-triage` | `triage.py` | classify PDF pages into tiers + document loop size (`loose`/`tight`); preflight rejects unreadable input and starts garbled-text or stamped-scan pages at `ocr` |
 | `pptx-triage` | `triage.py` | classify pptx slides (always tier `text`) + loop size (`tight` if any slide has a picture/chart) |
 | `docx-triage` | `triage.py` | split a docx into logical pages (Heading-1 sections, via `lib/docx_pages.split_pages`) + loop size (`tight` if any page has a table/image); its `page_count` is the pipeline's own pagination, not an independent source-file property |
 | `xlsx-triage` | `triage.py` | classify workbook sheets (always tier `text`, one sheet = one page) + loop size (`tight` if any sheet has an image/chart); its `page_count` (`workbook.sheetnames`) **is** an independent source-file property, like pptx |
@@ -48,10 +49,14 @@ iteration, Heading-1 pagination, and inline-image extraction, shared by
 `docx-triage` and `docx-extract` so segmentation can't drift between them),
 `html_pages.py` (HTML block iteration, table/heading parsing, and
 `data:`-URI/local-file image resolution, shared by `html-triage`,
-`html-extract`, and `text_mode_grade.py`'s html path).
+`html-extract`, and `text_mode_grade.py`'s html path), `preflight.py`
+(triage's one-line rejection of an input the extract step cannot read),
+`grades.py` (the failure taxonomy, split into content and image issues).
 
 ### Key script arguments
 
+- `queue-state/scripts/state.py init|next|reject|set-lang|decide|summary ...`
+- `queue-state/scripts/plan.py --doc <name> --stage scripts|extract|grade [--max-pages <n>]`
 - `pdf-triage/scripts/triage.py --doc <name>`
 - `pptx-triage/scripts/triage.py --doc <name>`
 - `docx-triage/scripts/triage.py --doc <name>`

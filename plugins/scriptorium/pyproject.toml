@@ -30,3 +30,8 @@ markers = [
     "requires_libreoffice: needs LibreOffice (soffice) -- skipped in default CI",
 ]
 addopts = "--cov=lib --cov=skills --cov-report=term-missing"
+
+[tool.coverage.run]
+# Most scripts are tested as subprocesses (conftest.run_script); measure them too.
+patch = ["subprocess"]
+core = "sysmon"

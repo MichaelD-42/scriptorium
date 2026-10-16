@@ -28,9 +28,18 @@ that's a subagent's job, not yours.
 Arguments (`$ARGUMENTS`, all optional): `--doc <name>` to process a single
 named document instead of the whole queue; `--format md|html|okf|md-tree|reqif|reqifz`
 (default `md`); `--split-depth <n>` (`md-tree` only, default `2`; only `2` is
-accepted); `--max-attempts <n>` (default `3`); `--batch-size <n>` (default `8`
-pages per subagent); `--zip` to also package each document's `output/<doc>/`
-into `output/<doc>.zip` once it passes (off by default).
+accepted); `--max-attempts <n>` (default `3`); `--batch-size <n>` (optional cap
+on pages per subagent, passed to `plan.py` as `--max-pages`; without it,
+batches are sized by work, see step 2); `--zip` to also package each
+document's `output/<doc>/` into `output/<doc>.zip` once it passes (off by
+default).
+
+Two scripts carry the bookkeeping, so you never edit `runs/state.json` or
+size a batch by hand (`queue-state` skill):
+`queue-state/scripts/state.py` owns the queue and the pass / retry /
+needs-human decision; `queue-state/scripts/plan.py` decides which pages need
+an agent and how to batch them. Run every script below as
+`uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/skills/<skill>/scripts/<script>" ...`.
 
 ## Step 0 — environment bootstrap (once, before the queue loop)
 
@@ -52,76 +61,72 @@ that actually have scanned pages, and that's handled per-document below.
 
 ## Setup
 
-- Ensure `runs/state.json` exists (`{"docs": {}}` if not).
-- Scan `input/*` for every supported input extension (`pdf`, `pptx`, `xlsx`,
-  `docx`, `html`, `png`, `jpg`, `jpeg`, `webp`, `tiff`). For every file whose
-  stem isn't yet a key under `docs`, add it:
-  `{"status": "pending", "attempt": 0, "input_format": "<ext>", "format": "<output format>", "escalated_pages": {}, "lang_flag": null, "tessdata_prefix": null}`.
-  `input_format` is the source file's extension — not to be confused with
-  `format`, which is the output format (`md`/`html`/`okf`/`md-tree`/`reqif`/`reqifz`).
-  The five image extensions all normalize to `input_format: "image"`
-  (`lib/paths.py`'s `detect_input_format`) — record `"image"`, not the raw
-  extension.
-- If `--doc` was given, you only ever pick that one document below.
+`state.py init --format <output format>` creates `runs/state.json` if needed
+and adds every new supported file in `input/` as `pending`. If `--doc` was
+given, pass `--doc <name>` to every `state.py next` below.
 
 ## Queue loop
 
 Repeat until no document matches:
 
-**Pick** the first document (`input/` order) with `status` in `pending` or
-`retrying`. None left → report a short summary (passed / needs-human counts,
-with grade-report paths, and any document that has `warnings` recorded in
-its queue entry — see step 5) and **stop**.
+**Pick**: `state.py next` prints the next `pending`/`retrying` document, or
+nothing. Nothing → run `state.py summary`, report it (passed / needs-human
+counts, each needs-human reason, documents with warnings) and **stop**.
 
 ### 1. Triage / resume
 
-- **Attempt 0**: run the triage script for this document's `input_format`
-  (a script — pure classification, no judgment, don't spend an agent on
-  it): `pdf-triage/scripts/triage.py --doc <name>` for `pdf`,
-  `pptx-triage/scripts/triage.py --doc <name>` for `pptx`,
-  `docx-triage/scripts/triage.py --doc <name>` for `docx`,
-  `xlsx-triage/scripts/triage.py --doc <name>` for `xlsx`,
-  `html-triage/scripts/triage.py --doc <name>` for `html`,
-  `image-triage/scripts/triage.py --doc <name>` for `image`. Its `loop_size`
-  tells you how closely to read the reports that follow: `loose` (all tier
-  `text`, no tables/images) — dispatch and wait for everything before
-  checking in; `tight` (some `ocr`, or visuals/tables present) — expect a
-  retry, read each batch's summary closely. `image` triage is always
-  `tight` (it's always tier `ocr`, carrying the same escalation risk a
-  scanned PDF page has). For `docx`/`xlsx`/`html`
-  specifically, "expect a retry" only applies to `missing_image`/
-  `bad_caption` — see the Decide step below for why a content defect on
-  one of these pages doesn't get a normal retry.
-- **Retry** (attempt > 0): don't re-triage — the PDF didn't change. Use
-  `escalated_pages` from `runs/state.json`; you'll only re-dispatch those
-  pages below, not the whole document.
-- **If any page (from triage or escalation) is tier `ocr` or `vision`** and
-  `lang_flag` is still `null` for this doc: run
-  `setup-environment/scripts/ensure_language.py` on one such page's
-  rendered PNG (render it first via `render-pages` if needed), store the
-  resulting `lang_flag` **and** `tessdata_prefix` in `runs/state.json` for
-  this doc, and pass both to every `extractor` batch below as `--lang` and
-  (only when `tessdata_prefix` isn't `null`) `--tessdata-dir`. Resolve this
-  once per document, not once per attempt.
+- **Attempt 0**: run `<input_format>-triage/scripts/triage.py --doc <name>`
+  (`pdf`, `pptx`, `docx`, `xlsx`, `html`, `image`; a script, no agent).
+  **Exit 1** means the input is unreadable, password-protected, empty or
+  damaged: `state.py reject --doc <name> --reason "<the error: line>"`, next
+  document. A retry cannot fix the input file. Triage's `loop_size` tells
+  you how closely to read the reports that follow: `loose` (all tier
+  `text`, no visuals) — dispatch and wait; `tight` — expect a retry and read
+  each batch's summary closely.
+- **Retry** (attempt > 0): don't re-triage. `plan.py` reads the escalated
+  pages from `runs/state.json`.
+- **OCR language**: if this attempt has an `ocr` or `vision` page (PDF
+  triage's `non_text_pages`, an `image` document, or a retry tier) and the
+  queue entry's `lang_flag` is `null`: run
+  `setup-environment/scripts/ensure_language.py` on one such page's rendered
+  PNG (render it first via `render-pages`), then `state.py set-lang --doc
+  <name> --lang-flag <lang_flag> [--tessdata-prefix <prefix>]`. Pass both
+  to every extractor batch with an `ocr`/`vision` page as `--lang` and (only
+  when set) `--tessdata-dir`. Once per document, not per attempt.
 
-### 2. Extract — parallel batches
+### 2. Extract — scripts first, agents only where needed
 
-Build the set of pages to (re-)extract: **all** pages on attempt 0; only
-the keys of `escalated_pages` on a retry. Partition into groups of
-`--batch-size`. **In a single message, spawn one `extractor` subagent per
-group** (multiple Agent tool calls together — this is what makes it
-parallel, not sequential calls across turns). Give each its doc name, its
-`input_format`, its page list, the tier for each of its pages (from triage,
-or the escalated tier), triage's `body_size` if the format has one (pass
-through to every `extract-text` call as `--body-size`),
-`--lang`/`--tessdata-dir` if relevant, and on a retry every page of the
-group whose `escalated_pages` entry has `recheck_images: true`, with its
-`reason` (the extractor then redoes only that page's image step). Wait for
-all of them.
+**2a. Scripts.** `plan.py --doc <name> --stage scripts` prints the pages to
+extract deterministically yourself (each list may be empty; skip a command
+with no pages):
 
-This is race-free by construction: each `extractor` only ever writes shard
-files for its own pages (`work/<doc>/shards/page{N}.*.json`), so batches
-never touch the same file.
+- `extract_text` → `extract-text/scripts/extract_text.py --doc <name>
+  --pages <list> --body-size <triage body_size>`
+- `extract_images` → `extract-images/scripts/extract_images.py --doc <name>
+  --pages <list>`
+- `format_extract` → the format's extract script
+  (`pptx-extract/scripts/extract_pptx.py`, `docx-extract/scripts/extract_docx.py`,
+  `xlsx-extract/scripts/extract_xlsx.py`, `html-extract/scripts/extract_html.py`)
+  `--doc <name> --pages <list>`
+
+Their stdout is one short line per page; that is all you read.
+
+**2b. Agents.** `plan.py --doc <name> --stage extract [--max-pages <n>]`
+prints `batches`: only the pages that still need judgment (an `ocr`/`vision`
+body, or an image without a description). Each batch is sized to fit in an
+extractor's turn limit. **In a single message, spawn one `extractor` per
+batch** (multiple Agent calls together, so they run in parallel). Give each:
+the doc name, `input_format`, its `pages` and `tiers` (verbatim), the note
+that text-tier bodies and image shards for its pages are already on disk,
+`--lang`/`--tessdata-dir` if it has an `ocr`/`vision` page, and on a retry its
+`recheck_images` pages and `reasons` (verbatim). No batches → skip the
+spawn. A page in `over_budget_pages` has more figures than one extractor
+can describe in its turn limit: tell that batch's extractor to describe as
+many as it can and list the rest in its summary; `figures_complete` will
+send the rest back as a retry. Wait for all of them.
+
+Each `extractor` only writes its own pages' shard files, so batches never
+touch the same file.
 
 ### 3. Merge and assemble (scripts, not agents)
 
@@ -150,118 +155,41 @@ retry that only re-extracted 2 pages still produces a complete document.
 
 ### 4. Grade
 
-Same page set as step 2 (all pages on attempt 0, only escalated pages on a
-retry — an un-escalated page's assembled content didn't change, so its
-existing grade shard from a prior attempt is still valid and doesn't need
-regrading).
+- **`pdf`/`pptx`/`image`**: `plan.py --doc <name> --stage grade
+  [--max-pages <n>]` prints `batches`, weighted by each page's figure count.
+  **Spawn one `grader` per batch in parallel**, each with its `pages` and
+  the assembled output's location (for `md-tree`, `output/<doc>/<doc>.md`,
+  see step 3). Wait for all of them. On a retry only the escalated pages are
+  regraded; the others' grade shards are still valid.
+- **`docx`/`xlsx`/`html`** (`plan.py` prints `text_mode: true`; no rendered
+  page, see `grade-output/text-rubric.md`): no agents. Run
+  `grade-output/scripts/text_mode_grade.py --doc <name>` once.
 
-- **`pdf`/`pptx`/`image`** (rendered pages exist): partition into
-  `--batch-size` groups, **spawn one `grader` subagent per group in
-  parallel**, each with its page list and the assembled output's location
-  (for `md-tree`, give it `output/<doc>/<doc>.md` — see step 3).
-  Wait for all of them. (`image` is always a single page, so this is one
-  `grader` subagent.)
-- **`docx`/`xlsx`/`html`** (no rendered page — see
-  `grade-output/text-rubric.md`): no subagent spawn for this step at all.
-  Run the deterministic grader script once for the whole document instead:
-
-  ```bash
-  uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/skills/grade-output/scripts/text_mode_grade.py" --doc <name>
-  ```
-
-Either way, once grade shards are on disk:
-
-```bash
-uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/skills/grade-output/scripts/merge_grades.py" --doc <name> --attempt <attempt>
-```
-
-Read `output/<doc>/grade-report.json` — the only place you look at grading
-detail, and even then just the compact per-page score/issues, not raw
-subagent output.
+Then `grade-output/scripts/merge_grades.py --doc <name> --attempt <attempt>`.
+Its stdout is a summary; you never need to read `grade-report.json`.
 
 ### 5. Decide
 
-- **`grade-report.json["warnings"]` is non-empty** (Task A5b fix round 1,
-  controller finding 2 — e.g. a `large_region_excluded`,
-  `orphan_figure_caption` or `table_as_figure` entry): record the
-  list verbatim in this document's `runs/state.json` queue entry as
-  `warnings`, and include it in the loop summary you report to the human,
-  **regardless of `overall_passed`** — a warning never blocks the pass/fail
-  decision below (it's not a gate), but it must never be silently dropped
-  either. This is the visibility half of the "no silent drops" contract
-  `grade-output`'s `large_region_excluded` and `orphan_figure_caption`
-  warnings exist for — a warning is worthless if nothing downstream of `gates.py` ever surfaces it to a
-  human.
-- **`overall_passed: true`**: `status: "passed"`. If `--zip` was given, run
-  `assemble-output/scripts/zip_output.py --doc <name>` now (a script, not an
-  agent step — deterministic packaging of whatever `assemble.py` already
-  wrote). Next document.
-- **`overall_passed: false`**:
-  - `attempt += 1`. `attempt >= max_attempts` → `status: "needs-human"`,
-    record the grade-report path, next document.
-  - **Gate failures** (`grade-report.json["gates"]["checks"]`, each with
-    `passed: false`). The original five checks are document-level only:
-    they name no pages, and this step does not map them to pages. The
-    three Task A9 structure checks each carry a `pages` list:
-    - `furniture_absent` or `toc_headings_match` failed →
-      `status: "needs-human"` **immediately**, and record the check's
-      `detail` and `pages` in the queue entry. These checks stay
-      document-level: their input is deterministic script output
-      (furniture removal in `extract-text` and in `merge.py`, TOC-driven
-      heading levels), so a retry at the same tier gives the same result,
-      and a tier bump does not help — `ocr`/`vision` get no TOC-driven
-      heading levels. This is the same logic as the `docx`/`xlsx`/`html`
-      content-defect rule below.
-      The reverse case is safe: a page bumped to `ocr`/`vision` for a
-      rubric issue does not bring the title block back, because
-      `merge.py` removes the furniture lines from `ocr`/`vision` bodies
-      with the same band plus pattern rule `furniture_absent` checks.
-    - `figures_complete` failed → for each page in its `pages`, keep the
-      body tier and set `recheck_images: true` (the same flag as
-      `missing_image`/`bad_caption` below), with the check's `detail` as
-      `reason`. This retries normally for every format.
-  - Unless the document is now `needs-human`, also, for each page with
-    issues in `rubric_verdict.per_page`, escalate into `escalated_pages` (keyed by page number) — this is
-    **retained feedback**, not a blind re-run:
-    - **`pdf`/`pptx`**: `dropped_text` / `hallucinated_text` /
-      `wrong_reading_order` / `duplicated_text` / `wrong_heading_level` /
-      `table_corruption` → bump the body tier one step:
-      `text → ocr → ocr → vision` (a page already at `ocr` whose *content*
-      is still wrong, not just low-confidence, goes straight to `vision`).
-      **A page already at `vision` that's still failing**: don't retry it
-      again — set `status: "needs-human"` for the whole document
-      immediately rather than burning remaining attempts on something
-      that's already had the best available tier.
-    - **`image`**: same content-defect issues as above, but the ladder has
-      only two rungs (no `text` — every image page starts at `ocr`):
-      `ocr → vision`. A page already at `vision` that's still failing
-      follows the identical `needs-human` rule above.
-    - **`docx`/`xlsx`/`html`** (no `ocr`/`vision` rung to escalate into —
-      extraction is already digital-native and deterministic): the same
-      content-defect issues above mean **`status: "needs-human"`
-      immediately**, on the *first* failure, no retry — re-running
-      `docx-extract`/`xlsx-extract`/`html-extract` on an unchanged page
-      produces byte-identical output, so a retry would only burn an
-      attempt without ever being able to fix anything. This is the same
-      logic as the "already at vision" rule above, just starting from
-      attempt 0 instead of the top of the ladder.
-    - `missing_image` / `bad_caption` (any format; for `pdf`/`image` this
-      also covers a wrong or incomplete `figure_text`) / `bad_mermaid`
-      (`pdf`/`pptx`/`image` only — `text_mode_grade.py` can't judge diagram
-      fidelity, so `docx`/`xlsx`/`html` never emit it) → keep the page's body tier
-      as-is, set `recheck_images: true` so the next `extractor` batch
-      redoes just the image/caption/mermaid step for that page — this
-      **does** retry normally even for `docx`/`xlsx`/`html`, since
-      re-captioning is a real, different action, unlike re-running
-      deterministic text extraction.
-    - Record `reason` (the grader's actual issue text) alongside each
-      escalation — that's what makes this retained feedback instead of
-      noise.
-  - `status: "retrying"`. Loop to step 2 for this same document.
+`state.py decide --doc <name> --max-attempts <n>` applies the grade report
+and prints the document's new `status`:
+
+- `passed` → if `--zip`, run `assemble-output/scripts/zip_output.py --doc
+  <name>`. Next document.
+- `retrying` → loop to step 2 for this document. `escalated_pages` holds
+  each page's new tier, `recheck_images` flag and the grader's `reason`;
+  `plan.py` reads them from the queue file.
+- `needs-human` → its `reason` says why. Next document.
+
+`warnings` (a count) is recorded in the queue entry whatever the status and
+reported by `state.py summary`; a warning never blocks a pass, but it is
+never dropped either. The rules `decide` applies (tier ladder per format,
+which gate failures go straight to a human, why a docx/xlsx/html content
+defect is not retried) are in `queue-state/SKILL.md`.
 
 ## Notes
 
-- `runs/state.json` is the single source of truth. If you're ever unsure
-  what to do next for a document, read it before guessing.
-- Never re-run the same tier on a page that already failed at that tier
-  without changing something — see the `vision`-already-failing rule above.
+- `runs/state.json` is the single source of truth, and only `state.py`
+  writes it. If you're unsure what to do next for a document, run
+  `state.py summary` or `state.py next` before guessing.
+- Never re-run the same tier on a page that already failed at that tier:
+  `decide` never proposes it.

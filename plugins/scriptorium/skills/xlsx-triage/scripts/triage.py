@@ -10,6 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 import paths  # noqa: E402
+import preflight  # noqa: E402
 
 import openpyxl
 
@@ -42,7 +43,7 @@ def main() -> None:
         print(f"error: input/{args.doc}.xlsx not found", file=sys.stderr)
         sys.exit(1)
 
-    workbook = openpyxl.load_workbook(xlsx_path, data_only=True)
+    workbook = preflight.open_office(lambda p: openpyxl.load_workbook(p, data_only=True), xlsx_path)
     pages = [classify_sheet(workbook[name], i) for i, name in enumerate(workbook.sheetnames, start=1)]
 
     loop_size = "tight" if any(p["image_count"] > 0 or p["has_chart"] for p in pages) else "loose"
