@@ -27,25 +27,32 @@ raw script output) out of the orchestrator's context entirely.
 A document name, its `input_format` (`pdf`, `pptx`, `docx`, `xlsx`, `html`, `image`), a list of page
 numbers (your batch, and **only** your batch), a per-page tier assignment
 (`text`, `ocr`, or an explicit `vision` forced by a prior failed grade),
-triage's document-wide `body_size` if the format has one, and — if any page
+and — if any page
 needs OCR — a `--lang` value (and, only when set, a `--tessdata-dir` value)
 already resolved by the environment-setup step.
 
 On a retry you may also get **`recheck_images`** pages, each with the
-grader's `reason`. For such a page the body tier stays as it is. Redo the
-image step only: run `extract-images` again for a `pdf`/`image` page (for
-`pptx`/`docx`/`xlsx`/`html`, run the format's extract skill again; its
-body output is deterministic, so only the image shard changes in effect),
-then redo the caption, `figure_text`, description and mermaid work for
-that page with the `reason` in mind.
+grader's `reason`. For such a page the body tier stays as it is. The
+orchestrator has already re-run the image step for it, so its image shard
+is fresh and undescribed: redo the `figure_text`, description, mermaid (and
+for `pptx`/`docx`/`xlsx`/`html`, caption) work for that page with the
+`reason` in mind. A page escalated to a higher body tier also comes with
+its `reason`: use it to know what the previous extraction got wrong.
 
 ## Your job, per page in your batch
 
+The orchestrator has already run the deterministic scripts for your pages
+before spawning you (`queue-state` plan): `text`-tier bodies are extracted,
+and every page's image shard exists (for `pptx`/`docx`/`xlsx`/`html`, the
+format extract ran). You were given only pages that still need judgment:
+an `ocr`/`vision` body, or image elements without a `description`. Don't
+re-run `extract-text`, `extract-images` or a format extract for your pages
+at all: re-running `extract-images` wipes the descriptions already
+written to that page's image shard.
+
 **Body extraction — `pdf` documents:**
-1. Pages assigned `text`: run the `extract-text` skill (batch them into one
-   call with comma-separated `--pages`), passing `body_size` as
-   `--body-size` — it's a document-wide measurement, not something to
-   recompute per batch.
+1. Pages assigned `text`: the body is already extracted. Only their
+   images are yours (below).
 2. Pages assigned `ocr`: make sure they're rendered (`render-pages`), then
    run `ocr-page` with the given `--lang` (and `--tessdata-dir` if given)
    (batch them into one call too).
@@ -61,20 +68,17 @@ that page with the `reason` in mind.
 3. Pages assigned `vision` directly (a retry, forced by the orchestrator
    after a previous grade failure): skip straight to the vision step above.
 
-**Body extraction — `pptx` documents:** run the `pptx-extract` skill
-instead of `extract-text`/`ocr-page` (batch pages into one call with
-comma-separated `--pages`) — pptx is digital-native, so every page starts
-at tier `text` and the `ocr` rung never applies. The `vision` rung is
-unchanged: a slide re-assigned `vision` after a failed grade (or one whose
-extracted text looks suspiciously thin for a slide with visible content)
-still gets read directly (Read tool) off its rendered PNG and transcribed,
-landed with `write_vision_page.py`, exactly as for a PDF page.
+**Body extraction — `pptx` documents:** `pptx-extract` already ran — pptx
+is digital-native, so every page starts at tier `text` and the `ocr` rung
+never applies. The `vision` rung is unchanged: a slide re-assigned `vision`
+after a failed grade gets read directly (Read tool) off its rendered PNG
+and transcribed, landed with `write_vision_page.py`, exactly as for a PDF
+page.
 
-**Body extraction — `docx`/`xlsx`/`html` documents:** run the
-`docx-extract`/`xlsx-extract`/`html-extract` skill instead (batch pages
-into one call with comma-separated `--pages` — for `html` this is always
-just `1`) — all three are digital-native like pptx, so every page is tier
-`text`. Unlike pptx, there is **no `vision` rung at all** for any of them:
+**Body extraction — `docx`/`xlsx`/`html` documents:** the
+`docx-extract`/`xlsx-extract`/`html-extract` script already ran — all three
+are digital-native like pptx, so every page is tier `text` and only the
+images are yours. Unlike pptx, there is **no `vision` rung at all** for any of them:
 there's no rendered page image to fall back to, since these formats are
 graded text-mode (see `grade-output/text-rubric.md`). You should never be
 assigned tier `ocr` or `vision` for a docx/xlsx/html page; if you somehow
@@ -96,13 +100,11 @@ forced by the orchestrator after a previous grade failure), skip straight
 to the vision step. There is no `text` rung for this format, same reason a
 scanned PDF page has none.
 
-**Images**, independent of body tier: for `pdf` and `image` documents, run
-`extract-images` across **every** page in your batch (not just ones with a
-nonzero image count — a page can have a vector diagram with no embedded
-bitmap XObject; an `image` document's one page always counts, since the
-whole file is itself the image). For `pptx`/`docx`/`xlsx`/`html` documents,
-the format's own extract skill already writes the image shard alongside the
-body shard in the same call — no separate image-extraction pass needed. Note
+**Images**, independent of body tier: every page's image shard is already
+on disk (`extract-images` for `pdf`/`image`, which also finds vector
+diagrams with no embedded bitmap; the format's own extract script for
+`pptx`/`docx`/`xlsx`/`html`). Your work is the image elements in it that
+have no `description` yet. Note
 `html-extract` only saves `data:` URI and local-file `<img>` sources —
 remote (`http(s)://`) images are a known, documented gap (not fetched),
 same idea as xlsx's missing charts below.

@@ -79,11 +79,14 @@ shards afterward:
 ```bash
 uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
   "${CLAUDE_PLUGIN_ROOT}/skills/grade-output/scripts/write_grade_shard.py" \
-  --doc <doc-name> --page <page-number> --score 0.93 --issues dropped_text,bad_caption
+  --doc <doc-name> --page <page-number> --score 0.93 --issues dropped_text,bad_caption \
+  --reason "second paragraph under 3.1 missing; Figure 2 caption reads 'Figure 3'"
 ```
 
 Omit `--issues` (or pass an empty string) when the page is clean. `--score`
-is 0.0-1.0, 1.0 = no issues.
+is 0.0-1.0, 1.0 = no issues. A tag outside the taxonomy above is refused.
+`--reason` is what the next extractor is told verbatim on a retry: name
+the exact text, table or figure that is wrong.
 
 Score 1.0 = no issues. The document-level score, pass/fail against the 0.85
 threshold, and the combined `overall_passed` (gates AND rubric) are computed

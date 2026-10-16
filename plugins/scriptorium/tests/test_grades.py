@@ -262,3 +262,35 @@ def test_write_vision_page_lands_elements_from_stdin(tmp_project, monkeypatch):
     assert shard["elements"] == [{"type": "paragraph", "text": "scanned text"}]
 
 
+
+
+def test_write_grade_shard_keeps_the_graders_reason(tmp_project, monkeypatch):
+    monkeypatch.setattr(
+        "sys.argv",
+        ["write_grade_shard.py", "--doc", "doc", "--page", "2", "--score", "0.6", "--issues", "dropped_text",
+         "--reason", "second paragraph missing"],
+    )
+    write_grade_shard.main()
+    assert json.loads(paths.grade_shard_path("doc", 2).read_text())["reason"] == "second paragraph missing"
+
+
+def test_write_grade_shard_refuses_an_unknown_tag(tmp_project, monkeypatch):
+    """queue-state decides retries by tag; a typo would be a silent no-op."""
+    monkeypatch.setattr("sys.argv", ["write_grade_shard.py", "--doc", "doc", "--page", "1", "--score", "0.5",
+                                     "--issues", "droped_text"])
+    with pytest.raises(SystemExit) as exc_info:
+        write_grade_shard.main()
+    assert exc_info.value.code == 1
+    assert not paths.grade_shard_path("doc", 1).exists()
+
+
+def test_merge_grades_stdout_is_compact(tmp_project, monkeypatch, capsys):
+    _seed_gates_report(tmp_project, "doc", passed=True)
+    for n in range(1, 41):
+        _seed_grade_shard(tmp_project, "doc", n, 1.0 if n != 7 else 0.5, [] if n != 7 else ["dropped_text"])
+    monkeypatch.setattr("sys.argv", ["merge_grades.py", "--doc", "doc"])
+    merge_grades.main()
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["overall_passed"] is True
+    assert summary["pages_with_issues"] == [7]
+    assert "rubric_verdict" not in summary

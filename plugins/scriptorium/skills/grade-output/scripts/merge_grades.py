@@ -68,7 +68,15 @@ def main() -> None:
     out_path = paths.grade_report_json(args.doc)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(result, indent=2), encoding="utf-8", newline="")
-    print(json.dumps(result, indent=2))
+    # Context-rot rule: a summary for the orchestrator; queue-state reads the full report.
+    print(json.dumps({
+        "doc": args.doc,
+        "overall_passed": result["overall_passed"],
+        "gates_passed": gates["passed"],
+        "score": score,
+        "pages_with_issues": [p["page_number"] for p in per_page if p.get("issues")],
+        "warnings": len(result["warnings"]),
+    }, indent=2))
 
 
 if __name__ == "__main__":

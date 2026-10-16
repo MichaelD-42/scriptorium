@@ -16,11 +16,12 @@ workspace "scriptorium" "Document-to-Markdown extraction pipeline run as a Claud
         libreoffice = softwareSystem "LibreOffice" "Headless pptx-to-PDF conversion, only to render slides." "External"
 
         scriptorium = softwareSystem "scriptorium" "Turns PDF, pptx, docx, xlsx, html and image documents into graded Markdown, HTML, OKF, md-tree or ReqIF." {
-            orchestrator = container "Orchestrator" "Drives the queue loop: triage, parallel extract batches, merge/assemble/gates, parallel grade batches, decide pass / escalate / needs-human. Reads only script stdout, state.json and grade-report.json (context-rot rule)." "Claude Code slash command (commands/extract.md)" "Agent"
+            orchestrator = container "Orchestrator" "Drives the queue loop: triage, parallel extract batches, merge/assemble/gates, parallel grade batches, decide pass / escalate / needs-human. Reads only compact script stdout (context-rot rule); state.py and plan.py read the bulk files for it." "Claude Code slash command (commands/extract.md)" "Agent"
             extractor = container "Extractor" "Extracts one page batch at its assigned tier (text, OCR, vision) plus images, captions, figure text and mermaid. Writes only its own pages' shards." "Claude Code subagent, one per batch, in parallel" "Agent"
             grader = container "Grader" "Grades one page batch against the rubric by comparing rendered pages to the assembled output. Writes only its own pages' grade shards." "Claude Code subagent, one per batch, in parallel" "Agent"
 
             scripts = container "Skill scripts" "Deterministic CLI steps, one skill per tier or format." "Python 3.11+, uv" {
+                queue = component "Queue state + plan" "Owns runs/state.json and the pass / retry / needs-human rules; plans which pages need an agent and the batch sizes." "queue-state"
                 triage = component "Triage" "Per format: page split, tier per page, loop size. PDF also: preflight, furniture, TOC, body font size." "pdf/pptx/docx/xlsx/html/image-triage"
                 render = component "Render" "Page or region to PNG; pptx via LibreOffice." "render-pages"
                 extractText = component "Native extract" "Text-tier body shards: headings, paragraphs, lists, tables." "extract-text, pptx/docx/xlsx/html-extract"
@@ -42,12 +43,17 @@ workspace "scriptorium" "Document-to-Markdown extraction pipeline run as a Claud
         scriptorium.extractor -> claude "Runs on; vision reads"
         scriptorium.grader -> claude "Runs on; vision reads"
 
-        scriptorium.orchestrator -> scriptorium.state "Reads and updates"
-        scriptorium.orchestrator -> scriptorium.extractor "Spawns one per page batch, in parallel"
-        scriptorium.orchestrator -> scriptorium.grader "Spawns one per page batch, in parallel"
+        scriptorium.orchestrator -> scriptorium.scripts.queue "Runs init / next / decide / plan"
+        scriptorium.scripts.queue -> scriptorium.state "Reads and writes"
+        scriptorium.scripts.queue -> scriptorium.work "Reads triage, shards, elements.json"
+        scriptorium.scripts.queue -> scriptorium.output "Reads grade-report.json"
+        scriptorium.orchestrator -> scriptorium.scripts.extractText "Runs on text-tier pages"
+        scriptorium.orchestrator -> scriptorium.scripts.images "Runs on every page"
+        scriptorium.orchestrator -> scriptorium.extractor "Spawns one per planned batch, in parallel"
+        scriptorium.orchestrator -> scriptorium.grader "Spawns one per planned batch, in parallel"
         scriptorium.orchestrator -> scriptorium.scripts.triage "Runs, reads compact stdout"
         scriptorium.orchestrator -> scriptorium.scripts.merge "Runs"
-        scriptorium.orchestrator -> scriptorium.scripts.gates "Runs, reads grade-report.json"
+        scriptorium.orchestrator -> scriptorium.scripts.gates "Runs"
 
         scriptorium.extractor -> scriptorium.scripts.render "Runs"
         scriptorium.extractor -> scriptorium.scripts.extractText "Runs"
@@ -88,12 +94,12 @@ workspace "scriptorium" "Document-to-Markdown extraction pipeline run as a Claud
 
         dynamic scriptorium "Attempt" "One extraction attempt for one document." {
             user -> scriptorium.orchestrator "Runs /scriptorium:extract"
-            scriptorium.orchestrator -> scriptorium.state "Picks the next pending or retrying document"
-            scriptorium.orchestrator -> scriptorium.extractor "Spawns one per page batch (after triage on attempt 0)"
+            scriptorium.orchestrator -> scriptorium.scripts "Picks the next document; after the extract scripts, plans agent batches"
+            scriptorium.orchestrator -> scriptorium.extractor "Spawns one per planned batch"
             scriptorium.extractor -> claude "Transcribes pages that OCR could not read"
-            scriptorium.orchestrator -> scriptorium.grader "Spawns one per page batch (after merge, assemble, gates)"
+            scriptorium.orchestrator -> scriptorium.grader "Spawns one per planned batch (after merge, assemble, gates)"
             scriptorium.grader -> claude "Compares rendered pages to the output"
-            scriptorium.orchestrator -> scriptorium.state "Records passed, retrying with escalated pages, or needs-human"
+            scriptorium.orchestrator -> scriptorium.scripts "Decides: passed, retrying with escalated pages, or needs-human"
             autoLayout lr
         }
 

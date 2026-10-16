@@ -77,7 +77,10 @@ the assembled output's format/location.
    incomplete. For a figure with `no_visible_text: true` (in
    `elements.json`; the flag is not rendered), confirm on the page that
    it really has no text; tag `bad_caption` if it has.
-4. Write one grade shard per page with `write_grade_shard.py` — **never**
+4. Write one grade shard per page with `write_grade_shard.py`, with
+   `--reason` naming exactly what is wrong whenever you tag an issue. The
+   next extractor is given that text verbatim, so "page 5: the second
+   paragraph under 3.1 is missing" helps, "text issues" does not. **Never**
    try to compute or write the whole document's merged grade report
    yourself; that's arithmetic over every batch's shards, done by a
    deterministic script (`merge_grades.py`) after all of you finish.

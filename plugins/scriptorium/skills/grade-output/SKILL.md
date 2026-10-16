@@ -40,7 +40,7 @@ uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
 # inside each grader subagent, per page it graded — see rubric.md
 uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
   "${CLAUDE_PLUGIN_ROOT}/skills/grade-output/scripts/write_grade_shard.py" \
-  --doc <doc-name> --page <n> --score 0.93 --issues dropped_text
+  --doc <doc-name> --page <n> --score 0.93 --issues dropped_text --reason "<what is wrong, specifically>"
 
 # OR, for a no-rendered-page format (docx/xlsx/html) — note this does NOT
 # apply to image, which is a rendered-page format like pdf/pptx: one script call

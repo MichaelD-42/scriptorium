@@ -15,7 +15,7 @@ implement each step, see [`tooling.md`](tooling.md). The C4 model
 
 | Elastic Loop concept | This plugin |
 |---|---|
-| Intent opens the loop | `/scriptorium:extract` sets doc (or the whole `input/` queue), format, `--batch-size`, `--max-attempts` |
+| Intent opens the loop | `/scriptorium:extract` sets doc (or the whole `input/` queue), format, `--max-attempts`, optional `--batch-size` cap |
 | Context grounds it | the PDF, per-page rendered PNGs, per-page shards |
 | Backpressure (structural/hard) | `grade-output`'s `gates.py` — page count, empty pages, dangling asset refs, OCR confidence floor, plus PDF-only structure checks: furniture removed, TOC headings matched, figures complete |
 | Backpressure (product/soft) | `grade-output/rubric.md` — reading order, dropped/hallucinated/duplicated text, table integrity, headings, captions. Pass threshold (0.85) is hardcoded there, not a CLI flag |
@@ -65,28 +65,34 @@ that's a subagent's job.
 
 1. **Bootstrap** the environment once (`setup-environment`), before the queue
    loop starts.
-2. **Pick** the next document with `status` `pending` or `retrying` from
-   `runs/state.json`. None left → report and stop.
+2. **Pick** the next document with `status` `pending` or `retrying`
+   (`queue-state`'s `state.py next`; only `state.py` writes
+   `runs/state.json`). None left → report and stop.
 3. **Triage / resume** — attempt 0 runs `pdf-triage` (pure classification, no
-   agent needed); a retry reuses `escalated_pages` from state instead of
-   re-triaging. If any page needs OCR/vision and the document's OCR language
+   agent needed; an unreadable input fails here and goes to a human); a
+   retry reuses `escalated_pages` from state instead of re-triaging. If any page needs OCR/vision and the document's OCR language
    hasn't been resolved yet, resolve it once via `ensure_language.py`.
-4. **Extract — parallel batches**: partition the pages to (re-)extract
-   (all pages on attempt 0, only `escalated_pages` on retry) into
-   `--batch-size` groups, and spawn one `extractor` subagent per group **in a
-   single message** so they run in parallel. Each writes only its own pages'
-   shards — race-free by construction.
+4. **Extract — scripts first, then parallel batches**: for the pages to
+   (re-)extract (all pages on attempt 0, only `escalated_pages` on retry),
+   the orchestrator runs the deterministic extract scripts itself. Then
+   `plan.py` batches only the pages that still need judgment (an OCR/vision
+   body, an image without a description), each batch sized to fit an
+   extractor's turn limit, and one `extractor` per batch is spawned **in a
+   single message** so they run in parallel. A text-only page never costs an
+   agent. Each writes only its own pages' shards — race-free by construction.
 5. **Merge and assemble** (deterministic scripts, not agents): `merge.py` →
    `assemble.py` → `gates.py`. `merge.py` recombines every page's shards, old
    and new, so a retry that only touched 2 pages still produces a complete
    document.
-6. **Grade — parallel batches**: same page-set rule as extraction, one
-   `grader` subagent per batch, spawned in parallel, each judging the
+6. **Grade — parallel batches**: same page-set rule as extraction, batched
+   by `plan.py` by figure count, one `grader` subagent per batch, spawned in parallel, each judging the
    assembled output against the rendered pages. `merge_grades.py` combines
    every batch's shards into `grade-report.json`.
-7. **Decide**: `overall_passed` (gates AND rubric) → `passed`, next document.
-   Otherwise escalate (below), `status: retrying`, loop back to step 4 — or,
-   at `max-attempts`, `status: needs-human`.
+7. **Decide** (`state.py decide`, a script): `overall_passed` (gates AND
+   rubric) → `passed`, next document. Otherwise escalate (below),
+   `status: retrying`, loop back to step 4 — or `status: needs-human` at
+   `max-attempts`, when no tier is left, or when nothing page-level is left
+   to retry.
 
 ```mermaid
 flowchart TD
