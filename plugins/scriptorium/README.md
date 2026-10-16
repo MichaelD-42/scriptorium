@@ -19,6 +19,13 @@ PDF, PowerPoint (`.pptx`), Word (`.docx`), Excel (`.xlsx`), HTML (`.html`),
 and standalone images (`.png`/`.jpg`/`.jpeg`/`.webp`/`.tiff`) are
 implemented today.
 
+## 0.4.5
+
+- **Faster PDF extraction**: table detection no longer reopens the PDF for
+  every page, which made `extract-text` and `extract-images` quadratic in
+  page count. On a 207-page PDF, `extract_text` drops from 14 s to 3.4 s
+  and `extract_images` from 5.2 s to 1.6 s, with identical output.
+
 ## 0.4.4
 
 Line breaks the R28 rule still missed or added, from the golden-document
