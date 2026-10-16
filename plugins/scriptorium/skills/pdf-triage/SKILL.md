@@ -21,8 +21,20 @@ uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
   "${CLAUDE_PLUGIN_ROOT}/skills/pdf-triage/scripts/triage.py" --doc <doc-name>
 ```
 
-Reads `input/<doc-name>.pdf`, writes `work/<doc-name>/triage.json`, and prints
-the same JSON to stdout.
+Reads `input/<doc-name>.pdf` and writes `work/<doc-name>/triage.json`. Stdout
+is a compact summary for the orchestrator, sized by the pages it must act on:
+
+```json
+{"doc": "sample", "page_count": 5, "loop_size": "tight", "body_size": 11.0,
+ "non_text_pages": {"5": "ocr"}, "triage_json": "work/sample/triage.json"}
+```
+
+Every page not in `non_text_pages` is tier `text`.
+
+**Preflight.** Exit 1 with a one-line `error:` on stderr, and no
+`triage.json`, when the file is not a PDF, is password-protected, has no
+pages, or is damaged so that pdfminer (used by `extract-images`) cannot
+parse it, even when MuPDF can repair it.
 
 ## Output schema
 
@@ -118,6 +130,11 @@ Empty `entries: []` and no `role` keys anywhere when there's no outline and
 no printed TOC found.
 
 - `tier`: `text` (Tier 1, native extraction), `ocr` (Tier 2, needs OCR/vision).
+  A page with a text layer still starts at `ocr` when the layer is garbled
+  (at least 10% of its non-whitespace chars are control codes, U+FFFD or
+  private-use glyphs, the output of a font with no usable ToUnicode map) or
+  when images cover at least half the page and it has fewer than 200 text
+  chars (a scan with a digital stamp or header). `reason` says which.
   Triage never assigns `vision` directly — that only happens when Tier 2
   (`ocr-extractor`) itself reports low confidence and escalates.
 - `loop_size`: `loose` if every page is `text` (low risk, let extractors run
@@ -133,7 +150,8 @@ no printed TOC found.
 - `furniture`: page furniture detected once, document-wide (not yet
   removed — that is a separate, later step).
   - `line_patterns`: text lines whose furniture key repeats in the top or
-    bottom furniture band (see `content_rect`) on at least 60% of pages — running
+    bottom furniture band (see `content_rect`) on at least 60% of pages, and on
+    at least 2 pages (one line on a one-page document is not furniture) — running
     headers/footers, doc-number/revision/page-number lines, etc. The key
     (`lib/furniture.py`'s `furniture_key`, stored in `masked`) removes all
     whitespace and then turns every digit run into one `#`, so the

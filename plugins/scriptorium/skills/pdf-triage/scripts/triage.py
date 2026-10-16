@@ -8,6 +8,7 @@ import json
 import math
 import statistics
 import sys
+import unicodedata
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
@@ -19,6 +20,17 @@ import fitz  # PyMuPDF
 import pdfplumber
 
 TEXT_CHAR_THRESHOLD = 20  # fewer non-whitespace chars than this => treat page as scanned
+# Preflight: a text layer that exists but cannot be used. GARBLED_MIN_FRACTION
+# is the share of non-whitespace chars that are control codes, U+FFFD or
+# private-use glyphs: a font with no usable ToUnicode map reads out glyph ids
+# ("2VBSUFSMZ\x01SFQPSU" for "Quarterly report"). Real text has almost none;
+# Word's private-use list bullets stay near 2%. A page covered at least
+# SCAN_MIN_IMAGE_FRACTION by images with fewer than SCAN_MAX_TEXT_CHARS of
+# text is a scan with a digital stamp or header on it: the text tier would
+# extract the stamp and drop the scanned body.
+GARBLED_MIN_FRACTION = 0.10
+SCAN_MIN_IMAGE_FRACTION = 0.50
+SCAN_MAX_TEXT_CHARS = 200
 
 # Furniture thresholds (see SKILL.md). The edge band and the bbox
 # tolerances are in lib/furniture.py: FURNITURE_EDGE_BAND (top/bottom 12% of
@@ -26,6 +38,10 @@ TEXT_CHAR_THRESHOLD = 20  # fewer non-whitespace chars than this => treat page a
 # used here to decide whether two pages' bboxes are the same frame; see that
 # module for why the later matching tolerance is 3pt).
 LINE_PATTERN_MIN_PAGE_FRACTION = 0.60
+# A line on one page only is not repeated, even when that is 100% of a
+# one-page document; assemble.py never renders furniture_text, so a wrong
+# match is lost from the output.
+LINE_PATTERN_MIN_PAGE_COUNT = 2
 FRAME_TABLE_MIN_AREA_FRACTION = 0.60
 FRAME_TABLE_MIN_PAGE_FRACTION = 0.50
 REPEATED_IMAGE_MIN_PAGE_FRACTION = 0.50
@@ -78,6 +94,24 @@ def document_body_size(document) -> float:
     return statistics.median(weighted_sizes) if weighted_sizes else 0.0
 
 
+def _image_area_fraction(page) -> float:
+    """Share of the page area covered by placed images, capped at 1.0
+    (overlapping images are counted twice)."""
+    page_area = page.rect.width * page.rect.height
+    if page_area <= 0:
+        return 0.0
+    covered = sum(abs(fitz.Rect(info["bbox"]) & page.rect) for info in page.get_image_info())
+    return min(1.0, covered / page_area)
+
+
+def _garbled_fraction(text: str) -> float:
+    chars = [ch for ch in text if not ch.isspace()]
+    if not chars:
+        return 0.0
+    bad = sum(1 for ch in chars if ch == "\ufffd" or unicodedata.category(ch) in ("Cc", "Co"))
+    return bad / len(chars)
+
+
 def classify_page(page) -> dict:
     text = page.get_text("text")
     non_ws = len(text.strip())
@@ -85,11 +119,19 @@ def classify_page(page) -> dict:
     text_ratio = min(1.0, non_ws / 500) if non_ws else 0.0
 
     if non_ws >= TEXT_CHAR_THRESHOLD:
+        reason = "native text layer present"
+        tier = "text"
+        garbled = _garbled_fraction(text)
+        image_fraction = _image_area_fraction(page)
+        if garbled >= GARBLED_MIN_FRACTION:
+            tier, reason = "ocr", f"text layer garbled ({garbled:.0%} unmappable glyphs)"
+        elif non_ws < SCAN_MAX_TEXT_CHARS and image_fraction >= SCAN_MIN_IMAGE_FRACTION:
+            tier, reason = "ocr", f"image covers {image_fraction:.0%} of the page with only {non_ws} text chars, likely a stamped scan"
         return {
-            "tier": "text",
+            "tier": tier,
             "text_ratio": round(text_ratio, 3),
             "image_count": image_count,
-            "reason": "native text layer present",
+            "reason": reason,
         }
     return {
         "tier": "ocr",
@@ -147,7 +189,11 @@ def _find_repeated_lines(document, rect_furniture: dict | None = None) -> tuple[
     kept_occurrences = {}
     for (masked, edge), entry in sorted(occurrences.items()):
         matched_page_count = len(entry["pages"])
-        if page_count and matched_page_count / page_count >= LINE_PATTERN_MIN_PAGE_FRACTION:
+        if (
+            page_count
+            and matched_page_count >= LINE_PATTERN_MIN_PAGE_COUNT
+            and matched_page_count / page_count >= LINE_PATTERN_MIN_PAGE_FRACTION
+        ):
             line_patterns.append(
                 {
                     "masked": masked,
@@ -163,7 +209,27 @@ def _find_repeated_lines(document, rect_furniture: dict | None = None) -> tuple[
     return line_patterns, kept_occurrences
 
 
-def _find_frame_tables(pdf_path: Path, page_count: int) -> list[dict]:
+def _frame_table_candidate_pages(document) -> set[int]:
+    """Pages whose vector drawings span more than FRAME_TABLE_MIN_AREA_FRACTION
+    of the page. pdfplumber's default "lines" strategy builds tables only
+    from ruling lines and rects, so a page whose drawings all fit in a smaller
+    box cannot hold a frame table, and `find_tables()` (most of triage's
+    run time) is skipped there."""
+    snap = 3  # pt, pdfplumber's default snap/join tolerance
+    candidates = set()
+    for page_number, page in enumerate(document, start=1):
+        page_area = page.rect.width * page.rect.height
+        extent = fitz.Rect()
+        for d in page.get_drawings():
+            extent |= d["rect"]
+        if page_area > 0 and not extent.is_empty:
+            extent = fitz.Rect(extent.x0 - snap, extent.y0 - snap, extent.x1 + snap, extent.y1 + snap)
+            if extent.width * extent.height / page_area > FRAME_TABLE_MIN_AREA_FRACTION:
+                candidates.add(page_number)
+    return candidates
+
+
+def _find_frame_tables(pdf_path: Path, page_count: int, candidate_pages: set[int] | None = None) -> list[dict]:
     """Tables (per pdfplumber's `find_tables()`) whose bbox covers more than
     FRAME_TABLE_MIN_AREA_FRACTION of the page area, and that repeat at
     (approximately) the same bbox on at least FRAME_TABLE_MIN_PAGE_FRACTION
@@ -175,7 +241,8 @@ def _find_frame_tables(pdf_path: Path, page_count: int) -> list[dict]:
     groups: list[dict] = []  # [{"bboxes": [...], "pages": set()}]
 
     with pdfplumber.open(pdf_path) as pdf:
-        for page in pdf.pages:
+        for page_number in sorted(candidate_pages) if candidate_pages is not None else range(1, page_count + 1):
+            page = pdf.pages[page_number - 1]
             page_area = page.width * page.height
             if page_area <= 0:
                 continue
@@ -408,7 +475,7 @@ def detect_furniture(document, pdf_path: Path, body_pages: set[int] | None = Non
     drawings of any size (counted over `body_pages`, see
     `_find_repeated_drawings`), and repeated images. Returns
     `(furniture, furniture_text)` for folding into triage.json."""
-    frame_tables = _find_frame_tables(pdf_path, document.page_count)
+    frame_tables = _find_frame_tables(pdf_path, document.page_count, _frame_table_candidate_pages(document))
     frame_drawings = _find_frame_drawings(document)
     repeated_drawings = _find_repeated_drawings(document, body_pages)
     image_xrefs = _find_repeated_images(document)
@@ -455,7 +522,29 @@ def main() -> None:
         print(f"error: {pdf_path} not found", file=sys.stderr)
         sys.exit(1)
 
-    document = fitz.open(pdf_path)
+    try:
+        document = fitz.open(pdf_path)
+    except RuntimeError as e:  # pymupdf.FileDataError: not a PDF, or damaged beyond repair
+        print(f"error: {pdf_path} cannot be opened as a PDF ({e})", file=sys.stderr)
+        sys.exit(1)
+    try:
+        # MuPDF repairs a damaged file silently; pdfminer (pdfplumber, used by
+        # extract-images) does not, and would fail mid-run instead of here.
+        with pdfplumber.open(pdf_path) as pdf:
+            pdf.pages[0]
+    except Exception as e:
+        print(
+            f"error: {pdf_path} is damaged ({type(e).__name__}); "
+            "a re-saved copy (e.g. `mutool clean in.pdf out.pdf`) may work",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if document.needs_pass:
+        print(f"error: {pdf_path} is password-protected", file=sys.stderr)
+        sys.exit(1)
+    if document.page_count == 0:
+        print(f"error: {pdf_path} has no pages", file=sys.stderr)
+        sys.exit(1)
     pages = []
     for i, page in enumerate(document, start=1):
         classification = classify_page(page)
@@ -484,7 +573,17 @@ def main() -> None:
     out_path = paths.triage_json(args.doc)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(result, indent=2), encoding="utf-8", newline="")
-    print(json.dumps(result, indent=2))
+    # Context-rot rule: the orchestrator reads this stdout, so it gets a
+    # summary sized by the pages it must act on, not the whole triage.json.
+    summary = {
+        "doc": args.doc,
+        "page_count": len(pages),
+        "loop_size": loop_size,
+        "body_size": result["body_size"],
+        "non_text_pages": {str(p["page_number"]): p["tier"] for p in pages if p["tier"] != "text"},
+        "triage_json": str(out_path),
+    }
+    print(json.dumps(summary, indent=2))
 
     toc_out_path = paths.toc_json(args.doc)
     toc_out_path.parent.mkdir(parents=True, exist_ok=True)

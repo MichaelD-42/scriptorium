@@ -82,7 +82,12 @@ its queue entry — see step 5) and **stop**.
   `docx-triage/scripts/triage.py --doc <name>` for `docx`,
   `xlsx-triage/scripts/triage.py --doc <name>` for `xlsx`,
   `html-triage/scripts/triage.py --doc <name>` for `html`,
-  `image-triage/scripts/triage.py --doc <name>` for `image`. Its `loop_size`
+  `image-triage/scripts/triage.py --doc <name>` for `image`. **Triage exits
+  1** (the file is unreadable, password-protected, empty or damaged; the
+  one-line `error:` on stderr says which) → `status: "needs-human"`, record
+  that line as the queue entry's `reason`, next document. A retry cannot fix
+  the input file. PDF triage prints a compact summary: every page not in
+  `non_text_pages` is tier `text`. Its `loop_size`
   tells you how closely to read the reports that follow: `loose` (all tier
   `text`, no tables/images) — dispatch and wait for everything before
   checking in; `tight` (some `ocr`, or visuals/tables present) — expect a

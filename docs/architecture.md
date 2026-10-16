@@ -3,7 +3,10 @@
 This document covers the elastic loop itself: why the agent tree has the
 shape it does, how the orchestrator drives a document through it, and how
 failures turn into targeted retries. For the skills/scripts/schemas that
-implement each step, see [`tooling.md`](tooling.md).
+implement each step, see [`tooling.md`](tooling.md). The C4 model
+(context, containers, scripts, one attempt) is
+[`c4/workspace.dsl`](c4/workspace.dsl): open it in Structurizr Lite with
+`docker run -it --rm -p 8080:8080 -v "$PWD/docs/c4:/usr/local/structurizr" structurizr/lite`.
 
 ## Elastic Loop mapping
 
