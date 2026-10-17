@@ -8,7 +8,7 @@ run each.
 
 | Subcommand | Does |
 |---|---|
-| `init --format <fmt>` | creates `runs/state.json`, adds each new supported `input/` file as `pending` (image extensions become `input_format: "image"`). A file whose content changed (`input_sha256`) is queued again from nothing: `work/<doc>/`, `output/<doc>/` and `output/<doc>.zip` are deleted, so old ocr/vision shards cannot outrank the new extraction. Two inputs with one name: the one `paths.input_file` picks (the scripts' rule) is queued, the other skipped with a warning |
+| `init --format <fmt>` | creates `runs/state.json`, adds each new supported `input/` file as `pending` (image extensions become `input_format: "image"`). A file whose content changed (`input_sha256`) is queued again from nothing: `work/<doc>/`, `output/<doc>/` and `output/<doc>.zip` are deleted, so old ocr/vision shards cannot outrank the new extraction. Two inputs with one name: the one `paths.input_file` picks (the scripts' rule) is queued, the other skipped with a warning. A different `--format` updates a pending/retrying entry; a finished one keeps its status and gets a warning naming the `assemble.py` command that re-renders it |
 | `next [--doc <name>]` | prints the next `pending`/`retrying` document in `input/` order, or nothing |
 | `reject --doc <name> --reason <text>` | `needs-human` with the reason (triage's `error:` line) |
 | `set-lang --doc <name> --lang-flag <f> [--tessdata-prefix <p>]` | records `ensure_language.py`'s result |
@@ -41,11 +41,17 @@ own is counted at `vision`.
      same result, and a higher tier has no TOC-driven heading levels.
    - Gate `figures_complete` failed → each page in its `pages`: same tier,
      `recheck_images`, the gate's `detail` as reason.
-   - Any other failed gate is document-level and names no page.
+   - Gate `ocr_confidence_floor` failed → each page in its `pages` goes to
+     `vision`.
+   - Any other failed gate is document-level and names no page: needs a
+     human, even when other pages could be retried, since a retry cannot
+     fix it.
    - A page tagged with a content issue (`dropped_text`, `hallucinated_text`,
      `wrong_reading_order`, `duplicated_text`, `wrong_heading_level`,
      `table_corruption`) moves one rung up its format's ladder:
-     `pdf` text → ocr → vision, `pptx` text → vision (no OCR rung),
+     `pdf` text → vision and ocr → vision (text skips OCR: Tesseract writes
+     only paragraphs, so a page with a text layer would lose its tables and
+     headings), `pptx` text → vision (no OCR rung),
      `image` ocr → vision. Already at the top → needs a human.
      `docx`/`xlsx`/`html` → needs a human at once: extraction is
      deterministic and there is no rendered page, so a retry gives
@@ -54,7 +60,8 @@ own is counted at `vision`.
      tier, `recheck_images`. This retries for every format.
    - The reason is the grader's `reason` text from the grade shard, or the
      tags when the grader wrote none.
-4. Status: anything that needs a human → `needs-human` with all reasons.
+4. Status: anything that needs a human (a needs-human gate, a document-level
+   gate, a content issue with no rung left) → `needs-human` with all reasons.
    Else `attempt >= max_attempts` → `needs-human`. Else no page to retry
    (a document-level gate, or a low score without tags) → `needs-human`,
    since a retry would re-run nothing. Else `retrying` with
@@ -68,11 +75,17 @@ report.py   # {"report": "output/report.html", "documents": n, "passed": n, "nee
 
 Run once when the queue is empty. Writes one self-contained HTML file (no
 scripts, light and dark mode) from `runs/state.json` and each document's
-`grade-report.json` and `elements.json`: summary tiles (documents, passed,
-needs a human, pages, attempts, extraction time), a row per document with
-its page-grade strip, and per document its reason, attempts (start, time,
-outcome, score, escalations with reasons), failed gates, warnings, and a
-page table (tier, score, issues, the grader's reason). Time is the sum of
+`grade-report.json`, `elements.json` and `toc.json`: summary tiles
+(documents, passed, needs a human, pages, furniture graphics, images,
+charts, tables, attempts, extraction time), a row per document with its
+page-grade strip, and per document its reason, its contents (`toc.json`'s
+entries, else the extracted headings), a page table (tier, furniture,
+images, charts, tables, score, issues, the grader's reason), attempts
+(start, time, outcome, score, escalations with reasons), failed gates and
+warnings. Under the title it lists the versions used: scriptorium,
+Python, PyMuPDF, pdfplumber, Tesseract and LibreOffice ("not installed"
+when missing). A chart is a figure read into a `data_table`; furniture counts
+the graphics shown once (page 1's `furniture_images`). Time is the sum of
 attempt durations, from `next` to `decide`/`reject`; it is not split by
 phase. All document text is HTML-escaped.
 

@@ -44,7 +44,11 @@ echo '[{"type": "paragraph", "text": "..."}]' | uv run --project "${CLAUDE_PLUGI
 ```
 
 This writes a `page{N}.vision.json` shard (no `ocr_confidence` — that field
-is specific to the tesseract backend's numeric score).
+is specific to the tesseract backend's numeric score). Allowed elements:
+`heading` (`level` 1-6, `text`), `paragraph` (`text`), `list_item`
+(`marker`, `level`, `text`) and `table` (`rows`, a list of lists). Any other
+type or a missing key exits 1 without writing, since `assemble.py` could
+not render it.
 
 ## Output
 

@@ -54,7 +54,15 @@ document.
     unbounded. This ranking is computed once over the WHOLE document (not
     just the pages a given `--pages` batch covers), so it stays consistent
     across separate invocations of this script for different page batches
-    of the same document.
+    of the same document. Follow-up R32: a block at least 1.5x the body
+    size is a candidate in any weight (a large light-weight title), and a
+    one-line block in an accent colour and a heavy weight (bold, or a
+    font named Medium/Md/SemiBold/...) at body size or larger, at most 10
+    words and not ending a sentence, is a heading one level below the
+    smallest size-ranked level (a coloured subheading).
+- Follow-up R31: characters on a bitmap panel are left out of table cell
+  text, so a layout table's screenshot cell does not repeat the
+  screenshot's text.
 - Tables are detected with `pdfplumber` and emitted as `table` elements
   (row-major list of lists). Follow-up R18: cell text is read from
   PyMuPDF's characters (a character belongs to the cell holding its
@@ -176,6 +184,20 @@ document.
   with no text/table extraction attempted — a printed TOC page's own text
   is redundant with `toc.json` and isn't useful body content. This applies
   per-page even when `--pages` mixes a TOC page in with body pages.
+- A line rotated off the horizontal that lies wholly in the left or right
+  12% of the page (a document number or legal line printed up the margin)
+  is furniture and dropped, without any repetition test: such lines often
+  differ per page (`lib/furniture.py`'s `is_side_margin_line`).
+- Two multi-line blocks that start on one line side by side are text
+  columns (follow-up R30): the left one is read first, each wraps at its
+  own right edge, and a left column that ends mid-sentence continues into
+  the right one as one paragraph.
+- A table that lies inside a figure region (a screenshot's text layer read
+  as a grid) is dropped (follow-up R31); its text is the figure's
+  `figure_text`.
+- A page with no element, no figure and no text but furniture (a blank
+  page, or one with only the header and footer) is written with
+  `"skipped": "blank"`, so `no_empty_pages` does not fail it.
 
 ## Output
 

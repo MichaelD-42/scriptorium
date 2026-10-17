@@ -19,6 +19,56 @@ PDF, PowerPoint (`.pptx`), Word (`.docx`), Excel (`.xlsx`), HTML (`.html`),
 and standalone images (`.png`/`.jpg`/`.jpeg`/`.webp`/`.tiff`) are
 implemented today.
 
+## 0.6.1
+
+- **Fix**: a blank PDF page, or one with only the header and footer, sent
+  the document to a human (`no_empty_pages`). Triage now keeps a fully
+  blank page off OCR, and `extract-text` marks such pages
+  `skipped: "blank"`.
+- **Fix**: a content issue on a text-layer PDF page now goes to `vision`,
+  not `ocr`. Tesseract writes only paragraphs, so the retry lost the
+  page's tables and headings.
+- **Fix**: `write_vision_page.py` refuses elements `assemble.py` cannot
+  render (e.g. a heading without `level` crashed assembly), and the
+  extractor prompt lists the heading, list and table shapes.
+- **Fix**: `write_grade_shard.py` refuses a score outside 0-1; a
+  percentage would have passed the document.
+- **Fix**: a failed document-level gate goes to a human at once with its
+  detail, instead of burning retries and ending as "still failing after N
+  attempts". A low OCR-confidence page is retried at `vision`.
+- `init` with a different `--format` updates open documents and warns
+  about finished ones instead of silently ignoring the flag.
+- **Fix (lost figures)**: on a two-page document every image counted as a
+  repeated "furniture" image (one page is 50%), and a screenshot reused on
+  every page of a bilingual guide did too. A furniture image now sits in
+  the header/footer band or covers most of the page, on at least 2 pages.
+- **Fix**: a screenshot printed as a mosaic of bitmap crops on a tinted
+  panel (with number badges on top) is one figure, the rendered panel,
+  instead of one figure per crop; a "table" read from a screenshot's text
+  layer is dropped.
+- **Headings without a TOC**: a title at 1.5x body size or more is a
+  heading in any weight, and a short one-line subheading in an accent
+  colour and a heavy weight (e.g. Helvetica Neue Medium) is one too.
+- **Fix**: a layout table's screenshot cell no longer repeats the
+  screenshot's text.
+- **Grading**: a caption is only the line printed outside a figure; text
+  inside a figure is never a caption, so a gap in `figure_text` is no
+  longer tagged `bad_caption`.
+- **Run report**: totals for furniture graphics, images, charts and
+  tables; per document a contents list (the TOC, else the headings) and
+  the same counts per page.
+  The report lists the scriptorium, Python, PyMuPDF, pdfplumber, Tesseract
+  and LibreOffice versions.
+- **Furniture graphics once**: page 1's logo and colour boxes in the
+  header/footer band appear once, at the top of the output, instead of not
+  at all.
+- **Side-margin furniture**: text rotated up the left or right page margin
+  (document number, "Aktuelle Informationen ...") is dropped as furniture,
+  even when it differs per page.
+- **Fix**: a paragraph set in two side-by-side columns is read left column
+  first, wraps at each column's own edge, and is one paragraph when the
+  left column ends mid-sentence.
+
 ## 0.6.0
 
 - **No skills**: the plugin registers no Claude Code skills, so nothing

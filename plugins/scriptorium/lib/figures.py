@@ -281,7 +281,7 @@ CAPTION_CONTINUATION_GAP_FACTOR = 1.2
 
 def page_tables(
     pdf_path: Path, page_number: int, frame_tables: list[dict] | None = None,
-    content_rect: list[float] | None = None,
+    content_rect: list[float] | None = None, exclude_regions: list[list[float]] | None = None,
 ) -> list[dict]:
     """Real (non-frame) tables on this page, queried fresh via pdfplumber
     -- not read from any shard, on purpose: extract_images.py and
@@ -307,7 +307,11 @@ def page_tables(
 
     Follow-up R20: `_open_edge_caps` closes a row left open at the page's
     top or bottom edge, so a continued table keeps its first (or last)
-    row."""
+    row.
+
+    Follow-up R31: characters inside `exclude_regions` (bitmap panels) are
+    left out of the cell text: a layout table's screenshot cell would
+    otherwise repeat the screenshot's text, which is the figure's."""
     frame_tables = frame_tables or []
     found = []
     pl_doc = _plumber_doc(pdf_path)
@@ -335,7 +339,10 @@ def page_tables(
             # like the body text (pdfplumber leaves "(cid:415)" and Symbol
             # codes, and splits a subscript onto its own line).
             if chars is None:
-                chars = glyphs.page_chars(fitz_doc[page_number - 1])
+                chars = [
+                    c for c in glyphs.page_chars(fitz_doc[page_number - 1])
+                    if not any(r[0] <= c[0] <= r[2] and r[1] <= c[1] <= r[3] for r in exclude_regions or [])
+                ]
             raw_rows = []
             for row in table.rows:
                 texts = glyphs.cell_texts(chars, row.cells)
@@ -724,7 +731,8 @@ def detect_figure_regions_with_exclusions(
 
     `excluded_regions`: Task A5b -- every drawing/cluster a filter removed,
     `[{"bbox": [...], "reason": "frame_drawing"|"repeated_drawing"|"tiny"|
-    "text_box"|"furniture_band"|"table_overlap"|"grid_table"|"invisible_drawing"}]`,
+    "text_box"|"furniture_band"|"table_overlap"|"grid_table"|"invisible_drawing"|
+    "bitmap_panel"}]`,
     sorted the same way.
     A "grid_table" entry is a pdfplumber table that is a chart's grid; its
     cluster is in `regions`. The page's
@@ -774,6 +782,7 @@ def detect_figure_regions_with_exclusions(
 
     clusters = page.cluster_drawings(drawings=significant)
     tables = page_tables(pdf_path, page_number, frame_tables, content_rect)
+    panels = bitmap_panels(page)
     page_lines = _page_lines(page)
     reference_area = page_area
     if content_rect:
@@ -812,6 +821,9 @@ def detect_figure_regions_with_exclusions(
     box_candidates = []  # raw [x0, y0, x1, y1] of each would-be text box
     for rect in clusters:
         raw = [rect.x0, rect.y0, rect.x1, rect.y1]
+        if any(_inside(raw, panel, PANEL_TOLERANCE) for panel in panels):
+            excluded_regions.append({"bbox": raw, "reason": "bitmap_panel"})  # drawn on a panel, which is the figure
+            continue
         bbox = padded(raw)
         area = max(0.0, bbox[2] - bbox[0]) * max(0.0, bbox[3] - bbox[1])
         if area / page_area < MIN_CLUSTER_AREA_FRACTION:
@@ -833,6 +845,8 @@ def detect_figure_regions_with_exclusions(
                 excluded_regions.append({"bbox": padded(raw), "reason": "text_box"})
 
     _absorb_edge_labels(regions, page_lines)
+    # A panel is a figure as printed: no table or band rule applies to it.
+    regions.extend({"bbox": panel} for panel in panels)
     regions.sort(key=lambda r: r["bbox"][1])
     excluded_regions.sort(key=lambda r: r["bbox"][1])
     return regions, excluded_regions
@@ -1134,6 +1148,69 @@ def _nearest_caption_line(
         if is_caption(line["text"]):
             return line
     return None
+
+
+# Follow-up R31: a screenshot printed as a mosaic of bitmap crops (with
+# vector badges on top) on one tinted panel is one figure: the panel. A
+# panel is a filled, unstroked, non-white rect, the smallest one around a
+# bitmap; it needs this many bitmaps, so a callout box's one icon stays a
+# bitmap and its text stays body text.
+PANEL_MIN_BITMAPS = 2
+PANEL_MAX_PAGE_FRACTION = 0.3
+PANEL_TOLERANCE = 1.0
+
+
+def bitmap_panels(page, furniture_xrefs: set[int] | None = None) -> list[list[float]]:
+    """Follow-up R31: the bbox of every panel holding PANEL_MIN_BITMAPS
+    bitmaps or more, top-to-bottom."""
+    page_area = page.rect.width * page.rect.height
+    fills = [
+        [d["rect"].x0, d["rect"].y0, d["rect"].x1, d["rect"].y1]
+        for d in page.get_drawings()
+        if d.get("fill") and d.get("color") is None and not is_invisible_drawing(d)
+        and d["rect"].width * d["rect"].height <= PANEL_MAX_PAGE_FRACTION * page_area
+    ]
+    counts: dict[tuple, int] = {}
+    for bbox in bitmap_bboxes(page, furniture_xrefs):
+        holders = [r for r in fills if _inside(bbox, r, PANEL_TOLERANCE)]
+        if holders:
+            panel = tuple(min(holders, key=lambda r: (r[2] - r[0]) * (r[3] - r[1])))
+            counts[panel] = counts.get(panel, 0) + 1
+    return sorted((list(p) for p, n in counts.items() if n >= PANEL_MIN_BITMAPS), key=lambda b: b[1])
+
+
+# Page furniture graphics (a logo, a colour box) in the header/footer band,
+# shown once in the output: band drawings and furniture bitmaps grouped by
+# proximity. A drawing thinner than FURNITURE_RULE_MAX_SIDE is a rule line,
+# and a group with a side under FURNITURE_GRAPHIC_MIN_SIDE is a speck.
+FURNITURE_GRAPHIC_GAP = 8.0
+FURNITURE_RULE_MAX_SIDE = 1.5
+FURNITURE_GRAPHIC_MIN_SIDE = 4.0
+
+
+def furniture_graphics(
+    page, furniture_xrefs: set[int] | None = None, content_rect: list[float] | None = None
+) -> list[list[float]]:
+    """The bbox of every furniture graphic in `page`'s header/footer band
+    (lib/furniture.py's band, with `content_rect`), clipped to the page,
+    top-to-bottom."""
+    height = page.rect.height
+    boxes = []
+    for d in page.get_drawings():
+        r = d["rect"] & page.rect
+        if r.is_empty or min(r.width, r.height) < FURNITURE_RULE_MAX_SIDE or is_invisible_drawing(d):
+            continue
+        if furniture_lib.in_furniture_band([r.x0, r.y0, r.x1, r.y1], height, content_rect):
+            boxes.append([r.x0, r.y0, r.x1, r.y1])
+    for img in page.get_images(full=True):
+        if img[0] in (furniture_xrefs or set()):
+            for r in page.get_image_rects(img[0]):
+                r = r & page.rect
+                if not r.is_empty and furniture_lib.in_furniture_band([r.x0, r.y0, r.x1, r.y1], height, content_rect):
+                    boxes.append([r.x0, r.y0, r.x1, r.y1])
+    graphics = [_union_bbox(group) for group in group_boxes(boxes, FURNITURE_GRAPHIC_GAP)]
+    graphics = [g for g in graphics if min(g[2] - g[0], g[3] - g[1]) >= FURNITURE_GRAPHIC_MIN_SIDE]
+    return sorted(graphics, key=lambda g: (g[1], g[0]))
 
 
 def bitmap_bboxes(page, furniture_xrefs: set[int] | None = None) -> list[list[float]]:

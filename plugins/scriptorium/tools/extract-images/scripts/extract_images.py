@@ -42,12 +42,20 @@ def extract_image_document(input_path: Path, assets_dir: Path) -> list[dict]:
 def extract_bitmaps(fitz_doc, page, page_number: int, assets_dir: Path, furniture_xrefs: set[int]) -> list[dict]:
     found = []
     idx = 0
+    # Follow-up R31: a bitmap on a mosaic panel is part of the panel's figure
+    # (extract_vector_regions renders the panel).
+    panels = figures_lib.bitmap_panels(page, furniture_xrefs)
     for img in page.get_images(full=True):
         xref = img[0]
         if xref in furniture_xrefs:
             # Repeated furniture (e.g. a logo on every page) -- never write
             # an image element for it.
             continue
+        try:
+            if any(figures_lib._inside(list(page.get_image_bbox(img)), p, figures_lib.PANEL_TOLERANCE) for p in panels):
+                continue
+        except Exception:
+            pass
         idx += 1
         try:
             base = fitz_doc.extract_image(xref)
@@ -180,8 +188,18 @@ def main() -> None:
         # is always present, even when empty, so a page with nothing dropped
         # is distinguishable from a page merge.py hasn't seen an image shard
         # for at all.
+        # Page furniture graphics (logo, colour box) are shown once: page 1's
+        # are rendered and assemble.py puts them at the top of the output.
+        extra = {}
+        if page_number == 1:
+            extra["furniture_images"] = []
+            for k, bbox in enumerate(figures_lib.furniture_graphics(page, furniture_xrefs, content_rect), start=1):
+                out_name = f"furniture{k}.png"
+                zoom = VECTOR_REGION_DPI / 72
+                page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), clip=fitz.Rect(*bbox)).save(assets_dir / out_name)
+                extra["furniture_images"].append({"asset": f"assets/{out_name}", "bbox": bbox})
         shard_path = paths.shard_path(args.doc, page_number, "image")
-        elements_lib.write_shard(shard_path, page_number, image_elements, excluded_regions=excluded_regions)
+        elements_lib.write_shard(shard_path, page_number, image_elements, excluded_regions=excluded_regions, **extra)
         print(f"page {page_number}: {len(image_elements)} image element(s), {len(excluded_regions)} excluded region(s)")
 
     fitz_doc.close()

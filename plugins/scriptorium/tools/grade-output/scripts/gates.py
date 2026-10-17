@@ -39,7 +39,7 @@ MIN_OUTPUT_BYTES = 20
 LARGE_REGION_EXCLUDED_AREA_FRACTION = 0.2
 # Follow-up R11: "grid_table" is a chart's grid read as a table; its cluster
 # is the image, so nothing is lost.
-LARGE_REGION_EXCLUDED_BENIGN_REASONS = {"frame_drawing", "repeated_drawing", "tiny", "text_box", "grid_table", "invisible_drawing"}
+LARGE_REGION_EXCLUDED_BENIGN_REASONS = {"frame_drawing", "repeated_drawing", "tiny", "text_box", "grid_table", "invisible_drawing", "bitmap_panel"}
 
 # Task A9: a `table` element whose bbox is within
 # furniture_lib.FRAME_MATCH_TOLERANCE of a triage `frame_tables` entry is the
@@ -69,7 +69,7 @@ def check_page_count_match(doc_data: dict, true_page_count: int) -> dict:
 def check_no_empty_pages(doc_data: dict) -> dict:
     # Follow-up R21: a page whose content was joined into another page's
     # element (a table cut by the page break) is listed in that element's
-    # "pages", and is not empty.
+    # "pages", and is not empty. A "skipped" page (toc, blank) is empty on purpose.
     joined = {
         n
         for p in doc_data["pages"].values()
@@ -79,7 +79,7 @@ def check_no_empty_pages(doc_data: dict) -> dict:
     empty = [
         p["page_number"]
         for p in doc_data["pages"].values()
-        if not p["elements"] and p.get("skipped") != "toc" and p["page_number"] not in joined
+        if not p["elements"] and not p.get("skipped") and p["page_number"] not in joined
     ]
     return {
         "name": "no_empty_pages",
@@ -111,6 +111,7 @@ def check_ocr_confidence_floor(doc_data: dict) -> dict:
     return {
         "name": "ocr_confidence_floor",
         "passed": not low,
+        "pages": low,
         "detail": f"pages below {OCR_CONFIDENCE_FLOOR} confidence: {low}" if low else "all OCR pages meet the confidence floor",
     }
 

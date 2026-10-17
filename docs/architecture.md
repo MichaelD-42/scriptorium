@@ -120,8 +120,8 @@ should work, and only a failed grade bumps a page up.
 
 ```mermaid
 flowchart LR
-    T["Tier 1: text<br/>(PyMuPDF)"] -->|"OCR confidence < 0.5,<br/>or empty/garbled"| O["Tier 2: OCR<br/>(Tesseract)"]
-    O -->|"content still wrong<br/>(not just low-confidence)"| V["Tier 3: vision<br/>(Claude reads the PNG)"]
+    T["Tier 1: text<br/>(PyMuPDF)"] -->|"content wrong<br/>(skips OCR)"| V["Tier 3: vision<br/>(Claude reads the PNG)"]
+    O["Tier 2: OCR<br/>(Tesseract; triage: no or garbled text layer)"] -->|"confidence < 0.5,<br/>or content wrong"| V
     V -->|"still failing"| H["needs-human<br/>(no tier left to try)"]
 ```
 
@@ -130,7 +130,7 @@ re-run — decides what happens next:
 
 | Failure tag | Effect on retry |
 |---|---|
-| `dropped_text`, `hallucinated_text`, `wrong_reading_order`, `duplicated_text`, `wrong_heading_level`, `table_corruption` | bump that page's body tier one step (`text → ocr → ocr → vision`; a page already at `ocr` whose *content* is wrong, not just low-confidence, jumps straight to `vision`) |
+| `dropped_text`, `hallucinated_text`, `wrong_reading_order`, `duplicated_text`, `wrong_heading_level`, `table_corruption` | move that page's body tier up to `vision` (`text → vision`, `ocr → vision`). A text-layer page skips OCR: Tesseract writes only paragraphs, so its tables and headings would be lost |
 | a page already at `vision` still failing | don't retry again — `status: needs-human` for the whole document immediately |
 | `missing_image`, `bad_caption` | body tier unchanged; set `recheck_images: true` so the next `extractor` batch redoes just the image step |
 

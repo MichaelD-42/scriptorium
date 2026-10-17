@@ -37,6 +37,13 @@ Handles both image kinds a PDF can contain:
   - it is invisible (follow-up R19): a fill with no stroke, the fill
     white — Word paints these behind body text. Recorded as
     `invisible_drawing`, and left out before clustering;
+  - it lies on a bitmap panel (follow-up R31): a tinted, unstroked rect
+    whose smallest-enclosing bitmaps number 2 or more, e.g. a screenshot
+    printed as a mosaic of crops with number badges on top. The panel
+    itself is the figure region (rendered whole, no table or band rule),
+    its bitmaps get no element of their own, and drawings on it are
+    recorded as `bitmap_panel`. One icon on a tinted callout box stays a
+    bitmap;
   - *more than half* its own area lies inside the furniture edge band
     (Task A5b tightened this from "any overlap at all", so a tall real
     figure that only grazes the band survives);
@@ -75,6 +82,11 @@ For an image document, `--pages` is always `1` — there's only ever page 1.
 
 - Saves assets to `output/<doc>/assets/page{N}_{bitmap|vector}{idx}.png`
   (`vector{idx}` is 1-indexed per page, in top-to-bottom region order).
+- Page 1 only: every furniture graphic in the header/footer band (band
+  drawings and furniture bitmaps grouped by proximity; rule lines left out,
+  `figures.furniture_graphics`) is rendered to `assets/furniture{k}.png`
+  and listed in the shard's `furniture_images` (`asset`, `bbox`).
+  `assemble.py` puts them once at the top of the output, as bare images.
 - Writes one shard per given page to `work/<doc>/shards/page{N}.image.json`
   (`image` elements, `kind: "bitmap"|"vector"`, `asset: "assets/..."`,
   `bbox: [x0, y0, x1, y1]`) — even when a page has no images, so a retry
@@ -126,14 +138,14 @@ For an image document, `--pages` is always `1` — there's only ever page 1.
 - **`excluded_regions` (Task A5b, "no silent drops")**: the page's image
   shard also carries `excluded_regions: [{"bbox": [...], "reason":
   "frame_drawing"|"repeated_drawing"|"tiny"|"text_box"|"furniture_band"|
-  "table_overlap"|"grid_table"|"invisible_drawing"}]` — every candidate a filter dropped on this page (the
+  "table_overlap"|"grid_table"|"invisible_drawing"|"bitmap_panel"}]` — every candidate a filter dropped on this page (the
   page's `repeated_drawings` matches give ONE `repeated_drawing` entry with
   their union bbox and a `count`, not one entry per line), always present (an empty list
   when nothing was dropped), so a large region that a filter removes is
   never simply invisible. `merge.py` passes it through to the merged page
   dict the same way `skipped` already does. `grade-output`'s
   `large_region_excluded` gate flags (as a warning, not a hard failure) any
-  entry here whose reason isn't `frame_drawing`/`repeated_drawing`/`tiny`/`text_box`/`grid_table`/`invisible_drawing` and whose area is
+  entry here whose reason isn't `frame_drawing`/`repeated_drawing`/`tiny`/`text_box`/`grid_table`/`invisible_drawing`/`bitmap_panel` and whose area is
   more than 20% of the page — see `grade-output`'s README.md.
 - If `work/<doc>/triage.json` marks a given page `"role": "toc"`
   (`pdf-triage`'s printed-TOC-page detection), that page's shard is written

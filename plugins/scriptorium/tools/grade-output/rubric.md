@@ -31,23 +31,31 @@ Markdown/HTML body when applying the criteria below.
 6. **Heading hierarchy** — do heading levels in the output roughly match
    the visual size/weight hierarchy on the page?
 7. **Images present and captioned** — does every visible figure/diagram on
-   the page have a corresponding `image` element with a non-empty,
-   accurate caption? If that `image` element also has a `mermaid` block,
-   does it faithfully represent the diagram's nodes, edges, and labels (not
-   just "some diagram exists")? If it has `figure_text`, compare it with
-   the figure on the page: the labels and values must be verbatim and
-   complete. Wrong or missing `figure_text` is `bad_caption`. If it has
-   `no_visible_text: true`, confirm the figure really shows no text; if it
-   does, that is `bad_caption`.
+   the page have a corresponding `image` element? A caption is only a line
+   printed outside the figure that names it ("Abbildung 3: ..."); text
+   inside a figure or image is never a caption. When the page prints a
+   caption for a figure, the output must carry it verbatim; a missing or
+   wrong printed caption is `bad_caption`. A figure with no printed
+   caption needs none. The text inside the figure (`figure_text`) is not
+   graded with a tag: a gap or a misread label in it is not `bad_caption`,
+   at most a note in the reason. If the `image` element has a `mermaid`
+   block, does it faithfully represent the diagram's nodes, edges, and
+   labels (not just "some diagram exists")? If not, that is `bad_mermaid`.
 
 ## Correct by design — not issues
 
 - **Page furniture removed** — a running header, footer, title block, logo
   or page frame that is absent from the output is correct, not
-  `dropped_text`.
+  `dropped_text`. The furniture graphics of page 1 (a logo, a colour box)
+  appear once, as bare images at the top of the output; that is correct,
+  not `missing_image` on later pages.
+- **Side-margin text removed** — a line printed up the left or right page
+  margin (document number, legal note) is furniture; its absence is
+  correct, not `dropped_text`.
 - **TOC pages** — a `role: toc` page whose merged page has
   `skipped: "toc"` and no elements is correct, not `dropped_text`. The
-  TOC's structure lives in the headings.
+  TOC's structure lives in the headings. A page with `skipped: "blank"`
+  and no elements is blank in the source (or only carries furniture).
 - **Lists** — list items rendered as a Markdown/HTML list (with indent for
   nested levels) are correct, not `wrong_reading_order`.
 - **Joined paragraphs** — a paragraph cut by a page break is joined into

@@ -45,8 +45,12 @@ Bash doesn't have; put this path in its place.
 - `ocr-page/scripts/ocr.py --doc <doc> --pages 5,6 --lang <lang> [--tessdata-dir <dir>]`
   — writes `page{N}.ocr.json` shards with `ocr_confidence`.
 - `ocr-page/scripts/write_vision_page.py --doc <doc> --page <n>` — reads
-  a JSON element list on stdin (`[{"type": "paragraph", "text": "..."}]`)
-  and writes the `page{N}.vision.json` shard.
+  a JSON element list on stdin and writes the `page{N}.vision.json` shard.
+  Keep the page's structure: `{"type": "heading", "level": 1-6, "text": ...}`,
+  `{"type": "paragraph", "text": ...}`,
+  `{"type": "list_item", "marker": "-" or "1)", "level": 1-6, "text": ...}`,
+  `{"type": "table", "rows": [["cell", ...], ...]}`. Images are not body
+  elements. Anything else is refused with exit 1.
 - `extract-images/scripts/describe_image.py --doc <doc> --page <n> --asset assets/<file>.png --description "..."`
   with optional `--data-table '<json rows>'`, `--mermaid '<source>'`,
   `--caption`, `--figure-text`, `--no-visible-text`.
@@ -77,7 +81,8 @@ written to that page's image shard.
    the text rather than inventing a plausible guess), then land it with
    `write_vision_page.py`. Leave out the page furniture: the lines listed in
    `work/<doc>/triage.json`'s `furniture_text` (the repeated header, footer
-   and title-block lines). `merge.py` also removes them from `ocr`/`vision`
+   and title-block lines), and text printed up the left or right page
+   margin. `merge.py` also removes them from `ocr`/`vision`
    bodies, but only when a line matches a furniture pattern exactly.
 3. Pages assigned `vision` directly (a retry, forced by the orchestrator
    after a previous grade failure): skip straight to the vision step above.

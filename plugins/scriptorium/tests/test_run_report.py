@@ -189,3 +189,63 @@ class TestReport:
         result = run_script("queue-state/scripts/report.py", cwd=tmp_project)
         assert result.returncode == 0, result.stderr
         assert "No documents" in (tmp_project / "output" / "report.html").read_text()
+
+
+class TestContentStats:
+    def _elements(self, doc, pages):
+        path = paths.elements_json(doc)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"doc": doc, "page_count": len(pages), "pages": pages}))
+
+    def test_totals_toc_and_per_page_counts(self, tmp_project):
+        _queue(tmp_project, "a")
+        img = {"type": "image", "asset": "assets/x.png"}
+        self._elements("a", [
+            {"page_number": 1, "tier": "text", "furniture_images": [{"asset": "assets/furniture1.png"}] * 2,
+             "elements": [{"type": "heading", "level": 1, "text": "Intro"}, img,
+                          {**img, "data_table": [["q", "v"]]}, {"type": "table", "rows": [["a"]]}]},
+            {"page_number": 2, "tier": "text",
+             "elements": [{"type": "heading", "level": 2, "text": "Details"}, img]},
+        ])
+        _grade_report("a", [{"page_number": 1, "score": 1.0, "issues": []}, {"page_number": 2, "score": 0.9, "issues": []}])
+
+        view = report_py.document_view("a", _state(tmp_project)["a"])
+        assert view["stats"] == {"furniture": 2, "images": 3, "charts": 1, "tables": 1}
+        assert [(p["page_number"], p["stats"]) for p in view["pages"]] == [
+            (1, {"furniture": 2, "images": 2, "charts": 1, "tables": 1}),
+            (2, {"furniture": 0, "images": 1, "charts": 0, "tables": 0}),
+        ]
+        # No toc.json: the extracted headings are the TOC.
+        assert view["toc"] == [{"level": 1, "title": "Intro", "page": 1}, {"level": 2, "title": "Details", "page": 2}]
+
+        assert run_script("queue-state/scripts/report.py", cwd=tmp_project).returncode == 0
+        html = (tmp_project / "output" / "report.html").read_text()
+        assert ">Charts<" in html and ">Furniture<" in html and "Contents" in html and "Details" in html
+
+    def test_printed_toc_wins_over_headings(self, tmp_project):
+        _queue(tmp_project, "a")
+        self._elements("a", [{"page_number": 1, "tier": "text", "elements": [{"type": "heading", "level": 1, "text": "X"}]}])
+        paths.toc_json("a").write_text(json.dumps({"entries": [{"number": "1", "title": "Scope", "page": 3, "level": 1}]}))
+        view = report_py.document_view("a", _state(tmp_project)["a"])
+        assert view["toc"] == [{"level": 1, "title": "1 Scope", "page": 3}]
+
+
+class TestToolVersions:
+    def test_versions_list_the_plugin_and_its_tools(self, tmp_project, monkeypatch):
+        plugin = json.loads((report_py.PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_text())
+        monkeypatch.setattr(report_py.tesseract_lib, "find_tesseract", lambda: None)
+        monkeypatch.setattr(report_py.shutil, "which", lambda name: None)
+        versions = dict(report_py.tool_versions())
+        assert versions["scriptorium"] == plugin["version"]
+        assert versions["Tesseract"] == "not installed" and versions["LibreOffice"] == "not installed"
+        assert versions["PyMuPDF"][0].isdigit() and versions["pdfplumber"][0].isdigit()
+
+    def test_command_version_keeps_the_version_number(self):
+        assert report_py.version_number("tesseract 5.5.3\n leptonica-1.85.0") == "5.5.3"
+        assert report_py.version_number("LibreOffice 25.2.1.2 520(Build:2)") == "25.2.1.2"
+
+    def test_report_shows_the_versions(self, tmp_project):
+        _queue(tmp_project, "a")
+        assert run_script("queue-state/scripts/report.py", cwd=tmp_project).returncode == 0
+        html = (tmp_project / "output" / "report.html").read_text()
+        assert "scriptorium" in html and "Tesseract" in html and "PyMuPDF" in html
