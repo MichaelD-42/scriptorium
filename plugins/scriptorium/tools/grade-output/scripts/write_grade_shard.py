@@ -25,6 +25,9 @@ def main() -> None:
     parser.add_argument("--reason", help="what is wrong, specific enough to act on; the next extractor gets it verbatim")
     args = parser.parse_args()
 
+    if not 0.0 <= args.score <= 1.0:
+        print(f"error: --score {args.score} is outside 0.0-1.0", file=sys.stderr)
+        sys.exit(1)
     issues = [i.strip() for i in args.issues.split(",") if i.strip()]
     unknown = sorted(set(issues) - grades.ISSUES)
     if unknown:

@@ -83,7 +83,7 @@ the assembled output's format/location.
    makes the next retry effective; vague ones ("looks off") aren't
    retained feedback, they're noise. Read the rubric's "Correct by
    design" list first: removed page furniture, an empty `skipped: toc`
-   page, lists, and paragraphs joined across a page break are not
+   or `skipped: blank` page, lists, and paragraphs joined across a page break are not
    issues. For a figure with `figure_text`, check the labels and values
    against the rendered page; tag `bad_caption` when they are wrong or
    incomplete. For a figure with `no_visible_text: true` (in

@@ -47,7 +47,8 @@ Markdown/HTML body when applying the criteria below.
   `dropped_text`.
 - **TOC pages** — a `role: toc` page whose merged page has
   `skipped: "toc"` and no elements is correct, not `dropped_text`. The
-  TOC's structure lives in the headings.
+  TOC's structure lives in the headings. A page with `skipped: "blank"`
+  and no elements is blank in the source (or only carries furniture).
 - **Lists** — list items rendered as a Markdown/HTML list (with indent for
   nested levels) are correct, not `wrong_reading_order`.
 - **Joined paragraphs** — a paragraph cut by a page break is joined into

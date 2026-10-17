@@ -19,6 +19,26 @@ PDF, PowerPoint (`.pptx`), Word (`.docx`), Excel (`.xlsx`), HTML (`.html`),
 and standalone images (`.png`/`.jpg`/`.jpeg`/`.webp`/`.tiff`) are
 implemented today.
 
+## 0.6.1
+
+- **Fix**: a blank PDF page, or one with only the header and footer, sent
+  the document to a human (`no_empty_pages`). Triage now keeps a fully
+  blank page off OCR, and `extract-text` marks such pages
+  `skipped: "blank"`.
+- **Fix**: a content issue on a text-layer PDF page now goes to `vision`,
+  not `ocr`. Tesseract writes only paragraphs, so the retry lost the
+  page's tables and headings.
+- **Fix**: `write_vision_page.py` refuses elements `assemble.py` cannot
+  render (e.g. a heading without `level` crashed assembly), and the
+  extractor prompt lists the heading, list and table shapes.
+- **Fix**: `write_grade_shard.py` refuses a score outside 0-1; a
+  percentage would have passed the document.
+- **Fix**: a failed document-level gate goes to a human at once with its
+  detail, instead of burning retries and ending as "still failing after N
+  attempts". A low OCR-confidence page is retried at `vision`.
+- `init` with a different `--format` updates open documents and warns
+  about finished ones instead of silently ignoring the flag.
+
 ## 0.6.0
 
 - **No skills**: the plugin registers no Claude Code skills, so nothing

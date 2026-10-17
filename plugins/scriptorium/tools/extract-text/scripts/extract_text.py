@@ -1353,7 +1353,9 @@ def main() -> None:
         page_elements.sort(key=lambda e: e["bbox"][1])
 
         shard_path = paths.shard_path(args.doc, page_number, "text")
-        elements_lib.write_shard(shard_path, page_number, page_elements)
+        # No text but furniture, no table, no figure: a blank page, not a dropped one.
+        blank = not page_elements and not filtered_blocks and not image_bboxes
+        elements_lib.write_shard(shard_path, page_number, page_elements, **({"skipped": "blank"} if blank else {}))
 
     fitz_doc.close()
     print(f"extracted text for pages {page_numbers}")

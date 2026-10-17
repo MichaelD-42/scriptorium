@@ -50,7 +50,9 @@ class TestDecide:
         assert out["warnings"] == [warning]
         assert out["escalated_pages"] == {}
 
-    def test_pdf_content_issue_bumps_text_to_ocr_with_the_graders_reason(self):
+    def test_pdf_content_issue_bumps_text_to_vision_with_the_graders_reason(self):
+        """Not ocr: tesseract writes only paragraphs, so a table or heading
+        defect on a page with a good text layer would get worse."""
         out = _decide(
             _report([_page(3, ["dropped_text"], "second paragraph missing")]),
             {3: "text"},
@@ -59,7 +61,7 @@ class TestDecide:
         assert out["attempt"] == 1
         assert out["escalated_pages"] == {
             "3": {
-                "tier": "ocr",
+                "tier": "vision",
                 "recheck_images": False,
                 "reason": "second paragraph missing",
             }
@@ -113,7 +115,7 @@ class TestDecide:
 
     def test_content_and_image_issue_on_one_page(self):
         out = _decide(_report([_page(4, ["dropped_text", "bad_caption"])]), {4: "text"})
-        assert out["escalated_pages"]["4"]["tier"] == "ocr"
+        assert out["escalated_pages"]["4"]["tier"] == "vision"
         assert out["escalated_pages"]["4"]["recheck_images"] is True
 
     def test_figures_complete_gate_rechecks_its_pages(self):
@@ -167,10 +169,52 @@ class TestDecide:
         assert out["status"] == "needs-human"
         assert "page_count_match" in out["reason"]
 
+    def test_low_ocr_confidence_goes_to_vision(self):
+        check = {
+            "name": "ocr_confidence_floor",
+            "passed": False,
+            "detail": "pages below 0.5 confidence: [2]",
+            "pages": [2],
+        }
+        out = _decide(_report(checks=[check]), {2: "ocr"})
+        assert out["status"] == "retrying"
+        assert out["escalated_pages"]["2"]["tier"] == "vision"
+
+    def test_unretryable_gate_is_needs_human_even_with_pages_to_retry(self):
+        """A retry re-extracts pages; it cannot fix a document-level gate,
+        and the gate's detail must reach the reason."""
+        check = {
+            "name": "image_refs_resolve",
+            "passed": False,
+            "detail": "missing assets: ['assets/p1-1.png']",
+        }
+        out = _decide(_report([_page(1, ["missing_image"])], checks=[check]), {1: "text"})
+        assert out["status"] == "needs-human"
+        assert "image_refs_resolve: missing assets" in out["reason"]
+
 
 class TestCli:
     def _state(self):
         return json.loads((paths.Path("runs/state.json")).read_text())
+
+    def test_init_with_another_format(self, tmp_project):
+        """A finished document is not re-queued (that would redo all
+        extraction), but init says so; an open one takes the new format."""
+        shutil.copyfile(EXAMPLES_ROOT / "sample.pdf", tmp_project / "input" / "done.pdf")
+        shutil.copyfile(EXAMPLES_ROOT / "sample.png", tmp_project / "input" / "open.png")
+        run_script("queue-state/scripts/state.py", "init", "--format", "md", cwd=tmp_project)
+        state = self._state()
+        state["docs"]["done"]["status"] = "passed"
+        paths.Path("runs/state.json").write_text(json.dumps(state))
+
+        result = run_script("queue-state/scripts/state.py", "init", "--format", "reqif", cwd=tmp_project)
+
+        assert result.returncode == 0, result.stderr
+        assert "done is passed as md" in result.stderr
+        assert "assemble.py --doc done --format reqif" in result.stderr
+        docs = self._state()["docs"]
+        assert (docs["done"]["status"], docs["done"]["format"]) == ("passed", "md")
+        assert (docs["open"]["status"], docs["open"]["format"]) == ("pending", "reqif")
 
     def test_init_next_reject(self, tmp_project):
         shutil.copyfile(EXAMPLES_ROOT / "sample.pdf", tmp_project / "input" / "b.pdf")

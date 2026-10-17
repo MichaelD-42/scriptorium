@@ -284,6 +284,46 @@ def test_write_grade_shard_refuses_an_unknown_tag(tmp_project, monkeypatch):
     assert not paths.grade_shard_path("doc", 1).exists()
 
 
+@pytest.mark.parametrize("score", ["90", "-0.1"])
+def test_write_grade_shard_refuses_a_score_outside_0_1(tmp_project, monkeypatch, score):
+    """A percentage (90) averaged with 0-1 scores would pass any document."""
+    monkeypatch.setattr("sys.argv", ["write_grade_shard.py", "--doc", "doc", "--page", "1", "--score", score])
+    with pytest.raises(SystemExit) as exc_info:
+        write_grade_shard.main()
+    assert exc_info.value.code == 1
+    assert not paths.grade_shard_path("doc", 1).exists()
+
+
+def test_write_vision_page_lands_headings_lists_and_tables(tmp_project, monkeypatch):
+    elements = [
+        {"type": "heading", "level": 2, "text": "Scope"},
+        {"type": "list_item", "marker": "1)", "level": 1, "text": "first"},
+        {"type": "table", "rows": [["a", "b"], ["1", "2"]]},
+    ]
+    monkeypatch.setattr("sys.argv", ["write_vision_page.py", "--doc", "doc", "--page", "5"])
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(elements)))
+    write_vision_page.main()
+    assert json.loads(paths.shard_path("doc", 5, "vision").read_text())["elements"] == elements
+
+
+@pytest.mark.parametrize("element", [
+    {"type": "heading", "text": "Intro"},  # no level: assemble.py raised KeyError
+    {"type": "heading", "level": 9, "text": "Intro"},
+    {"type": "list_item", "text": "first"},
+    {"type": "paragraph"},
+    {"type": "table", "rows": "a,b"},
+    {"type": "image", "asset": "assets/x.png"},
+    "just text",
+])
+def test_write_vision_page_refuses_an_element_assemble_cannot_render(tmp_project, monkeypatch, element):
+    monkeypatch.setattr("sys.argv", ["write_vision_page.py", "--doc", "doc", "--page", "5"])
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps([element])))
+    with pytest.raises(SystemExit) as exc_info:
+        write_vision_page.main()
+    assert exc_info.value.code == 1
+    assert not paths.shard_path("doc", 5, "vision").exists()
+
+
 def test_merge_grades_stdout_is_compact(tmp_project, monkeypatch, capsys):
     _seed_gates_report(tmp_project, "doc", passed=True)
     for n in range(1, 41):

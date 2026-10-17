@@ -176,6 +176,9 @@ document.
   with no text/table extraction attempted — a printed TOC page's own text
   is redundant with `toc.json` and isn't useful body content. This applies
   per-page even when `--pages` mixes a TOC page in with body pages.
+- A page with no element, no figure and no text but furniture (a blank
+  page, or one with only the header and footer) is written with
+  `"skipped": "blank"`, so `no_empty_pages` does not fail it.
 
 ## Output
 

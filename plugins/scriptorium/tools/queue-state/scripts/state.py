@@ -25,7 +25,9 @@ STATE_PATH = Path("runs") / "state.json"
 OPEN_STATUSES = ("pending", "retrying")
 # One rung up the body-tier ladder per format; a tier with no entry is the top.
 NEXT_TIER = {
-    "pdf": {"text": "ocr", "ocr": "vision"},
+    # text skips ocr: tesseract writes only paragraphs, so a page with a good
+    # text layer would lose its tables and headings.
+    "pdf": {"text": "vision", "ocr": "vision"},
     "pptx": {"text": "vision"},  # no ocr rung: pptx is digital-native, vision reads the rendered slide
     "image": {"ocr": "vision"},
 }
@@ -79,6 +81,9 @@ def decide(entry: dict, report: dict, tiers: dict[int, str], max_attempts: int) 
         elif check["name"] == "figures_complete":
             for page in check.get("pages", []):
                 escalate(page, tiers.get(page, "text"), True, check["detail"])
+        elif check["name"] == "ocr_confidence_floor" and check.get("pages"):
+            for page in check["pages"]:
+                escalate(page, "vision", False, check["detail"])
         else:
             unretryable.append(f"{check['name']}: {check['detail']}")
 
@@ -99,13 +104,14 @@ def decide(entry: dict, report: dict, tiers: dict[int, str], max_attempts: int) 
         else:
             escalate(page, tier, True, reason)
 
+    human += unretryable  # a retry re-extracts pages; it cannot fix a document-level gate
     if human:
         entry["status"], entry["reason"] = "needs-human", "; ".join(human)
     elif entry["attempt"] >= max_attempts:
         entry["status"], entry["reason"] = "needs-human", f"still failing after {entry['attempt']} attempts"
     elif not escalations:
         entry["status"] = "needs-human"
-        entry["reason"] = "; ".join(unretryable) or "rubric failed without page-level issues to retry"
+        entry["reason"] = "rubric failed without page-level issues to retry"
     else:
         entry["status"] = "retrying"
         entry["escalated_pages"] = {str(p): escalations[p] for p in sorted(escalations)}
@@ -145,6 +151,15 @@ def cmd_init(args) -> None:
         entry = state["docs"].get(doc)
         if entry and entry.get("input_sha256", digest) == digest:
             entry["input_sha256"] = digest  # an entry from before 0.5.1 keeps its status
+            if entry["format"] != args.format:
+                if entry["status"] in OPEN_STATUSES:
+                    entry["format"] = args.format
+                else:  # re-queuing would redo all extraction; the merged elements are enough
+                    print(
+                        f"warning: {doc} is {entry['status']} as {entry['format']}; --format {args.format} "
+                        f"does not re-queue it. To re-render: assemble.py --doc {doc} --format {args.format}",
+                        file=sys.stderr,
+                    )
             continue
         # New or changed input: old ocr/vision shards would outrank the new
         # extraction at merge time, so the document starts from nothing.

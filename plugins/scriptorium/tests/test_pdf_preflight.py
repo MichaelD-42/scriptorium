@@ -121,7 +121,7 @@ class TestCompactStdout:
             d.new_page().insert_text(
                 (72, 300), f"Body text on page {n + 1}, long enough to count."
             )
-        d.new_page()  # blank page -> ocr
+        d.new_page().insert_image(fitz.Rect(0, 0, 595, 842), pixmap=fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 10, 10), 0))  # scan -> ocr
         doc = _save(d, tmp_project, "forty")
 
         result, data = _triage(doc, tmp_project)

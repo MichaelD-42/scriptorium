@@ -133,6 +133,9 @@ def classify_page(page) -> dict:
             "image_count": image_count,
             "reason": reason,
         }
+    if not non_ws and not image_count and not page.get_drawings():
+        # Nothing to OCR: extract-text marks it skipped "blank".
+        return {"tier": "text", "text_ratio": 0.0, "image_count": 0, "reason": "blank page"}
     return {
         "tier": "ocr",
         "text_ratio": round(text_ratio, 3),

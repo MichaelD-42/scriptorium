@@ -286,7 +286,7 @@ class TestRetryCarriesTheGradersReason:
             {
                 "doc": "s",
                 "pages": [2],
-                "tiers": {"2": "ocr"},
+                "tiers": {"2": "vision"},
                 "recheck_images": [],
                 "reasons": {"2": "table caption line missing"},
             }

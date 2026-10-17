@@ -67,6 +67,10 @@ A page that was identified as a printed table-of-contents page (see
 entry. Every other page's entry has no `role` key at all — the default is
 "body", never written out explicitly.
 
+A page with no text, no image and no drawing is `"tier": "text"` with
+`"reason": "blank page"`: there is nothing to OCR. `extract-text` marks it
+`"skipped": "blank"`.
+
 ## `toc.json`
 
 Also writes `work/<doc-name>/toc.json`:
