@@ -408,12 +408,6 @@ def parse_toc_page_lines(
     return entries, [lines[k] for k in sorted(set(unparsed_at))]
 
 
-def _parse_toc_page_lines(lines: list[str]) -> list[dict]:
-    """The entries half of `parse_toc_page_lines`."""
-    entries, _unparsed = parse_toc_page_lines(lines)
-    return entries
-
-
 def parse_printed_toc_with_unparsed(document, toc_pages: list[int]) -> tuple[list[dict], list[str]]:
     entries: list[dict] = []
     unparsed: list[str] = []
@@ -425,11 +419,6 @@ def parse_printed_toc_with_unparsed(document, toc_pages: list[int]) -> tuple[lis
         entries.extend(page_entries)
         unparsed.extend(page_unparsed)
     return entries, unparsed
-
-
-def parse_printed_toc(document, toc_pages: list[int]) -> list[dict]:
-    entries, _unparsed = parse_printed_toc_with_unparsed(document, toc_pages)
-    return entries
 
 
 def detect_toc_with_unparsed(document) -> tuple[list[dict], list[int], list[str]]:

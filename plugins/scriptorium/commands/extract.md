@@ -70,8 +70,11 @@ given, pass `--doc <name>` to every `state.py next` below.
 Repeat until no document matches:
 
 **Pick**: `state.py next` prints the next `pending`/`retrying` document, or
-nothing. Nothing → run `state.py summary`, report it (passed / needs-human
-counts, each needs-human reason, documents with warnings) and **stop**.
+nothing. Nothing → run `queue-state/scripts/report.py` (writes
+`output/report.html`: summary tiles, every document's attempts with their
+durations, gates, warnings and page grades) and `state.py summary`; report
+the summary (passed / needs-human counts, each needs-human reason,
+documents with warnings) with the report's path, and **stop**.
 
 ### 1. Triage / resume
 

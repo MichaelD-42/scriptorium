@@ -13,19 +13,23 @@ run each.
 
 | Subcommand | Does |
 |---|---|
-| `init --format <fmt>` | creates `runs/state.json`, adds each new supported `input/` file as `pending` (image extensions become `input_format: "image"`); warns on two inputs with one stem |
+| `init --format <fmt>` | creates `runs/state.json`, adds each new supported `input/` file as `pending` (image extensions become `input_format: "image"`). A file whose content changed (`input_sha256`) is queued again from nothing: `work/<doc>/`, `output/<doc>/` and `output/<doc>.zip` are deleted, so old ocr/vision shards cannot outrank the new extraction. Two inputs with one name: the one `paths.input_file` picks (the scripts' rule) is queued, the other skipped with a warning |
 | `next [--doc <name>]` | prints the next `pending`/`retrying` document in `input/` order, or nothing |
 | `reject --doc <name> --reason <text>` | `needs-human` with the reason (triage's `error:` line) |
 | `set-lang --doc <name> --lang-flag <f> [--tessdata-prefix <p>]` | records `ensure_language.py`'s result |
 | `decide --doc <name> --max-attempts <n>` | applies `output/<doc>/grade-report.json` (rules below) |
 | `summary` | status counts, needs-human reasons, warning counts |
 
-Writes are atomic (temp file, then rename). A queue entry:
+Writes are atomic (temp file, then rename). `next` opens an attempt
+record (`started_at`) when it picks a document; `decide` and `reject` close
+it (`finished_at`, `status`, `score`, and on a retry the `escalated_pages`
+with their reasons). A queue entry:
 
 ```json
 {"status": "retrying", "attempt": 1, "input_format": "pdf", "format": "md",
  "escalated_pages": {"3": {"tier": "ocr", "recheck_images": false, "reason": "second paragraph missing"}},
- "lang_flag": null, "tessdata_prefix": null, "warnings": [], "reason": null, "grade_report": null}
+ "lang_flag": null, "tessdata_prefix": null, "warnings": [], "reason": null, "grade_report": null,
+ "input_sha256": "9f2c..."}
 ```
 
 ### Decision rules (`decide`)
@@ -60,6 +64,22 @@ own is counted at `vision`.
    (a document-level gate, or a low score without tags) → `needs-human`,
    since a retry would re-run nothing. Else `retrying` with
    `escalated_pages`.
+
+## `report.py` — the end-of-run report
+
+```bash
+report.py   # {"report": "output/report.html", "documents": n, "passed": n, "needs_human": n}
+```
+
+Run once when the queue is empty. Writes one self-contained HTML file (no
+scripts, light and dark mode) from `runs/state.json` and each document's
+`grade-report.json` and `elements.json`: summary tiles (documents, passed,
+needs a human, pages, attempts, extraction time), a row per document with
+its page-grade strip, and per document its reason, attempts (start, time,
+outcome, score, escalations with reasons), failed gates, warnings, and a
+page table (tier, score, issues, the grader's reason). Time is the sum of
+attempt durations, from `next` to `decide`/`reject`; it is not split by
+phase. All document text is HTML-escaped.
 
 ## `plan.py` — what needs an agent, and batch sizes
 

@@ -23,7 +23,7 @@ Each skill is `SKILL.md` + `scripts/*.py`, run with
 | Skill | Scripts | Role |
 |---|---|---|
 | `setup-environment` | `check_env.sh` / `check_env.ps1`, `ensure_language.py` | bootstrap `uv`/Python/`tesseract`/`soffice` (LibreOffice, for pptx rendering); detect and install the OCR language pack a document actually needs |
-| `queue-state` | `state.py`, `plan.py` | orchestrator only. `state.py` owns `runs/state.json` (init, next, reject, set-lang, decide, summary) and applies the pass / retry / needs-human rules to `grade-report.json`; `plan.py` lists the pages to extract by script, then batches the pages that need an agent by estimated turns against each agent's `maxTurns` |
+| `queue-state` | `state.py`, `plan.py`, `report.py` | orchestrator only. `state.py` owns `runs/state.json` (init, next, reject, set-lang, decide, summary) and applies the pass / retry / needs-human rules to `grade-report.json`; `plan.py` lists the pages to extract by script, then batches the pages that need an agent by estimated turns against each agent's `maxTurns`; `report.py` writes the end-of-run `output/report.html` (summary, durations, grades per document) |
 | `pdf-triage` | `triage.py` | classify PDF pages into tiers + document loop size (`loose`/`tight`); preflight rejects unreadable input and starts garbled-text or stamped-scan pages at `ocr` |
 | `pptx-triage` | `triage.py` | classify pptx slides (always tier `text`) + loop size (`tight` if any slide has a picture/chart) |
 | `docx-triage` | `triage.py` | split a docx into logical pages (Heading-1 sections, via `lib/docx_pages.split_pages`) + loop size (`tight` if any page has a table/image); its `page_count` is the pipeline's own pagination, not an independent source-file property |
@@ -37,7 +37,7 @@ Each skill is `SKILL.md` + `scripts/*.py`, run with
 | `pptx-extract` | `extract_pptx.py` | pptx Tier 1: title → heading, text frames → paragraphs, tables, pictures (own shard), speaker notes — body + image shards in one call |
 | `docx-extract` | `extract_docx.py` | docx Tier 1: headings (clamped to level 1-3), paragraphs, tables, inline images — body + image shards in one call, using the same page split as `docx-triage` |
 | `xlsx-extract` | `extract_xlsx.py` | xlsx Tier 1: sheet name → heading, used range → one table element (full rectangle, blank interior rows kept), embedded images (own shard) — charts not extracted (no rendering engine) |
-| `html-extract` | `extract_html.py` | html Tier 1: `<h1>`-`<h6>` → headings (clamped to level 1-3), `<p>`/`<li>`/`<pre>`/`<blockquote>` → paragraphs, `<table>` → table, `<img>` (`data:` URI or local file only — remote sources skipped) → image — body + image shards in one call, single page always |
+| `html-extract` | `extract_html.py` | html Tier 1: `<h1>`-`<h6>` → headings (clamped to level 1-3), `<p>`/`<li>`/`<pre>`/`<blockquote>` → paragraphs, `<table>` → table, `<img>` (`data:` URI, or an image file inside the HTML file's own folder — remote sources and paths outside the folder skipped) → image — body + image shards in one call, single page always |
 | `assemble-output` | `merge.py`, `assemble.py`, `zip_output.py` | `merge.py` combines every page's shards into `elements.json` (page count from `paths.true_page_count`, format-aware; also joins a paragraph/list item cut by a page break); `assemble.py` renders Markdown, HTML, an OKF bundle, `md-tree` (nested folders/files split at a heading depth, with a stable per-heading anchor — a byte-for-byte contract with a downstream consumer), or a ReqIF document (XML built by the internal `reqif_builder.py` helper, stdlib `xml.etree.ElementTree`, no new dependency); `zip_output.py` (optional, `/scriptorium:extract --zip`) packages `output/<doc>/` into `output/<doc>.zip` |
 | `grade-output` | `gates.py`, `write_grade_shard.py`, `merge_grades.py`, `text_mode_grade.py` | `gates.py` (deterministic, whole-doc, any format — page count, empty pages, dangling asset refs, OCR confidence floor, output file exists, plus PDF-only: furniture absent, TOC headings matched, figures complete, and a `large_region_excluded` warning) + `rubric.md` (vision judge, per page batch, applied by the `grader` agent via `write_grade_shard.py` — `pdf`/`pptx`/`image` only) **or** `text_mode_grade.py` (deterministic structural check re-reading the source file directly, no agent — `docx`/`xlsx`/`html`, see `text-rubric.md`) + `merge_grades.py` (deterministic, combines every batch's grade shards identically either way) |
 
@@ -57,6 +57,7 @@ iteration, Heading-1 pagination, and inline-image extraction, shared by
 
 - `queue-state/scripts/state.py init|next|reject|set-lang|decide|summary ...`
 - `queue-state/scripts/plan.py --doc <name> --stage scripts|extract|grade [--max-pages <n>]`
+- `queue-state/scripts/report.py` (writes `output/report.html`)
 - `pdf-triage/scripts/triage.py --doc <name>`
 - `pptx-triage/scripts/triage.py --doc <name>`
 - `docx-triage/scripts/triage.py --doc <name>`

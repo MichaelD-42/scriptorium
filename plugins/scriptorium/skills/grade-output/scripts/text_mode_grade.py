@@ -14,6 +14,7 @@ import argparse
 import json
 import re
 import sys
+from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
@@ -101,24 +102,25 @@ def docx_check_images(blocks: list, output_elements: list, document) -> tuple[bo
     return missing_image, bad_caption
 
 
+def headings_missing(expected: list[tuple[str, int]], output_elements: list) -> bool:
+    """True when a source (text, level) heading is not in the output. A
+    multiset, not a dict: one heading text can appear at two levels."""
+    actual = Counter((normalize(el["text"]), el["level"]) for el in output_elements if el["type"] == "heading")
+    return bool(Counter(expected) - actual)
+
+
 def docx_check_wrong_heading_level(blocks: list, output_elements: list) -> bool:
     from docx.text.paragraph import Paragraph
 
-    output_headings = {normalize(el["text"]): el["level"] for el in output_elements if el["type"] == "heading"}
+    expected = []
     for block in blocks:
         if not isinstance(block, Paragraph):
             continue
         level = docx_pages.heading_level(block)
-        if level is None:
-            continue
         text = block.text.strip()
-        if not text:
-            continue
-        expected_level = min(level, 3)
-        actual_level = output_headings.get(normalize(text))
-        if actual_level != expected_level:
-            return True
-    return False
+        if level is not None and text:
+            expected.append((normalize(text), min(level, 3)))
+    return headings_missing(expected, output_elements)
 
 
 def grade_docx_page(blocks: list, page: dict, document) -> tuple[float, list[str]]:
@@ -264,19 +266,13 @@ def html_check_images(soup, html_dir: Path, output_elements: list) -> tuple[bool
 
 
 def html_check_wrong_heading_level(blocks: list, output_elements: list) -> bool:
-    output_headings = {normalize(el["text"]): el["level"] for el in output_elements if el["type"] == "heading"}
+    expected = []
     for block in blocks:
         level = html_pages.heading_level(block)
-        if level is None:
-            continue
         text = block.get_text(strip=True)
-        if not text:
-            continue
-        expected_level = min(level, 3)
-        actual_level = output_headings.get(normalize(text))
-        if actual_level != expected_level:
-            return True
-    return False
+        if level is not None and text:
+            expected.append((normalize(text), min(level, 3)))
+    return headings_missing(expected, output_elements)
 
 
 def grade_html_page(blocks: list, page: dict, soup, html_dir: Path) -> tuple[float, list[str]]:

@@ -320,11 +320,6 @@ def pdf_page_sizes(pdf_path) -> dict[int, tuple[float, float]]:
         return {i: (page.rect.width, page.rect.height) for i, page in enumerate(doc, start=1)}
 
 
-def pdf_page_heights(pdf_path) -> dict[int, float]:
-    """{page_number: height in points} for a PDF (`pdf_page_sizes`)."""
-    return {n: size[1] for n, size in pdf_page_sizes(pdf_path).items()}
-
-
 def bbox_matches(a, b, tolerance: float = FRAME_MATCH_TOLERANCE) -> bool:
     """True when every coordinate of `a` is within `tolerance` of `b`."""
     a, b = list(a or []), list(b or [])

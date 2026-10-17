@@ -229,6 +229,53 @@ def _frame_table_candidate_pages(document) -> set[int]:
     return candidates
 
 
+def _repeating_groups(items, page_total: int, min_fraction: float) -> list[dict]:
+    """Group `(page_number, bbox, kind)` items whose bboxes match within
+    FRAME_GROUP_TOLERANCE (same kind), and keep the groups found on at
+    least FRAME_MIN_PAGE_COUNT pages AND at least `min_fraction` of
+    `page_total` pages. Each kept group is `{"bbox", "kind", "page_count"}`;
+    `bbox` is the average over all occurrences."""
+    tolerance = furniture_lib.FRAME_GROUP_TOLERANCE
+    groups: list[dict] = []  # [{"kind", "bboxes": [...], "pages": set()}]
+    # Grid index over the rounded-down coordinates (cell size = tolerance),
+    # so each lookup checks only the neighbouring cells, not every group.
+    index: dict[tuple, list[dict]] = {}
+
+    def cell(bbox) -> tuple:
+        return tuple(math.floor(v / tolerance) for v in bbox)
+
+    for page_number, bbox, kind in items:
+        base = cell(bbox)
+        group = None
+        for offset in itertools.product((-1, 0, 1), repeat=4):
+            key = (kind, *(c + o for c, o in zip(base, offset)))
+            group = next(
+                (g for g in index.get(key, []) if furniture_lib.bbox_matches(g["bboxes"][0], bbox, tolerance)),
+                None,
+            )
+            if group is not None:
+                break
+        if group is None:
+            group = {"kind": kind, "bboxes": [], "pages": set()}
+            groups.append(group)
+            index.setdefault((kind, *base), []).append(group)
+        group["bboxes"].append(bbox)
+        group["pages"].add(page_number)
+
+    kept = []
+    for group in groups:
+        matched_page_count = len(group["pages"])
+        if (
+            page_total
+            and matched_page_count >= FRAME_MIN_PAGE_COUNT
+            and matched_page_count / page_total >= min_fraction
+        ):
+            n = len(group["bboxes"])
+            avg_bbox = [round(sum(b[i] for b in group["bboxes"]) / n, 2) for i in range(4)]
+            kept.append({"bbox": avg_bbox, "kind": group["kind"], "page_count": matched_page_count})
+    return kept
+
+
 def _find_frame_tables(pdf_path: Path, page_count: int, candidate_pages: set[int] | None = None) -> list[dict]:
     """Tables (per pdfplumber's `find_tables()`) whose bbox covers more than
     FRAME_TABLE_MIN_AREA_FRACTION of the page area, and that repeat at
@@ -238,8 +285,7 @@ def _find_frame_tables(pdf_path: Path, page_count: int, candidate_pages: set[int
     isn't enough on a short document). A plain ruled rectangle with no
     internal lines is often not detected as a table at all by pdfplumber's
     heuristics -- that's a legitimate empty result, not a bug."""
-    groups: list[dict] = []  # [{"bboxes": [...], "pages": set()}]
-
+    items = []
     with pdfplumber.open(pdf_path) as pdf:
         for page_number in sorted(candidate_pages) if candidate_pages is not None else range(1, page_count + 1):
             page = pdf.pages[page_number - 1]
@@ -253,31 +299,12 @@ def _find_frame_tables(pdf_path: Path, page_count: int, candidate_pages: set[int
             for table in tables:
                 bbox = table.bbox
                 area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
-                if area / page_area <= FRAME_TABLE_MIN_AREA_FRACTION:
-                    continue
-
-                group = next(
-                    (g for g in groups if furniture_lib.bbox_matches(g["bboxes"][0], bbox, furniture_lib.FRAME_GROUP_TOLERANCE)),
-                    None,
-                )
-                if group is None:
-                    group = {"bboxes": [], "pages": set()}
-                    groups.append(group)
-                group["bboxes"].append(bbox)
-                group["pages"].add(page.page_number)
-
-    frame_tables = []
-    for group in groups:
-        matched_page_count = len(group["pages"])
-        if (
-            page_count
-            and matched_page_count >= FRAME_MIN_PAGE_COUNT
-            and matched_page_count / page_count >= FRAME_TABLE_MIN_PAGE_FRACTION
-        ):
-            n = len(group["bboxes"])
-            avg_bbox = [round(sum(b[i] for b in group["bboxes"]) / n, 2) for i in range(4)]
-            frame_tables.append({"bbox": avg_bbox, "page_count": matched_page_count})
-    return frame_tables
+                if area / page_area > FRAME_TABLE_MIN_AREA_FRACTION:
+                    items.append((page_number, list(bbox), None))
+    return [
+        {"bbox": g["bbox"], "page_count": g["page_count"]}
+        for g in _repeating_groups(items, page_count, FRAME_TABLE_MIN_PAGE_FRACTION)
+    ]
 
 
 def _find_frame_drawings(document) -> list[dict]:
@@ -285,47 +312,23 @@ def _find_frame_drawings(document) -> list[dict]:
     than FRAME_TABLE_MIN_AREA_FRACTION of the page area, repeating at
     (approximately, within FRAME_GROUP_TOLERANCE) the same bbox on at
     least FRAME_TABLE_MIN_PAGE_FRACTION of pages AND at least
-    FRAME_MIN_PAGE_COUNT distinct pages (both gates must hold). Mirrors
-    `_find_frame_tables`'s grouping shape exactly, over a different item
-    source (fitz drawings, not pdfplumber tables) -- see the constants'
-    docstring above for why this exists alongside frame_tables rather than
-    replacing it."""
-    page_count = document.page_count
-    groups: list[dict] = []  # [{"bboxes": [...], "pages": set()}]
-
+    FRAME_MIN_PAGE_COUNT distinct pages (both gates must hold). The same
+    test as `_find_frame_tables`, over fitz drawings instead of pdfplumber
+    tables -- see the constants' docstring above for why this exists
+    alongside frame_tables rather than replacing it."""
+    items = []
     for page_number, page in enumerate(document, start=1):
         page_area = page.rect.width * page.rect.height
         if page_area <= 0:
             continue
         for d in page.get_drawings():
             rect = d["rect"]
-            area = rect.width * rect.height
-            if area / page_area <= FRAME_TABLE_MIN_AREA_FRACTION:
-                continue
-            bbox = [rect.x0, rect.y0, rect.x1, rect.y1]
-
-            group = next(
-                (g for g in groups if furniture_lib.bbox_matches(g["bboxes"][0], bbox, furniture_lib.FRAME_GROUP_TOLERANCE)),
-                None,
-            )
-            if group is None:
-                group = {"bboxes": [], "pages": set()}
-                groups.append(group)
-            group["bboxes"].append(bbox)
-            group["pages"].add(page_number)
-
-    frame_drawings = []
-    for group in groups:
-        matched_page_count = len(group["pages"])
-        if (
-            page_count
-            and matched_page_count >= FRAME_MIN_PAGE_COUNT
-            and matched_page_count / page_count >= FRAME_TABLE_MIN_PAGE_FRACTION
-        ):
-            n = len(group["bboxes"])
-            avg_bbox = [round(sum(b[i] for b in group["bboxes"]) / n, 2) for i in range(4)]
-            frame_drawings.append({"bbox": avg_bbox, "page_count": matched_page_count})
-    return frame_drawings
+            if rect.width * rect.height / page_area > FRAME_TABLE_MIN_AREA_FRACTION:
+                items.append((page_number, [rect.x0, rect.y0, rect.x1, rect.y1], None))
+    return [
+        {"bbox": g["bbox"], "page_count": g["page_count"]}
+        for g in _repeating_groups(items, document.page_count, FRAME_TABLE_MIN_PAGE_FRACTION)
+    ]
 
 
 def _find_repeated_drawings(document, body_pages: set[int] | None = None) -> list[dict]:
@@ -350,54 +353,18 @@ def _find_repeated_drawings(document, body_pages: set[int] | None = None) -> lis
     repeated part, not one per occurrence. Each entry is
     `{"bbox", "type", "page_count"}`; `bbox` is the average over all
     occurrences."""
-    tolerance = furniture_lib.FRAME_GROUP_TOLERANCE
     if body_pages is None:
         body_pages = set(range(1, document.page_count + 1))
-    if not body_pages:
-        return []
-
-    groups: list[dict] = []  # [{"type", "bboxes": [...], "pages": set()}]
-    # Grid index over the rounded-down coordinates (cell size = tolerance),
-    # so each lookup checks only the neighbouring cells, not every group.
-    index: dict[tuple, list[dict]] = {}
-
-    def cell(bbox) -> tuple:
-        return tuple(math.floor(v / tolerance) for v in bbox)
-
-    for page_number, page in enumerate(document, start=1):
-        if page_number not in body_pages:
-            continue
-        for d in page.get_drawings():
-            rect = d["rect"]
-            bbox = [rect.x0, rect.y0, rect.x1, rect.y1]
-            dtype = d.get("type")
-            base = cell(bbox)
-            group = None
-            for offset in itertools.product((-1, 0, 1), repeat=4):
-                key = (dtype, *(c + o for c, o in zip(base, offset)))
-                group = next(
-                    (g for g in index.get(key, []) if furniture_lib.bbox_matches(g["bboxes"][0], bbox, tolerance)),
-                    None,
-                )
-                if group is not None:
-                    break
-            if group is None:
-                group = {"type": dtype, "bboxes": [], "pages": set()}
-                groups.append(group)
-                index.setdefault((dtype, *base), []).append(group)
-            group["bboxes"].append(bbox)
-            group["pages"].add(page_number)
-
-    repeated = []
-    for group in groups:
-        matched_page_count = len(group["pages"])
-        if (
-            matched_page_count >= FRAME_MIN_PAGE_COUNT
-            and matched_page_count / len(body_pages) >= furniture_lib.REPEATED_DRAWING_MIN_PAGE_FRACTION
-        ):
-            n = len(group["bboxes"])
-            avg_bbox = [round(sum(b[i] for b in group["bboxes"]) / n, 2) for i in range(4)]
-            repeated.append({"bbox": avg_bbox, "type": group["type"], "page_count": matched_page_count})
+    items = [
+        (page_number, [d["rect"].x0, d["rect"].y0, d["rect"].x1, d["rect"].y1], d.get("type"))
+        for page_number, page in enumerate(document, start=1)
+        if page_number in body_pages
+        for d in page.get_drawings()
+    ]
+    repeated = [
+        {"bbox": g["bbox"], "type": g["kind"], "page_count": g["page_count"]}
+        for g in _repeating_groups(items, len(body_pages), furniture_lib.REPEATED_DRAWING_MIN_PAGE_FRACTION)
+    ]
     repeated.sort(key=lambda r: (r["bbox"][1], r["bbox"][0], r["bbox"][3], r["bbox"][2]))
     return repeated
 

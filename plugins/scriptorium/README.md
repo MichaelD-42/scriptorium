@@ -19,6 +19,26 @@ PDF, PowerPoint (`.pptx`), Word (`.docx`), Excel (`.xlsx`), HTML (`.html`),
 and standalone images (`.png`/`.jpg`/`.jpeg`/`.webp`/`.tiff`) are
 implemented today.
 
+## 0.5.1
+
+- **Run report**: when the queue is empty, `output/report.html` sums up the
+  run (documents, passed, needs a human, pages, attempts, extraction time)
+  and shows each document's attempts with durations and escalation
+  reasons, failed gates, warnings and per-page grades. Attempt timing is
+  recorded in `runs/state.json`.
+- **Security**: an HTML input's `<img>` is read only from inside the HTML
+  file's own folder and only if it is an image; before, any local file
+  could be copied into the output.
+- **Reruns start clean**: a new or changed input file deletes the
+  document's old `work/` and `output/`, so old OCR/vision text can no
+  longer override the new extraction, and a replaced file is queued again.
+- **Fixes**: repeated heading text at two levels no longer fails a correct
+  docx/html document; parallel graders converting one pptx no longer share
+  a LibreOffice profile or read a half-written PDF; with two inputs of one
+  name the queue uses the file the scripts read.
+- **Cleanup**: one grouping helper in PDF triage (identical output), four
+  unused functions removed.
+
 ## 0.5.0
 
 - **Work-sized batches**: the orchestrator runs the deterministic extract

@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 from bs4 import BeautifulSoup
+from PIL import Image
 from bs4.element import Tag
 
 BLOCK_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6", "p", "table", "pre", "blockquote", "li"}
@@ -59,6 +60,15 @@ def _ext_from_mime(mime: str) -> str:
     return ext.lstrip(".")
 
 
+def _is_image(path: Path) -> bool:
+    try:
+        with Image.open(path) as img:
+            img.verify()
+        return True
+    except Exception:  # UnidentifiedImageError, truncated or not an image at all
+        return False
+
+
 def saveable_images(soup: BeautifulSoup, base_dir: Path) -> list[tuple[bytes, str]]:
     """(bytes, ext) for every <img> whose src is a data: URI or a local
     file (relative to base_dir, or an absolute local path), in document
@@ -87,7 +97,8 @@ def saveable_images(soup: BeautifulSoup, base_dir: Path) -> list[tuple[bytes, st
         local_path = Path(unquote(parsed.path))
         if not local_path.is_absolute():
             local_path = base_dir / local_path
-        if local_path.is_file():
+        # Untrusted input: only image files inside the HTML file's own folder.
+        if local_path.is_file() and local_path.resolve().is_relative_to(base_dir.resolve()) and _is_image(local_path):
             found.append((local_path.read_bytes(), local_path.suffix.lstrip(".") or "png"))
 
     return found

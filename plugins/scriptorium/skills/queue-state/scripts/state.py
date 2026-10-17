@@ -8,9 +8,12 @@ rules by hand.
 """
 
 import argparse
+import hashlib
 import json
 import os
+import shutil
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
@@ -123,33 +126,62 @@ def page_tiers(doc: str) -> dict[int, str]:
 
 def cmd_init(args) -> None:
     state = load_state()
-    seen = set()
     for path in sorted(Path("input").iterdir()):
         ext = path.suffix.lstrip(".").lower()
         if ext not in paths.SUPPORTED_INPUT_EXTS:
             continue
-        if path.stem in seen:
-            print(f"warning: {path} shares its name with another input; only one is processed", file=sys.stderr)
+        doc = path.stem
+        chosen = paths.input_file(doc)
+        if chosen != path:  # the scripts read paths.input_file's pick, so the queue must too
+            print(f"warning: {path} skipped; the scripts read {chosen} for '{doc}'", file=sys.stderr)
             continue
-        seen.add(path.stem)
-        state["docs"].setdefault(path.stem, {
-            "status": "pending", "attempt": 0,
-            "input_format": "image" if ext in paths.IMAGE_EXTS else ext,
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        entry = state["docs"].get(doc)
+        if entry and entry.get("input_sha256", digest) == digest:
+            entry["input_sha256"] = digest  # an entry from before 0.5.1 keeps its status
+            continue
+        # New or changed input: old ocr/vision shards would outrank the new
+        # extraction at merge time, so the document starts from nothing.
+        shutil.rmtree(paths.work_dir(doc), ignore_errors=True)
+        shutil.rmtree(paths.output_dir(doc), ignore_errors=True)
+        paths.output_zip(doc).unlink(missing_ok=True)
+        state["docs"][doc] = {
+            "status": "pending", "attempt": 0, "input_sha256": digest,
+            "input_format": paths.detect_input_format(doc),
             "format": args.format, "escalated_pages": {}, "lang_flag": None, "tessdata_prefix": None,
-        })
+        }
     save_state(state)
     print(json.dumps(summary(state)))
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _close_attempt(entry: dict, **fields) -> None:
+    """Finish the open attempt record that `next` started (report.py's timing)."""
+    if entry.get("attempts") and "finished_at" not in entry["attempts"][-1]:
+        entry["attempts"][-1].update(finished_at=_now(), **fields)
+
+
 def cmd_next(args) -> None:
-    docs = load_state()["docs"]
+    state = load_state()
+    docs = state["docs"]
     names = [args.doc] if args.doc else list(docs)
-    print(next((n for n in names if docs.get(n, {}).get("status") in OPEN_STATUSES), ""))
+    doc = next((n for n in names if docs.get(n, {}).get("status") in OPEN_STATUSES), "")
+    if doc:  # picking a document starts its attempt; asking again starts nothing new
+        attempts = docs[doc].setdefault("attempts", [])
+        if not attempts or "finished_at" in attempts[-1]:
+            attempts.append({"attempt": docs[doc]["attempt"], "started_at": _now()})
+            save_state(state)
+    print(doc)
 
 
 def cmd_reject(args) -> None:
     state = load_state()
-    state["docs"][args.doc].update(status="needs-human", reason=args.reason)
+    entry = state["docs"][args.doc]
+    entry.update(status="needs-human", reason=args.reason)
+    _close_attempt(entry, status="needs-human")
     save_state(state)
 
 
@@ -169,6 +201,8 @@ def cmd_decide(args) -> None:
     entry = decide(state["docs"][args.doc], report, page_tiers(args.doc), args.max_attempts)
     if entry["status"] == "needs-human":
         entry["grade_report"] = str(report_path)
+    escalated = {"escalated_pages": entry["escalated_pages"]} if entry["escalated_pages"] else {}
+    _close_attempt(entry, status=entry["status"], score=report["rubric_verdict"].get("score"), **escalated)
     state["docs"][args.doc] = entry
     save_state(state)
     out = {k: entry[k] for k in ("status", "attempt", "reason", "escalated_pages") if k in entry}

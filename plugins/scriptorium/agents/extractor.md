@@ -105,7 +105,7 @@ on disk (`extract-images` for `pdf`/`image`, which also finds vector
 diagrams with no embedded bitmap; the format's own extract script for
 `pptx`/`docx`/`xlsx`/`html`). Your work is the image elements in it that
 have no `description` yet. Note
-`html-extract` only saves `data:` URI and local-file `<img>` sources —
+`html-extract` only saves `data:` URI `<img>` sources and image files inside the HTML file's own folder —
 remote (`http(s)://`) images are a known, documented gap (not fetched),
 same idea as xlsx's missing charts below.
 

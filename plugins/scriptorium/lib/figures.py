@@ -597,10 +597,6 @@ def _overlaps_table(bbox, table_bbox) -> bool:
     )
 
 
-def _overlaps_any_table(bbox, table_bboxes: list[list[float]]) -> bool:
-    return any(_overlaps_table(bbox, t) for t in table_bboxes)
-
-
 def _drawings_in_cluster(cluster_rect, drawings: list[dict]) -> list[dict]:
     """The drawings whose own rect lies inside `cluster_rect` (1pt slack):
     `cluster_drawings()` returns only the cluster rects, not which drawings
