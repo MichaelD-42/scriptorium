@@ -1,15 +1,6 @@
 ---
 name: extractor
 description: Extracts a batch of pages (native text, OCR with escalation to vision, and images with captions) and writes per-page shards. Invoke once per page batch — the orchestrator spawns several of these in parallel across a document's page batches, since each writes only its own pages' shards and never touches another batch's.
-skills:
-  - render-pages
-  - extract-text
-  - ocr-page
-  - extract-images
-  - pptx-extract
-  - docx-extract
-  - xlsx-extract
-  - html-extract
 model: sonnet
 maxTurns: 30
 ---
@@ -38,6 +29,27 @@ is fresh and undescribed: redo the `figure_text`, description, mermaid (and
 for `pptx`/`docx`/`xlsx`/`html`, caption) work for that page with the
 `reason` in mind. A page escalated to a higher body tier also comes with
 its `reason`: use it to know what the previous extraction got wrong.
+
+## Commands
+
+Run each as `uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/tools/<path>" <args>`.
+Each tool's `README.md` next to its `scripts/` folder has the details;
+read one only when a step below needs more than the line here.
+
+- `render-pages/scripts/render.py --doc <doc> [--pages 1,3]` — page PNGs
+  to `work/<doc>/pages/page{N}.png`; skips pages already rendered.
+- `render-pages/scripts/render_region.py --doc <doc> --page <n> --bbox x0,y0,x1,y1 [--dpi 400]`
+  — a high-resolution crop of one region (PDF only); prints its path.
+- `ocr-page/scripts/ocr.py --doc <doc> --pages 5,6 --lang <lang> [--tessdata-dir <dir>]`
+  — writes `page{N}.ocr.json` shards with `ocr_confidence`.
+- `ocr-page/scripts/write_vision_page.py --doc <doc> --page <n>` — reads
+  a JSON element list on stdin (`[{"type": "paragraph", "text": "..."}]`)
+  and writes the `page{N}.vision.json` shard.
+- `extract-images/scripts/describe_image.py --doc <doc> --page <n> --asset assets/<file>.png --description "..."`
+  with optional `--data-table '<json rows>'`, `--mermaid '<source>'`,
+  `--caption`, `--figure-text`, `--no-visible-text`.
+- `extract-images/scripts/mermaid_image.py --doc <doc> --page <n> --asset assets/<file>.png`
+  — mermaid source on stdin.
 
 ## Your job, per page in your batch
 

@@ -20,7 +20,7 @@ workspace "scriptorium" "Document-to-Markdown extraction pipeline run as a Claud
             extractor = container "Extractor" "Extracts one page batch at its assigned tier (text, OCR, vision) plus images, captions, figure text and mermaid. Writes only its own pages' shards." "Claude Code subagent, one per batch, in parallel" "Agent"
             grader = container "Grader" "Grades one page batch against the rubric by comparing rendered pages to the assembled output. Writes only its own pages' grade shards." "Claude Code subagent, one per batch, in parallel" "Agent"
 
-            scripts = container "Skill scripts" "Deterministic CLI steps, one skill per tier or format." "Python 3.11+, uv" {
+            scripts = container "Tool scripts" "Deterministic CLI steps under tools/, one tool per tier or format." "Python 3.11+, uv" {
                 queue = component "Queue state + plan" "Owns runs/state.json and the pass / retry / needs-human rules; plans which pages need an agent and the batch sizes." "queue-state"
                 triage = component "Triage" "Per format: page split, tier per page, loop size. PDF also: preflight, furniture, TOC, body font size." "pdf/pptx/docx/xlsx/html/image-triage"
                 render = component "Render" "Page or region to PNG; pptx via LibreOffice." "render-pages"

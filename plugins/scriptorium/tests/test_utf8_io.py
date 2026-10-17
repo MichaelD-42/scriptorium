@@ -6,7 +6,7 @@ Every text read and write in the plugin's Python code states
 `encoding="utf-8"`, and every text write also states `newline=""`.
 
 Two checks:
-- a static sweep of lib/, skills/*/scripts and examples/ for text I/O calls
+- a static sweep of lib/, tools/*/scripts and examples/ for text I/O calls
   that leave the encoding (or, for a write, the newline) to the default;
 - a pipeline run with the locale default forced off UTF-8
   (`PYTHONUTF8=0`, `PYTHONIOENCODING=cp1252`): a vision shard holding "•"
@@ -23,9 +23,9 @@ import subprocess
 from pathlib import Path
 
 import fitz  # PyMuPDF
-from conftest import PLUGIN_ROOT, SKILLS_ROOT
+from conftest import PLUGIN_ROOT, TOOLS_ROOT
 
-SWEEP_ROOTS = [PLUGIN_ROOT / "lib", PLUGIN_ROOT / "skills", PLUGIN_ROOT / "examples"]
+SWEEP_ROOTS = [PLUGIN_ROOT / "lib", PLUGIN_ROOT / "tools", PLUGIN_ROOT / "examples"]
 NON_TEXT_OPENERS = {"fitz", "pymupdf", "pdfplumber", "zipfile", "tarfile", "Image"}
 
 BULLET = chr(0x2022)  # bullet
@@ -107,7 +107,7 @@ def _run(
             "--project",
             str(PLUGIN_ROOT),
             "python",
-            str(SKILLS_ROOT / relpath),
+            str(TOOLS_ROOT / relpath),
             *args,
         ],
         cwd=cwd,

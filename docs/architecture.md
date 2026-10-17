@@ -2,7 +2,7 @@
 
 This document covers the elastic loop itself: why the agent tree has the
 shape it does, how the orchestrator drives a document through it, and how
-failures turn into targeted retries. For the skills/scripts/schemas that
+failures turn into targeted retries. For the tools/scripts/schemas that
 implement each step, see [`tooling.md`](tooling.md). The C4 model
 (context, containers, scripts, one attempt) is
 [`c4/workspace.dsl`](c4/workspace.dsl): open it in Structurizr Lite with
@@ -32,7 +32,7 @@ subagents, but a subagent **cannot spawn its own subagents**. So the
 orchestrator is the only spawner, and `extractor`/`grader` are **roles it
 spawns many times in parallel**, once per page batch of a document — not
 five different specialist agents taking turns. Specialization still exists;
-it just lives in the *skills* each role calls (text vs. OCR vs. vision vs.
+it just lives in the *tools* each role runs (text vs. OCR vs. vision vs.
 images), not in five separate agent identities.
 
 ```mermaid

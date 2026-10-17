@@ -3,7 +3,7 @@ folder-per-level-1/file-per-level-2 bundle (for `--split-depth 2`, the only
 depth this repo's tests exercise -- see task-A8-brief.md's "ALL your tests
 target N=2").
 
-Layout (see assemble.py's `write_md_tree`/SKILL.md's "md-tree format"
+Layout (see assemble.py's `write_md_tree`/README.md's "md-tree format"
 section for the full contract):
   - `index.md` -- links to every split file, in document order.
   - `00-front-matter.md` -- content before the first level-1 heading, only

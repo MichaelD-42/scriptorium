@@ -35,24 +35,24 @@ document's `output/<doc>/` into `output/<doc>.zip` once it passes (off by
 default).
 
 Two scripts carry the bookkeeping, so you never edit `runs/state.json` or
-size a batch by hand (`queue-state` skill):
+size a batch by hand (`queue-state` tool):
 `queue-state/scripts/state.py` owns the queue and the pass / retry /
 needs-human decision; `queue-state/scripts/plan.py` decides which pages need
 an agent and how to batch them. Run every script below as
-`uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/skills/<skill>/scripts/<script>" ...`.
+`uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/tools/<tool>/scripts/<script>" ...`.
 
 ## Step 0 — environment bootstrap (once, before the queue loop)
 
 On Linux/macOS:
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/setup-environment/scripts/check_env.sh" "${CLAUDE_PLUGIN_ROOT}"
+"${CLAUDE_PLUGIN_ROOT}/tools/setup-environment/scripts/check_env.sh" "${CLAUDE_PLUGIN_ROOT}"
 ```
 
 On Windows:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}\skills\setup-environment\scripts\check_env.ps1" "${CLAUDE_PLUGIN_ROOT}"
+powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}\tools\setup-environment\scripts\check_env.ps1" "${CLAUDE_PLUGIN_ROOT}"
 ```
 
 Exit code 1 is fatal (uv couldn't be obtained) — stop and report it. Any
@@ -134,9 +134,9 @@ touch the same file.
 ### 3. Merge and assemble (scripts, not agents)
 
 ```bash
-uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/skills/assemble-output/scripts/merge.py" --doc <name>
-uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/skills/assemble-output/scripts/assemble.py" --doc <name> --format <format>
-uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/skills/grade-output/scripts/gates.py" --doc <name> --format <format>
+uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/tools/assemble-output/scripts/merge.py" --doc <name>
+uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/tools/assemble-output/scripts/assemble.py" --doc <name> --format <format>
+uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/tools/grade-output/scripts/gates.py" --doc <name> --format <format>
 ```
 
 For `--format md-tree`, run `assemble.py` twice: first `--format md`, then
@@ -147,9 +147,9 @@ reads the split files would flag every level-1/level-2 heading as missing.
 Both formats use the same element renderers.
 
 ```bash
-uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/skills/assemble-output/scripts/assemble.py" --doc <name> --format md
-uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/skills/assemble-output/scripts/assemble.py" --doc <name> --format md-tree --split-depth <n>
-uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/skills/grade-output/scripts/gates.py" --doc <name> --format md-tree
+uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/tools/assemble-output/scripts/assemble.py" --doc <name> --format md
+uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/tools/assemble-output/scripts/assemble.py" --doc <name> --format md-tree --split-depth <n>
+uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/tools/grade-output/scripts/gates.py" --doc <name> --format md-tree
 ```
 
 `merge.py` recombines **every** page's shards, old and new — untouched
@@ -187,7 +187,7 @@ and prints the document's new `status`:
 reported by `state.py summary`; a warning never blocks a pass, but it is
 never dropped either. The rules `decide` applies (tier ladder per format,
 which gate failures go straight to a human, why a docx/xlsx/html content
-defect is not retried) are in `queue-state/SKILL.md`.
+defect is not retried) are in `queue-state/README.md`.
 
 ## Notes
 

@@ -1,9 +1,6 @@
 ---
 name: grader
 description: Independently grades a batch of pages against the rubric, comparing rendered page images to the assembled output, and writes per-page grade shards. This is the loop-closing verification step — invoke it after assembly, never let the extractor grade its own work. The orchestrator spawns several of these in parallel across a document's page batches.
-skills:
-  - render-pages
-  - grade-output
 model: sonnet
 maxTurns: 20
 ---
@@ -27,6 +24,19 @@ warnings that are judgment calls in disguise: `large_region_excluded` and
 `orphan_figure_caption` (see step 2 below). gates.py can tell you a large
 region was dropped, or that a figure caption has no image; only looking at
 the page can tell you whether a figure is actually missing.
+
+## Commands
+
+Run each as `uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/tools/<path>" <args>`:
+
+- `render-pages/scripts/render.py --doc <doc> [--pages 1,3]` — page PNGs
+  to `work/<doc>/pages/page{N}.png`; skips pages already rendered.
+- `grade-output/scripts/write_grade_shard.py --doc <doc> --page <n> --score 0.93 [--issues dropped_text,...] [--reason "<what is wrong>"]`
+  — writes this page's grade shard.
+
+The rubric is `${CLAUDE_PLUGIN_ROOT}/tools/grade-output/rubric.md`; read it
+before grading. `tools/grade-output/README.md` explains the gates and
+their warnings if you need more than step 2 below.
 
 ## Your job
 
