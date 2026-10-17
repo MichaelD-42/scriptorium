@@ -8,7 +8,7 @@ run each.
 
 | Subcommand | Does |
 |---|---|
-| `init --format <fmt>` | creates `runs/state.json`, adds each new supported `input/` file as `pending` (image extensions become `input_format: "image"`). A file whose content changed (`input_sha256`) is queued again from nothing: `work/<doc>/`, `output/<doc>/` and `output/<doc>.zip` are deleted, so old ocr/vision shards cannot outrank the new extraction. Two inputs with one name: the one `paths.input_file` picks (the scripts' rule) is queued, the other skipped with a warning. A different `--format` updates a pending/retrying entry; a finished one keeps its status and gets a warning naming the `assemble.py` command that re-renders it |
+| `init --format <fmt>` | creates `input/` (exit 1 with an `error:` line if it cannot) and `runs/state.json`, adds each new supported `input/` file as `pending` (image extensions become `input_format: "image"`). A file whose content changed (`input_sha256`) is queued again from nothing: `work/<doc>/`, `output/<doc>/` and `output/<doc>.zip` are deleted, so old ocr/vision shards cannot outrank the new extraction. Two inputs with one name: the one `paths.input_file` picks (the scripts' rule) is queued, the other skipped with a warning. A different `--format` updates a pending/retrying entry; a finished one keeps its status and gets a warning naming the `assemble.py` command that re-renders it |
 | `next [--doc <name>]` | prints the next `pending`/`retrying` document in `input/` order, or nothing |
 | `reject --doc <name> --reason <text>` | `needs-human` with the reason (triage's `error:` line) |
 | `set-lang --doc <name> --lang-flag <f> [--tessdata-prefix <p>]` | records `ensure_language.py`'s result |
@@ -16,9 +16,19 @@ run each.
 | `summary` | status counts, needs-human reasons, warning counts |
 
 Writes are atomic (temp file, then rename). `next` opens an attempt
-record (`started_at`) when it picks a document; `decide` and `reject` close
-it (`finished_at`, `status`, `score`, and on a retry the `escalated_pages`
-with their reasons). A queue entry:
+record (`started_at`) when it picks a document, and `decide` opens the next
+one when it returns `retrying`; `decide` and `reject` close it
+(`finished_at`, `status`, `score`, `cost_usd`, and on a retry the
+`escalated_pages` with their reasons).
+
+`cost_usd` is what the Claude Code session spent during the attempt,
+orchestrator and subagents together: [ccusage](https://github.com/ryoppippi/ccusage)'s
+total for the session (`ccusage session --id $CLAUDE_CODE_SESSION_ID --json`)
+at the close minus the total at the open (`cost_at_start`, `session_id`).
+It is `null` when `ccusage` is not on `PATH`, `CLAUDE_CODE_SESSION_ID` is
+not set, or the attempt was resumed in another session. Everything the
+session does in that window counts, including chat with the user. A queue
+entry:
 
 ```json
 {"status": "retrying", "attempt": 1, "input_format": "pdf", "format": "md",
@@ -83,11 +93,12 @@ entries, else the extracted headings), a page table (tier, furniture,
 images, charts, tables, score, issues, the grader's reason), attempts
 (start, time, outcome, score, escalations with reasons), failed gates and
 warnings. Under the title it lists the versions used: scriptorium,
-Python, PyMuPDF, pdfplumber, Tesseract and LibreOffice ("not installed"
-when missing). A chart is a figure read into a `data_table`; furniture counts
+Python, PyMuPDF, pdfplumber, Tesseract, LibreOffice and ccusage ("not
+installed" when missing). A chart is a figure read into a `data_table`; furniture counts
 the graphics shown once (page 1's `furniture_images`). Time is the sum of
 attempt durations, from `next` to `decide`/`reject`; it is not split by
-phase. All document text is HTML-escaped.
+phase. A document's cost is the sum of its attempts' `cost_usd`, shown in
+its row and details; "–" when any finished attempt has none. All document text is HTML-escaped.
 
 ## `plan.py` — what needs an agent, and batch sizes
 

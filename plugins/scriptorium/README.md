@@ -19,6 +19,19 @@ PDF, PowerPoint (`.pptx`), Word (`.docx`), Excel (`.xlsx`), HTML (`.html`),
 and standalone images (`.png`/`.jpg`/`.jpeg`/`.webp`/`.tiff`) are
 implemented today.
 
+## 0.6.2
+
+- **Cost per document**: each attempt records what the session spent,
+  measured with `ccusage` (optional, on `PATH`); the run report shows each
+  document's total. See `tools/queue-state/README.md`.
+- **Fix**: a retry opened no attempt record, because the orchestrator loops
+  back to extraction without `next`, so the report showed only attempt 0's
+  time. `decide` now opens the next attempt when it returns `retrying`.
+- **Fix**: `state.py init` crashed when `input/` did not exist. It now
+  creates the folder, and exits 1 with an `error:` line if it cannot.
+- **README**: rewritten for humans and agents: install and system tools
+  first, full flag reference, where results and the run report land.
+
 ## 0.6.1
 
 - **Fix**: a blank PDF page, or one with only the header and footer, sent

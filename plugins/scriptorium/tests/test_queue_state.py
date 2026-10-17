@@ -197,6 +197,19 @@ class TestCli:
     def _state(self):
         return json.loads((paths.Path("runs/state.json")).read_text())
 
+    def test_init_creates_a_missing_input_dir(self, tmp_project):
+        (tmp_project / "input").rmdir()
+        result = run_script("queue-state/scripts/state.py", "init", cwd=tmp_project)
+        assert result.returncode == 0, result.stderr
+        assert (tmp_project / "input").is_dir() and self._state()["docs"] == {}
+
+    def test_init_fails_cleanly_when_input_cannot_be_a_dir(self, tmp_project):
+        (tmp_project / "input").rmdir()
+        (tmp_project / "input").write_text("not a directory")
+        result = run_script("queue-state/scripts/state.py", "init", cwd=tmp_project)
+        assert result.returncode == 1
+        assert result.stderr.startswith("error: cannot create input/") and "Traceback" not in result.stderr
+
     def test_init_with_another_format(self, tmp_project):
         """A finished document is not re-queued (that would redo all
         extraction), but init says so; an open one takes the new format."""

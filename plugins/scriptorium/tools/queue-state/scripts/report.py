@@ -116,6 +116,7 @@ def tool_versions() -> list[tuple[str, str]]:
         ("pdfplumber", _package_version("pdfplumber")),
         ("Tesseract", _command_version(tesseract_lib.find_tesseract())),
         ("LibreOffice", _command_version(shutil.which("soffice"))),
+        ("ccusage", _command_version(shutil.which("ccusage"))),
     ]
     return [(name, version or "not installed") for name, version in versions]
 
@@ -136,6 +137,9 @@ def document_view(name: str, entry: dict) -> dict:
     ]
     attempts = [{**a, "duration": duration(_seconds(a))} for a in entry.get("attempts", [])]
     seconds = sum(_seconds(a) for a in entry.get("attempts", []))
+    costs = [a.get("cost_usd") for a in entry.get("attempts", []) if "finished_at" in a]
+    # One unmeasured attempt (no ccusage, or resumed in another session) makes the total unknown.
+    cost = round(sum(costs), 4) if costs and None not in costs else None
     tier_counts = Counter(tiers.values())
     return {
         "name": name,
@@ -143,6 +147,7 @@ def document_view(name: str, entry: dict) -> dict:
         "attempts": attempts,
         "seconds": seconds,
         "duration": duration(seconds),
+        "cost": cost,
         "page_count": merged["page_count"] or len(pages),
         "score": report.get("rubric_verdict", {}).get("score"),
         "pages": pages,

@@ -2,6 +2,7 @@
 timing it reads from runs/state.json."""
 
 import json
+import os
 
 import paths
 from conftest import load_script, run_script
@@ -249,3 +250,63 @@ class TestToolVersions:
         assert run_script("queue-state/scripts/report.py", cwd=tmp_project).returncode == 0
         html = (tmp_project / "output" / "report.html").read_text()
         assert "scriptorium" in html and "Tesseract" in html and "PyMuPDF" in html
+
+
+class TestCost:
+    """Each attempt's cost is the ccusage session total at its close minus
+    the total at its open; the report shows a document's sum."""
+
+    def _fake_ccusage(self, tmp_path, monkeypatch, totals):
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "totals").write_text("".join(f"{t}\n" for t in totals))
+        script = bin_dir / "ccusage"
+        script.write_text(
+            '#!/bin/sh\nd=$(dirname "$0")\necho "$@" >> "$d/calls"\n'
+            't=$(head -n 1 "$d/totals")\ntail -n +2 "$d/totals" > "$d/rest" && mv "$d/rest" "$d/totals"\n'
+            'echo "{\\"sessionId\\": \\"s1\\", \\"totalCost\\": $t, \\"totalTokens\\": 1}"\n'
+        )
+        script.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s1")
+        return bin_dir
+
+    def test_a_retry_opens_its_own_attempt_and_each_attempt_has_its_cost(self, tmp_project, tmp_path, monkeypatch):
+        bin_dir = self._fake_ccusage(tmp_path, monkeypatch, [1.0, 1.25, 1.25, 2.0])
+        _queue(tmp_project, "a")
+        run_script("queue-state/scripts/state.py", "next", cwd=tmp_project)
+        _grade_report("a", [{"page_number": 1, "score": 0.5, "issues": ["missing_image"], "reason": "x"}], passed=False)
+        run_script("queue-state/scripts/state.py", "decide", "--doc", "a", cwd=tmp_project)
+        _grade_report("a", [{"page_number": 1, "score": 1.0, "issues": []}])
+        run_script("queue-state/scripts/state.py", "decide", "--doc", "a", cwd=tmp_project)
+
+        attempts = _state(tmp_project)["a"]["attempts"]
+        assert [(a["attempt"], a["status"], a["cost_usd"]) for a in attempts] == [
+            (0, "retrying", 0.25),
+            (1, "passed", 0.75),
+        ]
+        assert (bin_dir / "calls").read_text().splitlines()[0] == "session --id s1 --json"
+
+    def test_without_ccusage_the_cost_is_unknown(self, tmp_project, monkeypatch):
+        monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+        _queue(tmp_project, "a")
+        run_script("queue-state/scripts/state.py", "next", cwd=tmp_project)
+        _grade_report("a", [{"page_number": 1, "score": 1.0, "issues": []}])
+        result = run_script("queue-state/scripts/state.py", "decide", "--doc", "a", cwd=tmp_project)
+
+        assert result.returncode == 0, result.stderr
+        assert _state(tmp_project)["a"]["attempts"][0]["cost_usd"] is None
+
+    def test_report_shows_the_document_cost(self, tmp_project):
+        _queue(tmp_project, "a", "b")
+        state_path = tmp_project / "runs" / "state.json"
+        state = json.loads(state_path.read_text())
+        run = {"started_at": "2026-10-17T10:00:00+00:00", "finished_at": "2026-10-17T10:01:00+00:00"}
+        state["docs"]["a"]["attempts"] = [{**run, "attempt": 0, "cost_usd": 0.25}, {**run, "attempt": 1, "cost_usd": 0.5}]
+        state["docs"]["b"]["attempts"] = [{**run, "attempt": 0, "cost_usd": 0.25}, {**run, "attempt": 1, "cost_usd": None}]
+        state_path.write_text(json.dumps(state))
+
+        assert report_py.document_view("a", state["docs"]["a"])["cost"] == 0.75
+        assert report_py.document_view("b", state["docs"]["b"])["cost"] is None  # one attempt not measured
+        assert run_script("queue-state/scripts/report.py", cwd=tmp_project).returncode == 0
+        assert "$0.75" in (tmp_project / "output" / "report.html").read_text()

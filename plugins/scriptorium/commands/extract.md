@@ -61,8 +61,10 @@ that actually have scanned pages, and that's handled per-document below.
 
 ## Setup
 
-`state.py init --format <output format>` creates `runs/state.json` if needed
-and adds every new supported file in `input/` as `pending`. Pass any
+`state.py init --format <output format>` creates `input/` and
+`runs/state.json` if needed and adds every new supported file in `input/` as
+`pending`. **Exit 1** (`error: cannot create input/`): report the error line
+to the user and stop. Pass any
 `warning:` lines it prints on to the user (e.g. a finished document is not
 re-queued for a new `--format`). If `--doc` was
 given, pass `--doc <name>` to every `state.py next` below.
