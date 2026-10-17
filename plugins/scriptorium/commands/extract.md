@@ -96,7 +96,9 @@ documents with warnings) with the report's path, and **stop**.
   triage's `non_text_pages`, an `image` document, or a retry tier) and the
   queue entry's `lang_flag` is `null`: run
   `setup-environment/scripts/ensure_language.py` on one such page's rendered
-  PNG (render it first via `render-pages`), then `state.py set-lang --doc
+  PNG (render it first via `render-pages`) with `--extra
+  '${user_config.ocr_languages}'` (the user's extra languages, e.g. `deu`;
+  keep the single quotes), then `state.py set-lang --doc
   <name> --lang-flag <lang_flag> [--tessdata-prefix <prefix>]`. Pass both
   to every extractor batch with an `ocr`/`vision` page as `--lang` and (only
   when set) `--tessdata-dir`. Once per document, not per attempt.

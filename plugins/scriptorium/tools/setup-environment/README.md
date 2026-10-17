@@ -59,10 +59,14 @@ representative OCR-tier page to guess the **script** (Latin, Han,
 Cyrillic, ...), maps it to a best-guess language code, and installs the
 matching tesseract language pack if missing (per-manager package name
 table, e.g. `tesseract-data-deu` on Arch vs `tesseract-ocr-deu` on
-Debian). Pass `--extra` with the plugin's `userConfig.ocr_languages` (if
-the user configured any) — OSD only tells you the script, not the exact
-language, so a Latin-script German document still detects as "Latin" and
-needs to be told explicitly.
+Debian). The orchestrator passes the plugin's `ocr_languages` option as
+`--extra '${user_config.ocr_languages}'` — OSD only tells you the script,
+not the exact language, so a Latin-script German document still detects as
+"Latin" and needs to be told explicitly. Claude Code substitutes the option
+as a comma list (`deu,fra`); when it is not set, the literal placeholder
+arrives and is ignored. Any other entry that is not a tesseract code
+(letters, digits, `_`) is dropped with a `warning:` line, since the codes
+reach package-manager commands and a download URL.
 
 **This is coarse, not exact language ID.** The goal is closing the
 missing-language-pack failure mode, not solving language identification.
@@ -71,8 +75,8 @@ missing-language-pack failure mode, not solving language identification.
 packages, so a missing language on Windows (or on any OS with no supported
 package manager at all) falls back to downloading `<lang>.traineddata`
 directly into a user-writable tessdata dir — no admin rights needed. When
-that fallback dir ends up holding the wanted language(s), the JSON also
-reports `tessdata_prefix` (its path); pass that through to `ocr-page` as
+a wanted language exists only in that fallback dir (on any OS, e.g. a pack
+an earlier run downloaded), the JSON also reports `tessdata_prefix` (its path); pass that through to `ocr-page` as
 `--tessdata-dir` alongside `--lang`. `tessdata_prefix: null` means the
 system tessdata dir already covers everything and no override is needed.
 

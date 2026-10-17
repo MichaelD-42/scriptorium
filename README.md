@@ -34,6 +34,10 @@ The first run sets up the Python environment with [`uv`](https://docs.astral.sh/
 | LibreOffice (`soffice`) | `.pptx` (renders slides for grading) | same install attempt; pptx documents fail to render |
 | [ccusage](https://github.com/ryoppippi/ccusage) | cost per document in the run report | cost shows as "–" |
 
+OCR detects the script, not the language: a German or French scan reads as
+English unless you list its language codes (e.g. `deu,fra`) in the plugin's
+**Extra OCR languages** option (`/plugin` → scriptorium → configure).
+
 ## Use
 
 Work from the project directory where you want the results. Put your files

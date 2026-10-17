@@ -27,6 +27,15 @@ implemented today.
 - **Fix**: a retry opened no attempt record, because the orchestrator loops
   back to extraction without `next`, so the report showed only attempt 0's
   time. `decide` now opens the next attempt when it returns `retrying`.
+- **Fix**: the `ocr_languages` option (`/plugin` → configure `scriptorium`)
+  was never passed to `ensure_language.py`, so a German scan was OCR'd as
+  English. The orchestrator now passes it as `--extra`; entries that are
+  not tesseract codes are dropped with a warning.
+- **Fix**: a language pack that only exists in scriptorium's own tessdata
+  dir (`~/.cache/scriptorium/tessdata`) counted as installed, but on a
+  machine with a package manager tesseract was never pointed there, so it
+  OCR'd in English. `ensure_language.py` now returns `tessdata_prefix`
+  whenever a wanted pack lives only there.
 - **Fix**: `state.py init` crashed when `input/` did not exist. It now
   creates the folder, and exits 1 with an `error:` line if it cannot.
 - **README**: rewritten for humans and agents: install and system tools
