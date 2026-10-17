@@ -32,8 +32,9 @@ uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
   `paragraph` elements.
 - **Tables** (`<table>`) become `table` elements (row-major list of lists,
   cell text via `get_text(strip=True)`).
-- **Images** (`<img>`) whose `src` is a `data:` URI or a local file
-  reference are saved to `output/<doc>/assets/page1_bitmap{idx}.<ext>` and
+- **Images** (`<img>`) whose `src` is a `data:` URI or an image file inside
+  the HTML file's own folder (a path that leaves it, or a file that is not
+  an image, is skipped: the HTML is untrusted input) are saved to `output/<doc>/assets/page1_bitmap{idx}.<ext>` and
   become `image` elements with an empty caption — same contract as
   `extract-images`/`docx-extract`, so the same `describe_image.py` (its
   `--caption` alias — html has no script-side caption detection) fills

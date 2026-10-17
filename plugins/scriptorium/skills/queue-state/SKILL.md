@@ -13,7 +13,7 @@ run each.
 
 | Subcommand | Does |
 |---|---|
-| `init --format <fmt>` | creates `runs/state.json`, adds each new supported `input/` file as `pending` (image extensions become `input_format: "image"`); warns on two inputs with one stem |
+| `init --format <fmt>` | creates `runs/state.json`, adds each new supported `input/` file as `pending` (image extensions become `input_format: "image"`). A file whose content changed (`input_sha256`) is queued again from nothing: `work/<doc>/`, `output/<doc>/` and `output/<doc>.zip` are deleted, so old ocr/vision shards cannot outrank the new extraction. Two inputs with one name: the one `paths.input_file` picks (the scripts' rule) is queued, the other skipped with a warning |
 | `next [--doc <name>]` | prints the next `pending`/`retrying` document in `input/` order, or nothing |
 | `reject --doc <name> --reason <text>` | `needs-human` with the reason (triage's `error:` line) |
 | `set-lang --doc <name> --lang-flag <f> [--tessdata-prefix <p>]` | records `ensure_language.py`'s result |
@@ -25,7 +25,8 @@ Writes are atomic (temp file, then rename). A queue entry:
 ```json
 {"status": "retrying", "attempt": 1, "input_format": "pdf", "format": "md",
  "escalated_pages": {"3": {"tier": "ocr", "recheck_images": false, "reason": "second paragraph missing"}},
- "lang_flag": null, "tessdata_prefix": null, "warnings": [], "reason": null, "grade_report": null}
+ "lang_flag": null, "tessdata_prefix": null, "warnings": [], "reason": null, "grade_report": null,
+ "input_sha256": "9f2c..."}
 ```
 
 ### Decision rules (`decide`)

@@ -4,8 +4,10 @@ have no native page-image representation (pptx) are first converted to PDF
 via LibreOffice, then rasterized the same way. See SKILL.md."""
 
 import argparse
+import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
@@ -32,14 +34,22 @@ def convert_pptx_to_pdf(pptx_path: Path, doc: str) -> Path:
     if out_pdf.exists() and out_pdf.stat().st_mtime >= pptx_path.stat().st_mtime:
         return out_pdf
 
-    result = subprocess.run(
-        ["soffice", "--headless", "--convert-to", "pdf", "--outdir", str(work_dir), str(pptx_path)],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0 or not out_pdf.exists():
-        print(f"error: soffice pptx->pdf conversion failed: {result.stderr}", file=sys.stderr)
-        sys.exit(1)
+    # Parallel graders/extractors each convert the deck: a private LibreOffice
+    # profile lets two soffice runs coexist, and os.replace means a reader
+    # never sees a half-written PDF at out_pdf.
+    with tempfile.TemporaryDirectory(dir=work_dir) as tmp:
+        tmp = Path(tmp).resolve()
+        result = subprocess.run(
+            ["soffice", f"-env:UserInstallation={(tmp / 'profile').as_uri()}", "--headless",
+             "--convert-to", "pdf", "--outdir", str(tmp), str(pptx_path)],
+            capture_output=True,
+            text=True,
+        )
+        converted = tmp / f"{pptx_path.stem}.pdf"
+        if result.returncode != 0 or not converted.exists():
+            print(f"error: soffice pptx->pdf conversion failed: {result.stderr}", file=sys.stderr)
+            sys.exit(1)
+        os.replace(converted, out_pdf)
     return out_pdf
 
 
