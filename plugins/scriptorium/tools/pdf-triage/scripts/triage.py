@@ -45,6 +45,9 @@ LINE_PATTERN_MIN_PAGE_COUNT = 2
 FRAME_TABLE_MIN_AREA_FRACTION = 0.60
 FRAME_TABLE_MIN_PAGE_FRACTION = 0.50
 REPEATED_IMAGE_MIN_PAGE_FRACTION = 0.50
+# Same rule as LINE_PATTERN_MIN_PAGE_COUNT: on a two-page document one page
+# is already 50%.
+REPEATED_IMAGE_MIN_PAGE_COUNT = 2
 
 # Task A5b fix round 1 (controller finding 1): a document with fewer than
 # this many pages can never have a "repeated" frame_table/frame_drawing at
@@ -372,20 +375,34 @@ def _find_repeated_drawings(document, body_pages: set[int] | None = None) -> lis
     return repeated
 
 
+def _is_furniture_placement(rect, page_rect) -> bool:
+    """In the 12% header/footer band (a logo), or covering most of the page
+    (a letterhead background). A screenshot repeated mid-page is content."""
+    bbox = [rect.x0, rect.y0, rect.x1, rect.y1]
+    if furniture_lib.in_furniture_band(bbox, page_rect.height):
+        return True
+    return rect.get_area() >= FRAME_TABLE_MIN_AREA_FRACTION * page_rect.get_area()
+
+
 def _find_repeated_images(document) -> list[int]:
-    """Image xrefs (PyMuPDF's `page.get_images(full=True)`) present on at
-    least REPEATED_IMAGE_MIN_PAGE_FRACTION of pages."""
+    """Image xrefs (PyMuPDF's `page.get_images(full=True)`) placed as
+    furniture (`_is_furniture_placement`) on at least
+    REPEATED_IMAGE_MIN_PAGE_COUNT pages and REPEATED_IMAGE_MIN_PAGE_FRACTION
+    of pages."""
     page_count = document.page_count
     xref_pages: dict[int, set] = {}
     for page_number, page in enumerate(document, start=1):
         for image in page.get_images(full=True):
             xref = image[0]
-            xref_pages.setdefault(xref, set()).add(page_number)
+            rects = page.get_image_rects(xref)
+            if rects and all(_is_furniture_placement(r, page.rect) for r in rects):
+                xref_pages.setdefault(xref, set()).add(page_number)
 
     return sorted(
         xref
         for xref, pages in xref_pages.items()
-        if page_count and len(pages) / page_count >= REPEATED_IMAGE_MIN_PAGE_FRACTION
+        if len(pages) >= REPEATED_IMAGE_MIN_PAGE_COUNT
+        and len(pages) / page_count >= REPEATED_IMAGE_MIN_PAGE_FRACTION
     )
 
 

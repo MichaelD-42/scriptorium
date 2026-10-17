@@ -75,11 +75,17 @@ report.py   # {"report": "output/report.html", "documents": n, "passed": n, "nee
 
 Run once when the queue is empty. Writes one self-contained HTML file (no
 scripts, light and dark mode) from `runs/state.json` and each document's
-`grade-report.json` and `elements.json`: summary tiles (documents, passed,
-needs a human, pages, attempts, extraction time), a row per document with
-its page-grade strip, and per document its reason, attempts (start, time,
-outcome, score, escalations with reasons), failed gates, warnings, and a
-page table (tier, score, issues, the grader's reason). Time is the sum of
+`grade-report.json`, `elements.json` and `toc.json`: summary tiles
+(documents, passed, needs a human, pages, furniture graphics, images,
+charts, tables, attempts, extraction time), a row per document with its
+page-grade strip, and per document its reason, its contents (`toc.json`'s
+entries, else the extracted headings), a page table (tier, furniture,
+images, charts, tables, score, issues, the grader's reason), attempts
+(start, time, outcome, score, escalations with reasons), failed gates and
+warnings. Under the title it lists the versions used: scriptorium,
+Python, PyMuPDF, pdfplumber, Tesseract and LibreOffice ("not installed"
+when missing). A chart is a figure read into a `data_table`; furniture counts
+the graphics shown once (page 1's `furniture_images`). Time is the sum of
 attempt durations, from `next` to `decide`/`reject`; it is not split by
 phase. All document text is HTML-escaped.
 

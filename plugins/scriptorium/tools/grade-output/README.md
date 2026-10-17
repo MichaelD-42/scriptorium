@@ -86,8 +86,8 @@ separate from `checks` — see below.
 For a PDF, `gates.py` also checks every page's `excluded_regions` (written
 by `extract-images`, see its README.md) and, for any entry whose `reason` is
 `furniture_band` or `table_overlap` (never `frame_drawing`/
-`repeated_drawing`/`tiny`/`text_box`/`grid_table`/`invisible_drawing` — those are expected/benign; an
-`invisible_drawing` draws nothing; a
+`repeated_drawing`/`tiny`/`text_box`/`grid_table`/`invisible_drawing`/`bitmap_panel` — those are expected/benign; an
+`invisible_drawing` draws nothing, a `bitmap_panel` drawing is part of its panel's figure; a
 `text_box` keeps its text as body text, and a `grid_table` is a chart's grid
 whose cluster became the image) AND whose bbox
 covers more than 20% of its page,

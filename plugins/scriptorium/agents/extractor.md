@@ -81,7 +81,8 @@ written to that page's image shard.
    the text rather than inventing a plausible guess), then land it with
    `write_vision_page.py`. Leave out the page furniture: the lines listed in
    `work/<doc>/triage.json`'s `furniture_text` (the repeated header, footer
-   and title-block lines). `merge.py` also removes them from `ocr`/`vision`
+   and title-block lines), and text printed up the left or right page
+   margin. `merge.py` also removes them from `ocr`/`vision`
    bodies, but only when a line matches a furniture pattern exactly.
 3. Pages assigned `vision` directly (a retry, forced by the orchestrator
    after a previous grade failure): skip straight to the vision step above.

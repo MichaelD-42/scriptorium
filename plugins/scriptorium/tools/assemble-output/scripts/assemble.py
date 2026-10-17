@@ -160,6 +160,20 @@ def elements_to_markdown(elements: list[dict], asset_prefix: str = "") -> str:
     return "\n".join(lines).strip() + "\n"
 
 
+def add_furniture_images(doc_data: dict) -> None:
+    """Page furniture graphics (extract-images' `furniture_images`, from the
+    first page) become plain image elements at the top of the first page:
+    shown once, with an empty alt text, since they are decoration."""
+    if not doc_data["pages"]:
+        return
+    first = doc_data["pages"][min(doc_data["pages"])]
+    graphics = [
+        {"type": "image", "kind": "furniture", "asset": f["asset"], "bbox": f["bbox"]}
+        for f in first.get("furniture_images", [])
+    ]
+    first["elements"] = graphics + first["elements"]
+
+
 def sorted_pages(doc_data: dict) -> list[dict]:
     return sorted(doc_data["pages"].values(), key=lambda p: p["page_number"])
 
@@ -623,6 +637,7 @@ def main() -> None:
         sys.exit(1)
 
     doc_data = elements_lib.load_doc(elements_path)
+    add_furniture_images(doc_data)
 
     if args.format == "okf":
         for path in write_okf(doc_data, args.doc):

@@ -39,7 +39,7 @@ MIN_OUTPUT_BYTES = 20
 LARGE_REGION_EXCLUDED_AREA_FRACTION = 0.2
 # Follow-up R11: "grid_table" is a chart's grid read as a table; its cluster
 # is the image, so nothing is lost.
-LARGE_REGION_EXCLUDED_BENIGN_REASONS = {"frame_drawing", "repeated_drawing", "tiny", "text_box", "grid_table", "invisible_drawing"}
+LARGE_REGION_EXCLUDED_BENIGN_REASONS = {"frame_drawing", "repeated_drawing", "tiny", "text_box", "grid_table", "invisible_drawing", "bitmap_panel"}
 
 # Task A9: a `table` element whose bbox is within
 # furniture_lib.FRAME_MATCH_TOLERANCE of a triage `frame_tables` entry is the

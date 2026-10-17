@@ -112,3 +112,38 @@ class TestNoFurnitureFalsePositiveOnShortSample:
             "image_xrefs": [], "content_rect": None, "content_rect_page_size": None,
         }
         assert triage["furniture_text"] is None
+
+
+class TestRepeatedImagesOnAShortDocument:
+    """A bilingual two-page guide (one language per page) shows the same
+    screenshots on both pages, and other screenshots on one page only.
+    Only the header logo is furniture; extract-images drops furniture
+    images, so a wrong match loses the figures."""
+
+    def _pixmap(self, shade: int):
+        import fitz
+
+        pix = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 40, 30), 0)
+        pix.set_rect(pix.irect, (shade, 80, 160))
+        return pix
+
+    def test_only_the_banded_logo_is_furniture(self, tmp_project):
+        import fitz
+
+        d = fitz.open()
+        logo, shared = self._pixmap(10), self._pixmap(60)
+        for n in (1, 2):
+            page = d.new_page()
+            page.insert_image(fitz.Rect(40, 30, 90, 60), pixmap=logo)
+            page.insert_text((72, 120), f"Body text in language {n}, long enough to be a text layer.")
+            page.insert_image(fitz.Rect(72, 300, 300, 450), pixmap=shared)
+            page.insert_image(fitz.Rect(72, 500, 300, 650), pixmap=self._pixmap(100 + n))
+        d.save(tmp_project / "input" / "bilingual.pdf")
+
+        result = run_script("pdf-triage/scripts/triage.py", "--doc", "bilingual", cwd=tmp_project)
+        assert result.returncode == 0, result.stderr
+
+        doc = fitz.open(tmp_project / "input" / "bilingual.pdf")
+        logo_xrefs = {x[0] for x in doc[0].get_images(full=True) if doc[0].get_image_rects(x[0])[0].y0 < 100}
+        triage = json.loads(paths.triage_json("bilingual").read_text())
+        assert set(triage["furniture"]["image_xrefs"]) == logo_xrefs

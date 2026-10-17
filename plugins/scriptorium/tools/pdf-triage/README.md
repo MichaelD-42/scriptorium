@@ -184,8 +184,10 @@ no printed TOC found.
     distinct repeated part (`bbox` is the average), not one per page.
     `extract-images`/`extract-text` remove every matching drawing before
     clustering.
-  - `image_xrefs`: PyMuPDF image xrefs present on at least 50% of pages —
-    typically a repeated logo.
+  - `image_xrefs`: PyMuPDF image xrefs placed in the 12% header/footer
+    band, or over most of the page, on at least 2 pages and 50% of pages —
+    typically a repeated logo or letterhead. A screenshot repeated mid-page
+    is content.
   - `content_rect` (follow-up R10): the inner content frame, or `null`. A
     `frame_drawings` rect, or a `repeated_drawings` rect covering more
     than 60% of the page, that repeats on at least 80% of the body pages

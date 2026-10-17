@@ -168,8 +168,9 @@ def build_block_element(
     text = join_line_texts(kept_lines)
     max_size = max(line["max_size"] for line in kept_lines)
     is_bold_block = all(line["bold"] for line in kept_lines)
+    is_accent_block = len(kept_lines) == 1 and kept_lines[0].get("accent", False)
 
-    level = classify_heading_level(text, is_bold_block, max_size, body_size, toc_lookup, heading_size_ranks)
+    level = classify_heading_level(text, is_bold_block, max_size, body_size, toc_lookup, heading_size_ranks, is_accent_block)
     if level:
         return {"type": "heading", "level": level, "text": text, "bbox": bbox}
 
@@ -237,6 +238,31 @@ def is_bold_span(span: dict) -> bool:
     return bool(flags & _BOLD_FLAG_BIT) or "bold" in font.lower()
 
 
+# Follow-up R32: a title this many times the body size is a heading in any
+# weight (a 25 pt light-weight title over 9 pt body).
+LARGE_HEADING_SIZE_RATIO = 1.5
+# Follow-up R32: a weight above regular, from the font name (Helvetica Neue
+# "Md", "Medium", "SemiBold", ...); the bold flag is not set for these.
+HEAVY_FONT_RE = re.compile(r"(?:^|[-_ ,])(?:md|medium|semi\w*|demi\w*|bd|bold\w*|heavy|black|hv)$")
+# Follow-up R32: an accent colour is chromatic: its channels differ by more
+# than this (0-255). Body text is black or grey.
+ACCENT_MIN_CHANNEL_SPREAD = 60
+# Follow-up R32: an accent heading is at most this many words.
+ACCENT_HEADING_MAX_WORDS = 10
+
+
+def is_heavy_span(span: dict) -> bool:
+    """Bold, or a heavier-than-regular weight named in the font."""
+    return is_bold_span(span) or bool(HEAVY_FONT_RE.search((span.get("font", "") or "").lower()))
+
+
+def is_accent_span(span: dict) -> bool:
+    """Follow-up R32: heavy and in a chromatic colour."""
+    color = span.get("color", 0) or 0
+    channels = ((color >> 16) & 255, (color >> 8) & 255, color & 255)
+    return is_heavy_span(span) and max(channels) - min(channels) > ACCENT_MIN_CHANNEL_SPREAD
+
+
 def non_glyph_char_count(text: str) -> int:
     """See FALLBACK_NON_GLYPH_MIN_CHARS -- count of alphanumeric characters
     in `text`."""
@@ -249,7 +275,9 @@ def is_fallback_heading_candidate(text: str, is_bold_block: bool, max_size: floa
     of real (non-glyph) text. Used both to build the document-wide size
     ranking (`document_heading_size_ranks`) and to classify each block
     against it, so the two stay consistent with each other."""
-    if body_size <= 0 or not is_bold_block or max_size <= body_size:
+    if body_size <= 0 or max_size <= body_size:
+        return False
+    if not is_bold_block and max_size < LARGE_HEADING_SIZE_RATIO * body_size:
         return False
     return non_glyph_char_count(text) >= FALLBACK_NON_GLYPH_MIN_CHARS
 
@@ -612,7 +640,8 @@ def document_list_marker_levels(
             text = join_line_texts(kept_lines)
             max_size = max(line["max_size"] for line in kept_lines)
             is_bold_block = all(line["bold"] for line in kept_lines)
-            if classify_heading_level(text, is_bold_block, max_size, body_size, toc_lookup, heading_size_ranks):
+            is_accent_block = len(kept_lines) == 1 and kept_lines[0].get("accent", False)
+            if classify_heading_level(text, is_bold_block, max_size, body_size, toc_lookup, heading_size_ranks, is_accent_block):
                 continue  # a TOC-matched/fallback heading never seeds a marker x-position
             if _block_marker_start(kept_lines, 0) is not None:
                 j = 0
@@ -811,15 +840,62 @@ def continues_paragraph(last: dict, first: dict, right_edge: float | None) -> bo
     return not is_hard_break(last, first, right_edge, right_edge, max(right_edge - last["bbox"][0], 1.0))
 
 
-def _join_paragraph(elements: list[dict], last_line: dict | None, lines: list[dict], right_edge: float | None) -> bool:
+def order_text_columns(blocks_and_lines: list[tuple[dict, list[dict]]]) -> list[tuple[dict, list[dict]]]:
+    """Follow-up R30: two multi-line blocks that start on one line side by
+    side are text columns. The left one moves right before the right one,
+    so it is read first; it records the right one as `next_column`; and
+    both record `column_right`, their own text right edge, which R28's
+    breaks use instead of the page's (against the page edge, every line of
+    a narrow column ends early)."""
+    out = list(blocks_and_lines)
+    for block, lines in blocks_and_lines:
+        right = next(
+            (
+                (b, b_lines) for b, b_lines in blocks_and_lines
+                if len(lines) > 1 and len(b_lines) > 1 and b is not block
+                and abs(b["bbox"][1] - block["bbox"][1]) <= LIST_MARKER_Y_TOLERANCE
+                and b["bbox"][0] > block["bbox"][2]
+            ),
+            None,
+        )
+        if right is None:
+            continue
+        right_block, right_lines = right
+        block["next_column"] = right_block
+        block["column_right"] = max(line["bbox"][2] for line in lines)
+        right_block["column_right"] = max(line["bbox"][2] for line in right_lines)
+        left_i = next(i for i, (b, _) in enumerate(out) if b is block)
+        right_i = next(i for i, (b, _) in enumerate(out) if b is right_block)
+        if left_i > right_i:
+            out.insert(right_i, out.pop(left_i))
+    return out
+
+
+def _fills_column(last: dict, first: dict, column_right: float | None) -> bool:
+    """Follow-up R30: `last` ends its column (`first`'s first word would not
+    have fit) and does not end a sentence."""
+    if column_right is None or _ends_sentence(last["text"]):
+        return False
+    return column_right - last["bbox"][2] <= HARD_BREAK_WORD_FACTOR * _first_word_width(first) + HARD_BREAK_SLACK
+
+
+def _join_paragraph(
+    elements: list[dict], last_line: dict | None, lines: list[dict], right_edge: float | None, next_column: bool = False
+) -> bool:
     """Follow-up R29: append `lines` to the paragraph that ends `elements`
-    when they continue it (`continues_paragraph`); True when joined."""
+    when they continue it (`continues_paragraph`); True when joined.
+    Follow-up R30: or when `lines` open the next text column
+    (`next_column`) and `last_line`, full to its column's `right_edge`,
+    does not end a sentence."""
     if (
         last_line is None
         or not elements
         or elements[-1]["type"] != "paragraph"
         or "row_value_x" in elements[-1]
-        or not continues_paragraph(last_line, lines[0], right_edge)
+        or not (
+            continues_paragraph(last_line, lines[0], right_edge)
+            or (next_column and _fills_column(last_line, lines[0], right_edge))
+        )
     ):
         return False
     elements[-1]["text"] = elements_lib.join_text(elements[-1]["text"], join_line_texts(lines))
@@ -915,6 +991,12 @@ def merge_list_and_paragraph_blocks(
         first_line = kept_lines[0]
         stripped_first = first_line["text"].strip()
         prev_paragraph_line, last_paragraph_line = last_paragraph_line, None
+        # Follow-up R30: a text column wraps at its own edge, and a paragraph
+        # can run on from the left column into this one.
+        edge = block.get("column_right", right_edge)
+        prev_block = blocks_and_lines[i - 1][0] if i else {}
+        next_column = prev_block.get("next_column") is block
+        join_edge = prev_block.get("column_right") if next_column else right_edge
 
         if (
             len(kept_lines) == 1
@@ -948,8 +1030,11 @@ def merge_list_and_paragraph_blocks(
         block_text = join_line_texts(kept_lines)
         block_max_size = max(line["max_size"] for line in kept_lines)
         block_is_bold = all(line["bold"] for line in kept_lines)
-        if classify_heading_level(block_text, block_is_bold, block_max_size, body_size, toc_lookup, heading_size_ranks) is None:
-            block_items = parse_block_list_items(kept_lines, list_level_lookup, right_edge)
+        block_is_accent = len(kept_lines) == 1 and kept_lines[0].get("accent", False)
+        if classify_heading_level(
+            block_text, block_is_bold, block_max_size, body_size, toc_lookup, heading_size_ranks, block_is_accent
+        ) is None:
+            block_items = parse_block_list_items(kept_lines, list_level_lookup, edge)
             if block_items is not None:
                 # Follow-up R25: leading lines that sit right of the open
                 # item's marker are that item's last wrapped line(s).
@@ -986,9 +1071,9 @@ def merge_list_and_paragraph_blocks(
         # Follow-up R27: a paragraph block made of label/value rows and a
         # body becomes one paragraph per group.
         if element is not None and element["type"] == "paragraph":
-            groups = paragraph_groups(kept_lines, right_edge)
+            groups = paragraph_groups(kept_lines, edge)
             if len(groups) > 1:
-                if _join_paragraph(elements, prev_paragraph_line, groups[0], right_edge):
+                if _join_paragraph(elements, prev_paragraph_line, groups[0], join_edge, next_column):
                     groups = groups[1:]
                 for group in groups:
                     paragraph = {
@@ -1019,7 +1104,7 @@ def merge_list_and_paragraph_blocks(
             continue
 
         if element is not None and element["type"] == "paragraph":
-            if not _join_paragraph(elements, prev_paragraph_line, kept_lines, right_edge):
+            if not _join_paragraph(elements, prev_paragraph_line, kept_lines, join_edge, next_column):
                 elements.append(element)
             last_paragraph_line = kept_lines[-1]
         elif element is not None:
@@ -1135,6 +1220,7 @@ def classify_heading_level(
     body_size: float,
     toc_lookup: dict[str, int],
     heading_size_ranks: dict[float, int],
+    is_accent_block: bool = False,
 ) -> int | None:
     """Primary: TOC-driven, whenever this document has any TOC entries at
     all (`toc_lookup` non-empty). A block becomes a heading at its matching
@@ -1149,9 +1235,24 @@ def classify_heading_level(
     `is_fallback_heading_candidate`."""
     if toc_lookup:
         return toc_lookup.get(toc_lib.normalize_toc_text(text))
-    if not is_fallback_heading_candidate(text, is_bold_block, max_size, body_size):
-        return None
-    return heading_size_ranks.get(max_size)
+    if is_fallback_heading_candidate(text, is_bold_block, max_size, body_size):
+        return heading_size_ranks.get(max_size)
+    if is_accent_block and is_accent_heading(text, max_size, body_size):
+        # Follow-up R32: one level below the smallest size-ranked heading.
+        return min(max(heading_size_ranks.values(), default=0) + 1, FALLBACK_MAX_LEVELS)
+    return None
+
+
+def is_accent_heading(text: str, max_size: float, body_size: float) -> bool:
+    """Follow-up R32: a one-line block in an accent colour and a heavy
+    weight (`is_accent_span`), at least body size, short, and not a
+    sentence: a subheading set apart by colour, not size. A bold red
+    "Achtung: ... ." ends a sentence and stays a paragraph."""
+    words = text.split()
+    return (
+        body_size > 0 and max_size >= body_size and 0 < len(words) <= ACCENT_HEADING_MAX_WORDS
+        and not _ends_sentence(text) and non_glyph_char_count(text) >= FALLBACK_NON_GLYPH_MIN_CHARS
+    )
 
 
 def extract_page_text_blocks(page, body_size: float | None) -> tuple[list[dict], float]:
@@ -1174,7 +1275,7 @@ def extract_page_text_blocks(page, body_size: float | None) -> tuple[list[dict],
         for line in block.get("lines", []):
             raw_stripped = "".join(span["text"] for span in line.get("spans", [])).strip()
             stripped = glyphs.line_text(line, symbol_fonts).strip()
-            if not stripped:
+            if not stripped or furniture_lib.is_side_margin_line(line["dir"], line["bbox"], page.rect.width):
                 continue
             line_max_size = 0.0
             line_spans = line.get("spans", [])
@@ -1187,6 +1288,7 @@ def extract_page_text_blocks(page, body_size: float | None) -> tuple[list[dict],
                 "bbox": line["bbox"],
                 "max_size": line_max_size,
                 "bold": bool(line_spans) and all(is_bold_span(s) for s in line_spans),
+                "accent": bool(line_spans) and all(is_accent_span(s) for s in line_spans if s["text"].strip()),
             })
         if lines:
             text_blocks.append({"bbox": block["bbox"], "lines": lines})
@@ -1280,9 +1382,12 @@ def main() -> None:
         # Page-frame tables (furniture, not real content) are left out by
         # the shared query -- before the overlap-drop below, or a frame
         # "table" would swallow real text blocks that merely sit under it.
+        # Follow-up R31: a bitmap panel's text is its figure's, not a cell's.
         tables = [
             {"bbox": t["bbox"], "rows": t["rows"]}
-            for t in figures_lib.page_tables(pdf_path, page_number, frame_tables, content_rect)
+            for t in figures_lib.page_tables(
+                pdf_path, page_number, frame_tables, content_rect, exclude_regions=figures_lib.bitmap_panels(page)
+            )
         ]
         # Task A5: figure regions detected the same way extract_images.py
         # detects them (same shared helper, so the two scripts can never
@@ -1296,6 +1401,12 @@ def main() -> None:
         # part of the figure, so it is not a table element.
         grid_tables = [r["bbox"] for r in region_exclusions if r["reason"] == "grid_table"]
         tables = [t for t in tables if not any(furniture_lib.bbox_matches(t["bbox"], g) for g in grid_tables)]
+        # Follow-up R31: a "table" read inside a figure (a screenshot's
+        # text layer) is part of the figure.
+        tables = [
+            t for t in tables
+            if not any(figures_lib._inside(t["bbox"], r["bbox"], figures_lib.PANEL_TOLERANCE) for r in figure_regions)
+        ]
 
         # Task A6: caption lines -- one find_caption_line() search per
         # image bbox on the page (every vector region above, plus every
@@ -1339,7 +1450,7 @@ def main() -> None:
         # Follow-up R28: the page's text right edge, for explicit line breaks.
         right_edge = max((line["bbox"][2] for _block, lines in filtered_blocks for line in lines), default=None)
         page_elements = merge_list_and_paragraph_blocks(
-            filtered_blocks, body_size, toc_lookup, heading_size_ranks, list_level_lookup, right_edge,
+            order_text_columns(filtered_blocks), body_size, toc_lookup, heading_size_ranks, list_level_lookup, right_edge,
         )
         list_items = [el for el in page_elements if el["type"] == "list_item"]
         if list_items:

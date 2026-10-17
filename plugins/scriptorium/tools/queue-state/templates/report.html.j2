@@ -95,6 +95,8 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 8px
 .muted { color: var(--text-secondary); }
 .legend { display: flex; gap: 16px; flex-wrap: wrap; color: var(--text-secondary); font-size: 13px; margin-top: 8px; }
 a { color: var(--accent); }
+.toc { list-style: none; padding-left: 0; }
+.toc li { padding: 2px 0; }
 </style>
 </head>
 <body>
@@ -104,6 +106,7 @@ a { color: var(--accent); }
   Generated {{ summary.generated | when }}
   {%- if summary.started %} · run {{ summary.started | when }} to {{ summary.finished | when or "still open" }}{% endif %}
 </p>
+<p class="meta">{% for name, version in versions %}{{ name }} {{ version }}{{ " · " if not loop.last }}{% endfor %}</p>
 
 {%- if not docs %}
 <p>No documents in the queue.</p>
@@ -114,6 +117,10 @@ a { color: var(--accent); }
   <div class="tile {{ 'critical' if summary.needs_human else '' }}"><div class="value">{{ summary.needs_human }}</div><div class="label">Need a human</div></div>
   {%- if summary.open %}<div class="tile"><div class="value">{{ summary.open }}</div><div class="label">Still open</div></div>{% endif %}
   <div class="tile"><div class="value">{{ summary.pages }}</div><div class="label">Pages</div></div>
+  <div class="tile"><div class="value">{{ summary.stats.furniture }}</div><div class="label">Furniture</div></div>
+  <div class="tile"><div class="value">{{ summary.stats.images }}</div><div class="label">Images</div></div>
+  <div class="tile"><div class="value">{{ summary.stats.charts }}</div><div class="label">Charts</div></div>
+  <div class="tile"><div class="value">{{ summary.stats.tables }}</div><div class="label">Tables</div></div>
   <div class="tile"><div class="value">{{ summary.attempts }}</div><div class="label">Attempts</div></div>
   <div class="tile"><div class="value">{{ summary.duration }}</div><div class="label">Extraction time</div></div>
 </div>
@@ -136,7 +143,7 @@ a { color: var(--accent); }
     <td class="num">{{ "%.2f" | format(d.score) if d.score is not none else "–" }}</td>
     <td class="num">{{ d.duration }}</td>
     <td><div class="strip" role="img" aria-label="Page grades for {{ d.name }}; see the page table below">
-      {%- for p in d.pages %}<span class="cell {{ p.status }}" title="Page {{ p.page_number }}: {{ '%.2f' | format(p.score) }}{% if p.issues %} · {{ p.issues | join(', ') }}{% endif %}"></span>{% endfor -%}
+      {%- for p in d.pages if p.score is not none %}<span class="cell {{ p.status }}" title="Page {{ p.page_number }}: {{ '%.2f' | format(p.score) }}{% if p.issues %} · {{ p.issues | join(', ') }}{% endif %}"></span>{% endfor -%}
     </div></td>
   </tr>
   {%- endfor %}
@@ -159,6 +166,38 @@ a { color: var(--accent); }
 
   {%- if d.entry.reason %}
   <p class="reason">{{ d.entry.reason }}</p>
+  {%- endif %}
+
+  {%- if d.toc %}
+  <h3>Contents</h3>
+  <ul class="toc">
+  {%- for e in d.toc %}
+    <li style="margin-left: {{ (e.level - 1) * 16 }}px">{{ e.title }} <span class="muted">p. {{ e.page }}</span></li>
+  {%- endfor %}
+  </ul>
+  {%- endif %}
+
+  {%- if d.pages %}
+  <h3>Pages</h3>
+  <p class="muted">{{ d.stats.furniture }} furniture · {{ d.stats.images }} images · {{ d.stats.charts }} charts · {{ d.stats.tables }} tables</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th class="num">Page</th><th>Tier</th><th class="num">Furniture</th><th class="num">Images</th><th class="num">Charts</th><th class="num">Tables</th><th class="num">Score</th><th>Issues</th><th>Reason</th></tr></thead>
+    <tbody>
+    {%- for p in d.pages %}
+    <tr>
+      <td class="num">{{ p.page_number }}</td>
+      <td>{{ p.tier }}</td>
+      <td class="num">{{ p.stats.furniture }}</td>
+      <td class="num">{{ p.stats.images }}</td>
+      <td class="num">{{ p.stats.charts }}</td>
+      <td class="num">{{ p.stats.tables }}</td>
+      <td class="num">{% if p.score is not none %}<span class="status">{{ page_mark(p) }}{{ "%.2f" | format(p.score) }}</span>{% else %}–{% endif %}</td>
+      <td>{{ p.issues | join(", ") if p.issues else "–" }}</td>
+      <td>{{ p.reason or "" }}</td>
+    </tr>
+    {%- endfor %}
+    </tbody>
+  </table></div>
   {%- endif %}
 
   {%- if d.attempts %}
@@ -209,23 +248,6 @@ a { color: var(--accent); }
   </ul>
   {%- endif %}
 
-  {%- if d.pages %}
-  <h3>Pages</h3>
-  <div class="table-wrap"><table>
-    <thead><tr><th class="num">Page</th><th>Tier</th><th class="num">Score</th><th>Issues</th><th>Reason</th></tr></thead>
-    <tbody>
-    {%- for p in d.pages %}
-    <tr>
-      <td class="num">{{ p.page_number }}</td>
-      <td>{{ p.tier }}</td>
-      <td class="num"><span class="status">{{ page_mark(p) }}{{ "%.2f" | format(p.score) }}</span></td>
-      <td>{{ p.issues | join(", ") if p.issues else "–" }}</td>
-      <td>{{ p.reason or "" }}</td>
-    </tr>
-    {%- endfor %}
-    </tbody>
-  </table></div>
-  {%- endif %}
 </details>
 {%- endfor %}
 {%- endif %}

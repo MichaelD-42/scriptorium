@@ -84,11 +84,11 @@ the assembled output's format/location.
    retained feedback, they're noise. Read the rubric's "Correct by
    design" list first: removed page furniture, an empty `skipped: toc`
    or `skipped: blank` page, lists, and paragraphs joined across a page break are not
-   issues. For a figure with `figure_text`, check the labels and values
-   against the rendered page; tag `bad_caption` when they are wrong or
-   incomplete. For a figure with `no_visible_text: true` (in
-   `elements.json`; the flag is not rendered), confirm on the page that
-   it really has no text; tag `bad_caption` if it has.
+   issues. A caption is only a line printed outside a figure that names
+   it; text inside a figure or image is never a caption. Tag
+   `bad_caption` only when a printed caption is missing from the output
+   or wrong. A gap in a figure's `figure_text` (the text inside it) gets
+   no tag; mention it in the reason at most.
 4. Write one grade shard per page with `write_grade_shard.py`, with
    `--reason` naming exactly what is wrong whenever you tag an issue. The
    next extractor is given that text verbatim, so "page 5: the second

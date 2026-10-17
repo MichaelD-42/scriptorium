@@ -236,6 +236,18 @@ def furniture_edge(y0: float, y1: float, page_height: float, rect: list[float] |
     return None
 
 
+def is_side_margin_line(line_dir, bbox, page_width: float) -> bool:
+    """A text line rotated off the horizontal (`line_dir`, PyMuPDF's line
+    "dir") that lies wholly in the left or right FURNITURE_EDGE_BAND of the
+    page: a document number or legal line printed up the margin. Furniture
+    without repetition, since it often differs per page (one language per
+    page)."""
+    if abs(line_dir[1]) < 0.5 or page_width <= 0:
+        return False
+    band = FURNITURE_EDGE_BAND * page_width
+    return bbox[2] <= band or bbox[0] >= page_width - band
+
+
 def in_furniture_band(bbox, page_height: float | None, rect: list[float] | None = None) -> bool:
     """True when `bbox` ([x0, y0, x1, y1]) lies in the top or bottom
     furniture band of the page (band_limits, with the content rect `rect`).
