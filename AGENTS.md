@@ -55,21 +55,28 @@ that only show up under concurrency or on large documents.
   Two deterministic scripts (`merge.py`, `merge_grades.py`) combine shards
   afterward — don't reintroduce a read-modify-write pattern on one shared
   file.
-- **A new input format is a sibling skill, not a new plugin.** The
-  `extractor`/`grader` agents and the orchestrator loop are format-agnostic;
-  only the `*-triage`/`*-extract` skills are format-specific. Adding support
-  for a new format means adding skills the existing agents call, not a new
-  agent or plugin.
+- **A new input format is a pair of sibling tools, not a new plugin or
+  agent.** The `extractor`/`grader` agents and the orchestrator loop are
+  format-agnostic; the `tools/<format>-triage` and `tools/<format>-extract`
+  scripts are format-specific. The format's name still appears in a few
+  shared places (`lib/paths.py`, `queue-state/scripts/state.py`,
+  `assemble-output/scripts/merge.py`, `grade-output`, `commands/extract.md`,
+  `agents/extractor.md`); grep for an existing format such as `xlsx`.
+- **No Claude Code skills.** `tools/` folders have a `README.md`, never a
+  `SKILL.md`: a skill would be listed in every session with the plugin
+  enabled. The command and the agent prompts name each script by its
+  `${CLAUDE_PLUGIN_ROOT}/tools/...` path (substituted in command and agent
+  content; not set in Bash).
 
 ## Where to go deeper
 
 - [`docs/architecture.md`](docs/architecture.md) — the elastic loop, the
   agent tree, the escalation ladder, why shards exist.
-- [`docs/tooling.md`](docs/tooling.md) — every skill, script, CLI argument,
+- [`docs/tooling.md`](docs/tooling.md) — every tool, script, CLI argument,
   and on-disk file/shard schema.
 - `plugins/scriptorium/commands/extract.md` — the orchestrator's exact,
   executable step-by-step spec.
-- Per-skill `plugins/scriptorium/skills/*/SKILL.md` — one per extraction
+- Per-tool `plugins/scriptorium/tools/*/README.md` — one per extraction
   tier/format.
 
 Don't duplicate content from these into this file — link to them instead.

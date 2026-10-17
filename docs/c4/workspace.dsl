@@ -16,19 +16,20 @@ workspace "scriptorium" "Document-to-Markdown extraction pipeline run as a Claud
         libreoffice = softwareSystem "LibreOffice" "Headless pptx-to-PDF conversion, only to render slides." "External"
 
         scriptorium = softwareSystem "scriptorium" "Turns PDF, pptx, docx, xlsx, html and image documents into graded Markdown, HTML, OKF, md-tree or ReqIF." {
-            orchestrator = container "Orchestrator" "Drives the queue loop: triage, parallel extract batches, merge/assemble/gates, parallel grade batches, decide pass / escalate / needs-human. Reads only compact script stdout (context-rot rule); state.py and plan.py read the bulk files for it." "Claude Code slash command (commands/extract.md)" "Agent"
-            extractor = container "Extractor" "Extracts one page batch at its assigned tier (text, OCR, vision) plus images, captions, figure text and mermaid. Writes only its own pages' shards." "Claude Code subagent, one per batch, in parallel" "Agent"
-            grader = container "Grader" "Grades one page batch against the rubric by comparing rendered pages to the assembled output. Writes only its own pages' grade shards." "Claude Code subagent, one per batch, in parallel" "Agent"
+            orchestrator = container "Orchestrator" "Drives the queue loop: triage, parallel extract batches, merge/assemble/gates, parallel grade batches, decide pass / escalate / needs-human. Reads only compact script stdout (context-rot rule); state.py and plan.py read the bulk files for it. The plugin's only entry point: it registers no skills, so nothing else appears in a session." "Claude Code slash command (commands/extract.md)" "Agent"
+            extractor = container "Extractor" "Extracts one page batch at its assigned tier (text, OCR, vision) plus images, captions, figure text and mermaid. Writes only its own pages' shards. Its prompt names each command it runs; it reads a tool's README.md only when a step needs more." "Claude Code subagent (agents/extractor.md), one per batch, in parallel" "Agent"
+            grader = container "Grader" "Grades one page batch against the rubric by comparing rendered pages to the assembled output. Writes only its own pages' grade shards. Its prompt names each command it runs; it reads tools/grade-output/rubric.md before grading." "Claude Code subagent (agents/grader.md), one per batch, in parallel" "Agent"
 
-            scripts = container "Skill scripts" "Deterministic CLI steps, one skill per tier or format." "Python 3.11+, uv" {
-                queue = component "Queue state + plan" "Owns runs/state.json and the pass / retry / needs-human rules; plans which pages need an agent and the batch sizes." "queue-state"
+            scripts = container "Tool scripts" "Deterministic CLI steps, tools/<name>/scripts/ with a README.md each (not Claude Code skills), one tool per tier or format." "Python 3.11+, uv" {
+                setup = component "Environment setup" "Bootstraps uv, the Python env, tesseract and LibreOffice; resolves and installs a document's OCR language pack." "setup-environment"
+                queue = component "Queue state + plan" "Owns runs/state.json and the pass / retry / needs-human rules; plans which pages need an agent and the batch sizes; writes the end-of-run report." "queue-state"
                 triage = component "Triage" "Per format: page split, tier per page, loop size. PDF also: preflight, furniture, TOC, body font size." "pdf/pptx/docx/xlsx/html/image-triage"
                 render = component "Render" "Page or region to PNG; pptx via LibreOffice." "render-pages"
                 extractText = component "Native extract" "Text-tier body shards: headings, paragraphs, lists, tables." "extract-text, pptx/docx/xlsx/html-extract"
                 ocr = component "OCR" "OCR-tier body shards; lands vision transcriptions." "ocr-page"
-                images = component "Image extract" "Bitmaps and vector figure regions, captions, figure text; agent-written descriptions and mermaid." "extract-images"
+                images = component "Image extract" "Bitmaps and vector figure regions, captions, figure text; lands agent-written descriptions, figure text and mermaid." "extract-images"
                 merge = component "Merge + assemble" "Shards to elements.json (page-break joins, furniture removal), then the output format." "assemble-output"
-                gates = component "Gates + grade merge" "Structural gates, text-mode grading, grade shards to grade-report.json." "grade-output"
+                gates = component "Gates + grade merge" "Structural gates, text-mode grading, grader-written grade shards, grade shards to grade-report.json." "grade-output"
             }
             lib = container "Shared library" "Paths, shard I/O, furniture, figures, glyph repair, TOC." "Python package (lib/)"
 
@@ -43,24 +44,30 @@ workspace "scriptorium" "Document-to-Markdown extraction pipeline run as a Claud
         scriptorium.extractor -> claude "Runs on; vision reads"
         scriptorium.grader -> claude "Runs on; vision reads"
 
-        scriptorium.orchestrator -> scriptorium.scripts.queue "Runs init / next / decide / plan"
+        scriptorium.orchestrator -> scriptorium.scripts.setup "Runs once per run; per document for its OCR language"
+        scriptorium.scripts.setup -> tesseract "Installs language packs for"
+        scriptorium.orchestrator -> scriptorium.scripts.queue "Runs init / next / decide / plan / report"
         scriptorium.scripts.queue -> scriptorium.state "Reads and writes"
         scriptorium.scripts.queue -> scriptorium.work "Reads triage, shards, elements.json"
         scriptorium.scripts.queue -> scriptorium.output "Reads grade-report.json, writes report.html"
-        scriptorium.orchestrator -> scriptorium.scripts.extractText "Runs on text-tier pages"
+        scriptorium.orchestrator -> scriptorium.scripts.extractText "Runs on text-tier pages and every docx/xlsx/html/pptx page"
+        scriptorium.orchestrator -> scriptorium.scripts.render "Runs on one page to detect its OCR language"
         scriptorium.orchestrator -> scriptorium.scripts.images "Runs on every page"
         scriptorium.orchestrator -> scriptorium.extractor "Spawns one per planned batch, in parallel"
         scriptorium.orchestrator -> scriptorium.grader "Spawns one per planned batch, in parallel"
         scriptorium.orchestrator -> scriptorium.scripts.triage "Runs, reads compact stdout"
         scriptorium.orchestrator -> scriptorium.scripts.merge "Runs"
-        scriptorium.orchestrator -> scriptorium.scripts.gates "Runs"
+        scriptorium.orchestrator -> scriptorium.scripts.gates "Runs gates, text-mode grading, grade merge"
 
-        scriptorium.extractor -> scriptorium.scripts.render "Runs"
-        scriptorium.extractor -> scriptorium.scripts.extractText "Runs"
-        scriptorium.extractor -> scriptorium.scripts.ocr "Runs"
-        scriptorium.extractor -> scriptorium.scripts.images "Runs"
-        scriptorium.grader -> scriptorium.scripts.render "Runs"
+        scriptorium.extractor -> scriptorium.scripts.render "Renders pages and zoomed regions with"
+        scriptorium.extractor -> scriptorium.scripts.ocr "OCRs and lands vision transcriptions with"
+        scriptorium.extractor -> scriptorium.scripts.images "Lands descriptions, figure text and mermaid with"
+        scriptorium.extractor -> scriptorium.work "Reads page PNGs, triage.json, image shards"
+        scriptorium.extractor -> scriptorium.output "Reads image assets"
+        scriptorium.grader -> scriptorium.scripts.render "Renders pages with"
         scriptorium.grader -> scriptorium.scripts.gates "Writes grade shards with"
+        scriptorium.grader -> scriptorium.work "Reads page PNGs, gates-report.json, elements.json"
+        scriptorium.grader -> scriptorium.output "Reads the assembled document"
 
         scriptorium.scripts -> scriptorium.lib "Imports"
         scriptorium.scripts.triage -> scriptorium.work "Writes triage.json, toc.json"
@@ -73,6 +80,7 @@ workspace "scriptorium" "Document-to-Markdown extraction pipeline run as a Claud
         scriptorium.scripts.images -> scriptorium.output "Writes assets"
         scriptorium.scripts.merge -> scriptorium.work "Reads shards, writes elements.json"
         scriptorium.scripts.merge -> scriptorium.output "Writes the assembled document"
+        scriptorium.scripts.gates -> scriptorium.work "Reads elements.json, writes gates-report.json"
         scriptorium.scripts.gates -> scriptorium.output "Writes grade shards and grade-report.json"
     }
 
@@ -94,7 +102,7 @@ workspace "scriptorium" "Document-to-Markdown extraction pipeline run as a Claud
 
         dynamic scriptorium "Attempt" "One extraction attempt for one document." {
             user -> scriptorium.orchestrator "Runs /scriptorium:extract"
-            scriptorium.orchestrator -> scriptorium.scripts "Picks the next document; after the extract scripts, plans agent batches"
+            scriptorium.orchestrator -> scriptorium.scripts "Picks the next document, triages it, runs the extract scripts, plans agent batches"
             scriptorium.orchestrator -> scriptorium.extractor "Spawns one per planned batch"
             scriptorium.extractor -> claude "Transcribes pages that OCR could not read"
             scriptorium.orchestrator -> scriptorium.grader "Spawns one per planned batch (after merge, assemble, gates)"

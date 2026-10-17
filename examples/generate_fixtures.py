@@ -3,7 +3,7 @@
 plugins/scriptorium/examples/ (alongside the existing sample.png and
 sample.html), used by the pytest suite (plugins/scriptorium/tests/) as
 one-example-per-format test input. Each fixture exercises the same shapes
-the pipeline's triage/extract skills look for: a heading, a body paragraph,
+the pipeline's triage/extract tools look for: a heading, a body paragraph,
 a table, and an embedded image — so a single fixture per format is enough
 to drive triage -> extract -> merge -> assemble -> gate/grade end to end.
 

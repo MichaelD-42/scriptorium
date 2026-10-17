@@ -12,7 +12,7 @@ merge_shards() combines them into the same page shape v1 used, so
 assemble.py and gates.py don't need to know sharding exists. merge.py (in
 assemble-output) builds the final on-disk elements.json around it, adding
 `furniture_text` (Task A2) -- pdf-triage's verbatim repeated header/footer
-text (see skills/pdf-triage), `None` for non-PDF inputs or when no
+text (see tools/pdf-triage), `None` for non-PDF inputs or when no
 furniture was detected:
 
 {

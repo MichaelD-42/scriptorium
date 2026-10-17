@@ -5,7 +5,7 @@ setup and how to run the example.
 
 For the full architecture — the two-level agent tree, the queue loop,
 context-rot prevention, and the escalation ladder — see
-[`docs/architecture.md`](../../docs/architecture.md). For the skills,
+[`docs/architecture.md`](../../docs/architecture.md). For the tools,
 scripts, and file/shard schemas that implement it, see
 [`docs/tooling.md`](../../docs/tooling.md).
 
@@ -14,10 +14,29 @@ triages a document page-by-page, then spawns `extractor` and `grader`
 subagents in parallel over page batches — cheap deterministic extraction
 first, with local OCR and Claude vision escalated to only where needed, and
 an independent grader deciding pass/retry/escalate. Extraction is
-format-agnostic at the agent level; only the *skills* are format-specific.
+format-agnostic at the agent level; only the *tools* are format-specific.
 PDF, PowerPoint (`.pptx`), Word (`.docx`), Excel (`.xlsx`), HTML (`.html`),
 and standalone images (`.png`/`.jpg`/`.jpeg`/`.webp`/`.tiff`) are
 implemented today.
+
+## 0.6.0
+
+- **No skills**: the plugin registers no Claude Code skills, so nothing
+  of it shows up in the skill list of every session. `skills/` is now
+  `tools/`; each folder keeps its `scripts/` and has a `README.md` in
+  place of `SKILL.md`. `/scriptorium:extract` is still the one entry
+  point. The `extractor` and `grader` prompts list the exact commands
+  they run and no longer preload about 40 KB and 14 KB of skill text at
+  every spawn; they read a tool's README only when they need it.
+
+## 0.5.2
+
+- **Fix (data loss)**: an input named `...pdf` or `..pdf` made
+  `state.py init` delete the project folder or all of `work/` and
+  `output/`. Such names are now skipped with a warning.
+- **Fix (macOS)**: an input with an upper-case extension (`Report.PDF`)
+  is queued again; 0.5.1 skipped it.
+- `init` hashes inputs in chunks instead of reading each file into memory.
 
 ## 0.5.1
 

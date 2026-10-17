@@ -1,5 +1,5 @@
 """Conventional per-document paths, resolved against the current working
-directory (the orchestrator always runs skill scripts from the project root,
+directory (the orchestrator always runs tool scripts from the project root,
 i.e. ${CLAUDE_PROJECT_DIR}).
 
     input/<doc>.{pdf,pptx,xlsx,docx,html,png,jpg,jpeg,webp,tiff}  one supported input extension

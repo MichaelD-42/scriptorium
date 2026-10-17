@@ -17,7 +17,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      # Covers the ocr-page skill's tesseract path. LibreOffice (needed only
+      # Covers the ocr-page tool's tesseract path. LibreOffice (needed only
       # for render-pages' pptx->PDF conversion) is intentionally not
       # installed here -- tests behind that path are marked
       # `requires_libreoffice` and skip automatically without it.

@@ -118,7 +118,7 @@ interest — decides whether the result is good enough or needs another pass.
 If you want the full architectural tour — the agent tree, the escalation
 ladder, why pages are processed in isolated batches — see
 [`docs/architecture.md`](docs/architecture.md) for the design and
-[`docs/tooling.md`](docs/tooling.md) for the skills/scripts/schemas that
+[`docs/tooling.md`](docs/tooling.md) for the tools/scripts/schemas that
 implement it. If you're a developer looking to modify this repo, see
 [`AGENTS.md`](AGENTS.md).
 

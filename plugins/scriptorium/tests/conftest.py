@@ -18,11 +18,11 @@ from pathlib import Path
 import pytest
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
-SKILLS_ROOT = PLUGIN_ROOT / "skills"
+TOOLS_ROOT = PLUGIN_ROOT / "tools"
 LIB_ROOT = PLUGIN_ROOT / "lib"
 EXAMPLES_ROOT = PLUGIN_ROOT / "examples"
 
-# Every skill script does its own `sys.path.insert(0, .../lib)` at import
+# Every tool script does its own `sys.path.insert(0, .../lib)` at import
 # time, so lib/ ends up importable regardless -- but unit tests that want to
 # `import paths`/`import elements` directly (without going through
 # load_script) need it up front too.
@@ -30,7 +30,7 @@ sys.path.insert(0, str(LIB_ROOT))
 
 
 def load_script(relpath: str, name: str):
-    """Import skills/<relpath> as a module registered under a unique
+    """Import tools/<relpath> as a module registered under a unique
     `name`, so pure functions inside it can be called directly.
 
     Inserts the script's own directory at the front of sys.path first --
@@ -38,7 +38,7 @@ def load_script(relpath: str, name: str):
     resolves when the script's directory is importable (true automatically
     when run as `python assemble.py`, not true for an arbitrary importlib
     load)."""
-    path = SKILLS_ROOT / relpath
+    path = TOOLS_ROOT / relpath
     script_dir = str(path.parent)
     if script_dir not in sys.path:
         sys.path.insert(0, script_dir)
@@ -50,9 +50,9 @@ def load_script(relpath: str, name: str):
 
 
 def run_script(relpath: str, *args: str, cwd: Path, stdin: str | None = None) -> subprocess.CompletedProcess:
-    """Run skills/<relpath> as a subprocess, the same way commands/extract.md
+    """Run tools/<relpath> as a subprocess, the same way commands/extract.md
     invokes it: `uv run --project <plugin> python <script> <args>`."""
-    script_path = SKILLS_ROOT / relpath
+    script_path = TOOLS_ROOT / relpath
     return subprocess.run(
         ["uv", "run", "--project", str(PLUGIN_ROOT), "python", str(script_path), *args],
         cwd=cwd,

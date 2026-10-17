@@ -1,26 +1,30 @@
-# Tooling — skills, scripts, and file schemas
+# Tooling — tools, scripts, and file schemas
 
 This document is the reference for the machinery that implements the loop
 described in [`architecture.md`](architecture.md): the two agents, the
-skills they call, the shared `lib/`, and the on-disk file/shard formats.
+tools they and the orchestrator run, the shared `lib/`, and the on-disk file/shard formats.
 
 ## Agents
 
-| Role | Skills it calls | Job |
+| Role | Tools it runs | Job |
 |---|---|---|
-| `extractor` | render-pages, extract-text, ocr-page, extract-images, pptx-extract, docx-extract, xlsx-extract, html-extract | given a page batch: run the right tier/skill per page and format (pdf: text; or OCR → escalate to vision on low confidence. pptx: native extract, escalate to vision on a forced retry. docx/xlsx/html: native extract, no ocr/vision rung at all. image: always OCR → escalate to vision, no text rung), extract + caption images. Writes shards, returns a compact summary only. |
-| `grader` | render-pages, grade-output | **independent**: given a page batch, applies the rubric (rendered PNG vs. assembled output) and writes per-page grade shards. Never grades output it produced. Only spawned for formats with a rendered page (`pdf`, `pptx`, `image`) — see `grade-output/text-rubric.md` for the no-render alternative. |
+| `extractor` | render-pages, ocr-page, extract-images (`describe_image.py`, `mermaid_image.py`) | given a page batch: run the right tier per page and format (pdf: text; or OCR → escalate to vision on low confidence. pptx: native extract, escalate to vision on a forced retry. docx/xlsx/html: native extract, no ocr/vision rung at all. image: always OCR → escalate to vision, no text rung), extract + caption images. Writes shards, returns a compact summary only. |
+| `grader` | render-pages, grade-output (`write_grade_shard.py`, `rubric.md`) | **independent**: given a page batch, applies the rubric (rendered PNG vs. assembled output) and writes per-page grade shards. Never grades output it produced. Only spawned for formats with a rendered page (`pdf`, `pptx`, `image`) — see `grade-output/text-rubric.md` for the no-render alternative. |
 
 Both are leaves — spawned in parallel, several at once, one per page batch.
 See `plugins/scriptorium/agents/extractor.md` and `agents/grader.md` for the
-full agent prompts.
+full agent prompts. Each prompt lists the exact commands it runs; neither
+preloads anything else.
 
-## Skills
+## Tools
 
-Each skill is `SKILL.md` + `scripts/*.py`, run with
-`uv run --project "${CLAUDE_PLUGIN_ROOT}"`:
+Each tool is `tools/<name>/` with `scripts/*.py` and a `README.md`, run
+with `uv run --project "${CLAUDE_PLUGIN_ROOT}"`. They are not Claude Code
+skills: nothing is registered or listed in a session. The command and the
+agent prompts name each script by path, and a README is read only when a
+step needs its detail.
 
-| Skill | Scripts | Role |
+| Tool | Scripts | Role |
 |---|---|---|
 | `setup-environment` | `check_env.sh` / `check_env.ps1`, `ensure_language.py` | bootstrap `uv`/Python/`tesseract`/`soffice` (LibreOffice, for pptx rendering); detect and install the OCR language pack a document actually needs |
 | `queue-state` | `state.py`, `plan.py`, `report.py` | orchestrator only. `state.py` owns `runs/state.json` (init, next, reject, set-lang, decide, summary) and applies the pass / retry / needs-human rules to `grade-report.json`; `plan.py` lists the pages to extract by script, then batches the pages that need an agent by estimated turns against each agent's `maxTurns`; `report.py` writes the end-of-run `output/report.html` (summary, durations, grades per document) |
@@ -41,8 +45,8 @@ Each skill is `SKILL.md` + `scripts/*.py`, run with
 | `assemble-output` | `merge.py`, `assemble.py`, `zip_output.py` | `merge.py` combines every page's shards into `elements.json` (page count from `paths.true_page_count`, format-aware; also joins a paragraph/list item cut by a page break); `assemble.py` renders Markdown, HTML, an OKF bundle, `md-tree` (nested folders/files split at a heading depth, with a stable per-heading anchor — a byte-for-byte contract with a downstream consumer), or a ReqIF document (XML built by the internal `reqif_builder.py` helper, stdlib `xml.etree.ElementTree`, no new dependency); `zip_output.py` (optional, `/scriptorium:extract --zip`) packages `output/<doc>/` into `output/<doc>.zip` |
 | `grade-output` | `gates.py`, `write_grade_shard.py`, `merge_grades.py`, `text_mode_grade.py` | `gates.py` (deterministic, whole-doc, any format — page count, empty pages, dangling asset refs, OCR confidence floor, output file exists, plus PDF-only: furniture absent, TOC headings matched, figures complete, and a `large_region_excluded` warning) + `rubric.md` (vision judge, per page batch, applied by the `grader` agent via `write_grade_shard.py` — `pdf`/`pptx`/`image` only) **or** `text_mode_grade.py` (deterministic structural check re-reading the source file directly, no agent — `docx`/`xlsx`/`html`, see `text-rubric.md`) + `merge_grades.py` (deterministic, combines every batch's grade shards identically either way) |
 
-`lib/` (not a skill) holds the shard read/write/merge helpers and path
-conventions every skill script imports: `paths.py` (path conventions and
+`lib/` holds the shard read/write/merge helpers and path
+conventions every tool script imports: `paths.py` (path conventions and
 input-format dispatch, below), `elements.py` (shard read/write/merge
 helpers), `tesseract.py` (OCR backend wrapper), `docx_pages.py` (docx block
 iteration, Heading-1 pagination, and inline-image extraction, shared by
@@ -115,7 +119,7 @@ output/<doc>/{index.md,NN-slug.md}                  okf format (multi-file bundl
 output/<doc>/{index.md,00-front-matter.md,NN-slug/NN.MM-slug.md}
                                                      md-tree format (nested-folder bundle,
                                                      `--split-depth 2` only — see
-                                                     `skills/assemble-output/SKILL.md`)
+                                                     `tools/assemble-output/README.md`)
 output/<doc>/assets/*.{png,jpg,...}
 output/<doc>/grade-shards/page{N}.json              one per grader batch page (or per page, for text_mode_grade.py)
 output/<doc>/grade-report.json                      merge_grades.py's output
@@ -140,7 +144,7 @@ runs/state.json                                     per-document queue state
   furniture (`furniture`: `line_patterns`, `frame_tables`, `frame_drawings`,
   `repeated_drawings`, `image_xrefs`) and its verbatim text (`furniture_text`), and marks any
   detected printed-TOC page `"role": "toc"` in its `pages[]` entry — see
-  `pdf-triage/SKILL.md`.
+  `pdf-triage/README.md`.
 - **`toc.json`** (pdf only) — `entries[]`, each `{number, title, page,
   level}`, from `lib/toc.py`'s `detect_toc()`: the PDF's own outline if it
   has one, else a detected printed table of contents. `extract-text` reads
@@ -153,7 +157,7 @@ runs/state.json                                     per-document queue state
   `toc_headings_match`, `figures_complete` — each carrying its own `pages`
   list and structured detail. Also a top-level `warnings` list (currently
   just `large_region_excluded`, a large dropped figure-region candidate) that
-  never affects `passed` — see `grade-output/SKILL.md`.
+  never affects `passed` — see `grade-output/README.md`.
 - **`grade-report.json`** — `merge_grades.py`'s output: `overall_passed`
   (`gates.passed AND rubric_passed`) and `rubric_verdict.per_page`, each entry
   a score (0-1) and any failure-taxonomy tags. Shards come from
@@ -172,7 +176,7 @@ runs/state.json                                     per-document queue state
 
 ## Environment bootstrap
 
-`pyproject.toml` + `uv`. `skills/setup-environment/scripts/check_env.sh`
+`pyproject.toml` + `uv`. `tools/setup-environment/scripts/check_env.sh`
 (Linux/macOS) or `check_env.ps1` (Windows) bootstraps `uv` itself (official
 installer) if missing, then `uv sync` (which fetches a matching Python and
 installs `python-pptx`/`python-docx`/`openpyxl`/`beautifulsoup4` alongside
@@ -201,11 +205,11 @@ subagent's own Read tool.
 - `--format html` (single file)
 - `--format okf` (multi-file [OKF v0.1](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)
   bundle, split by top-level heading, with a TOC `index.md` and
-  inter-section links — see `skills/assemble-output/SKILL.md` for the exact
+  inter-section links — see `tools/assemble-output/README.md` for the exact
   layout)
 - `--format md-tree` (multi-file bundle split into nested folders/files at a
   heading depth, `--split-depth 2` only; every inline heading gets a stable
-  cross-repo anchor — see `skills/assemble-output/SKILL.md`'s "md-tree
+  cross-repo anchor — see `tools/assemble-output/README.md`'s "md-tree
   format" section. This is an `assemble.py`-level format for a downstream
   consumer; it is not currently one of `/scriptorium:extract`'s own
   `--format` choices, and `gates.py` has no dedicated `output_file_exists`
@@ -214,7 +218,7 @@ subagent's own Read tool.
   — the standard requirements-interchange XML format, one `SPEC-OBJECT` per
   element with a `SPEC-HIERARCHY` mirroring the heading tree; `reqifz`
   additionally bundles the `.reqif` with its referenced assets into a
-  self-contained zip — see `skills/assemble-output/SKILL.md` for the exact
+  self-contained zip — see `tools/assemble-output/README.md` for the exact
   element/attribute mapping)
 
 An `image` element with a `mermaid` field renders as a ` ```mermaid ` code
