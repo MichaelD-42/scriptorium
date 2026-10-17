@@ -4,7 +4,7 @@
  * The prose behind these diagrams is docs/architecture.md; the scripts and
  * file schemas are docs/tooling.md.
  */
-workspace "scriptorium" "Document-to-Markdown extraction pipeline run as a Claude Code plugin." {
+workspace "scriptorium" "Document extraction pipeline run as a Claude Code plugin." {
 
     !identifiers hierarchical
 
@@ -14,6 +14,7 @@ workspace "scriptorium" "Document-to-Markdown extraction pipeline run as a Claud
         claude = softwareSystem "Claude model" "Runs the orchestrator session and its subagents; reads page images for vision transcription, image descriptions and grading." "External"
         tesseract = softwareSystem "Tesseract" "Local OCR engine plus language packs." "External"
         libreoffice = softwareSystem "LibreOffice" "Headless pptx-to-PDF conversion, only to render slides." "External"
+        ccusage = softwareSystem "ccusage" "Optional. Reports the Claude Code session's token cost from its usage logs." "External"
 
         scriptorium = softwareSystem "scriptorium" "Turns PDF, pptx, docx, xlsx, html and image documents into graded Markdown, HTML, OKF, md-tree or ReqIF." {
             orchestrator = container "Orchestrator" "Drives the queue loop: triage, parallel extract batches, merge/assemble/gates, parallel grade batches, decide pass / escalate / needs-human. Reads only compact script stdout (context-rot rule); state.py and plan.py read the bulk files for it. The plugin's only entry point: it registers no skills, so nothing else appears in a session." "Claude Code slash command (commands/extract.md)" "Agent"
@@ -22,7 +23,7 @@ workspace "scriptorium" "Document-to-Markdown extraction pipeline run as a Claud
 
             scripts = container "Tool scripts" "Deterministic CLI steps, tools/<name>/scripts/ with a README.md each (not Claude Code skills), one tool per tier or format." "Python 3.11+, uv" {
                 setup = component "Environment setup" "Bootstraps uv, the Python env, tesseract and LibreOffice; resolves and installs a document's OCR language pack." "setup-environment"
-                queue = component "Queue state + plan" "Owns runs/state.json and the pass / retry / needs-human rules; plans which pages need an agent and the batch sizes; writes the end-of-run report." "queue-state"
+                queue = component "Queue state + plan" "Owns runs/state.json and the pass / retry / needs-human rules; records each attempt's time and cost; plans which pages need an agent and the batch sizes; writes the end-of-run report." "queue-state"
                 triage = component "Triage" "Per format: page split, tier per page, loop size. PDF also: preflight, furniture, TOC, body font size." "pdf/pptx/docx/xlsx/html/image-triage"
                 render = component "Render" "Page or region to PNG; pptx via LibreOffice." "render-pages"
                 extractText = component "Native extract" "Text-tier body shards: headings, paragraphs, lists, tables." "extract-text, pptx/docx/xlsx/html-extract"
@@ -33,7 +34,7 @@ workspace "scriptorium" "Document-to-Markdown extraction pipeline run as a Claud
             }
             lib = container "Shared library" "Paths, shard I/O, furniture, figures, glyph repair, TOC." "Python package (lib/)"
 
-            state = container "Queue state" "One entry per input document: status, attempt, escalated pages, OCR language, warnings." "runs/state.json" "Store"
+            state = container "Queue state" "One entry per input document: status, attempts with time and cost, escalated pages, OCR language, warnings." "runs/state.json" "Store"
             work = container "Work area" "triage.json, toc.json, page PNGs, per-page shards, elements.json." "work/<doc>/" "Store"
             output = container "Output area" "Assembled document, assets, grade shards, grade-report.json, optional zip." "output/<doc>/" "Store"
         }
@@ -50,6 +51,7 @@ workspace "scriptorium" "Document-to-Markdown extraction pipeline run as a Claud
         scriptorium.scripts.queue -> scriptorium.state "Reads and writes"
         scriptorium.scripts.queue -> scriptorium.work "Reads triage, shards, elements.json"
         scriptorium.scripts.queue -> scriptorium.output "Reads grade-report.json, writes report.html"
+        scriptorium.scripts.queue -> ccusage "Reads the session cost at each attempt's start and end"
         scriptorium.orchestrator -> scriptorium.scripts.extractText "Runs on text-tier pages and every docx/xlsx/html/pptx page"
         scriptorium.orchestrator -> scriptorium.scripts.render "Runs on one page to detect its OCR language"
         scriptorium.orchestrator -> scriptorium.scripts.images "Runs on every page"

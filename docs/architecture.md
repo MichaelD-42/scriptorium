@@ -16,12 +16,12 @@ implement each step, see [`tooling.md`](tooling.md). The C4 model
 | Elastic Loop concept | This plugin |
 |---|---|
 | Intent opens the loop | `/scriptorium:extract` sets doc (or the whole `input/` queue), format, `--max-attempts`, optional `--batch-size` cap |
-| Context grounds it | the PDF, per-page rendered PNGs, per-page shards |
-| Backpressure (structural/hard) | `grade-output`'s `gates.py` — page count, empty pages, dangling asset refs, OCR confidence floor, plus PDF-only structure checks: furniture removed, TOC headings matched, figures complete |
-| Backpressure (product/soft) | `grade-output/rubric.md` — reading order, dropped/hallucinated/duplicated text, table integrity, headings, captions. Pass threshold (0.85) is hardcoded there, not a CLI flag; any content tag (wrong body text) fails the document whatever the average |
+| Context grounds it | the input document, per-page rendered PNGs, per-page shards |
+| Backpressure (structural/hard) | `grade-output`'s `gates.py` — page count, empty pages, dangling asset refs, OCR confidence floor, figures complete, plus checks that only find something on PDFs (only PDF triage detects furniture and a TOC): furniture removed, TOC headings matched |
+| Backpressure (product/soft) | `grade-output/rubric.md` — reading order, dropped/hallucinated/duplicated text, table integrity, headings, captions. Pass threshold (0.85) is hardcoded in `merge_grades.py`, not a CLI flag; any content tag (wrong body text) fails the document whatever the average |
 | Verification closes it | the `grader` role — independent of `extractor`, never grades its own work |
-| Loop sizing | `pdf-triage` classifies each document `loose` (all tier-1) or `tight` (needs escalation) |
-| Elastic escalation | Tier 1 text (PyMuPDF) → Tier 2 OCR (Tesseract) → Tier 3 vision (Claude) |
+| Loop sizing | each format's triage script classifies the document `loose` (all text tier, no visuals) or `tight` (expect escalation) |
+| Elastic escalation | text (PyMuPDF, native) or OCR (Tesseract, scans) → vision (Claude); a text page skips OCR |
 | Retained feedback | a failed grade's per-page failure taxonomy drives exactly which pages escalate to which tier on retry — not a blind re-run |
 | Harness engineering | environment bootstrap, page sharding, and the context-rot rule below — the loop only works if the scaffold around the model is sound |
 
@@ -67,8 +67,9 @@ that's a subagent's job.
    loop starts.
 2. **Pick** the next document with `status` `pending` or `retrying`
    (`queue-state`'s `state.py next`; only `state.py` writes
-   `runs/state.json`). None left → report and stop.
-3. **Triage / resume** — attempt 0 runs `pdf-triage` (pure classification, no
+   `runs/state.json`). None left → write `output/report.html` (status,
+   attempts, time and cost per document) and stop.
+3. **Triage / resume** — attempt 0 runs the format's triage script (pure classification, no
    agent needed; an unreadable input fails here and goes to a human); a
    retry reuses `escalated_pages` from state instead of re-triaging. If any page needs OCR/vision and the document's OCR language
    hasn't been resolved yet, resolve it once via `ensure_language.py`.
@@ -90,7 +91,7 @@ that's a subagent's job.
    every batch's shards into `grade-report.json`.
 7. **Decide** (`state.py decide`, a script): `overall_passed` (gates AND
    rubric) → `passed`, next document. Otherwise escalate (below),
-   `status: retrying`, loop back to step 4 — or `status: needs-human` at
+   `status: retrying` (which opens the next attempt), loop back to step 4 — or `status: needs-human` at
    `max-attempts`, when no tier is left, or when nothing page-level is left
    to retry.
 
@@ -115,7 +116,7 @@ flowchart TD
 Body extraction has three tiers: **Tier 1 text** (PyMuPDF, cheap,
 deterministic) → **Tier 2 OCR** (Tesseract, local) → **Tier 3 vision**
 (Claude reading the rendered page directly). A document is only as expensive
-as it needs to be: `pdf-triage` starts every page at the cheapest tier that
+as it needs to be: triage starts every page at the cheapest tier that
 should work, and only a failed grade bumps a page up.
 
 ```mermaid

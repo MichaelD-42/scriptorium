@@ -1,5 +1,5 @@
 ---
-description: Run the elastic-loop PDF extraction pipeline over the input/ queue — bootstrap the environment, triage, extract and grade in parallel page batches, escalate on failure, repeat until the queue is empty.
+description: Run the elastic-loop document extraction pipeline over the input/ queue — bootstrap the environment, triage, extract and grade in parallel page batches, escalate on failure, repeat until the queue is empty.
 ---
 
 # /scriptorium:extract
