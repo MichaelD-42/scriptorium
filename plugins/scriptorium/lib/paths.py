@@ -17,6 +17,7 @@ i.e. ${CLAUDE_PROJECT_DIR}).
     output/<doc>/grade-shards/page{N}.json              one per grader batch page
     output/<doc>/grade-report.json                      merge_grades.py's output
     output/<doc>.zip                                    zip_output.py's output (sibling to output/<doc>/, not inside it)
+    output/report.html                                  queue-state report.py's end-of-run report, all documents
 """
 
 from pathlib import Path

@@ -57,6 +57,7 @@ class Orchestrator:
         for _ in range(20):  # guard: a loop bug must fail the test, not hang it
             doc = self.sh("queue-state/scripts/state.py", "next").strip()
             if not doc:
+                self.report = json.loads(self.sh("queue-state/scripts/report.py"))
                 return json.loads(self.sh("queue-state/scripts/state.py", "summary"))
             self.attempt(doc)
         raise AssertionError("queue loop did not terminate")
@@ -208,6 +209,10 @@ class TestEveryFormatPasses:
         summary = orch.run()
 
         assert summary["counts"] == {"passed": 7}, summary
+        assert orch.report == {"report": "output/report.html", "documents": 7, "passed": 7, "needs_human": 0}
+        html = (tmp_project / "output" / "report.html").read_text()
+        for doc in ("s_pdf", "furniture_sample", "s_pptx", "s_docx", "s_xlsx", "s_html", "s_png"):
+            assert f">{doc}<" in html
         for doc in (
             "s_pdf",
             "furniture_sample",
@@ -274,6 +279,8 @@ class TestRetryCarriesTheGradersReason:
 
         assert summary["counts"] == {"passed": 1}
         assert orch.state()["s"]["attempt"] == 1
+        assert [a["status"] for a in orch.state()["s"]["attempts"]] == ["retrying", "passed"]
+        assert "table caption line missing" in (tmp_project / "output" / "report.html").read_text()
         retry = [b for b in orch.extractor_batches if b.get("reasons")]
         assert retry == [
             {

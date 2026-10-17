@@ -20,7 +20,10 @@ run each.
 | `decide --doc <name> --max-attempts <n>` | applies `output/<doc>/grade-report.json` (rules below) |
 | `summary` | status counts, needs-human reasons, warning counts |
 
-Writes are atomic (temp file, then rename). A queue entry:
+Writes are atomic (temp file, then rename). `next` opens an attempt
+record (`started_at`) when it picks a document; `decide` and `reject` close
+it (`finished_at`, `status`, `score`, and on a retry the `escalated_pages`
+with their reasons). A queue entry:
 
 ```json
 {"status": "retrying", "attempt": 1, "input_format": "pdf", "format": "md",
@@ -61,6 +64,22 @@ own is counted at `vision`.
    (a document-level gate, or a low score without tags) → `needs-human`,
    since a retry would re-run nothing. Else `retrying` with
    `escalated_pages`.
+
+## `report.py` — the end-of-run report
+
+```bash
+report.py   # {"report": "output/report.html", "documents": n, "passed": n, "needs_human": n}
+```
+
+Run once when the queue is empty. Writes one self-contained HTML file (no
+scripts, light and dark mode) from `runs/state.json` and each document's
+`grade-report.json` and `elements.json`: summary tiles (documents, passed,
+needs a human, pages, attempts, extraction time), a row per document with
+its page-grade strip, and per document its reason, attempts (start, time,
+outcome, score, escalations with reasons), failed gates, warnings, and a
+page table (tier, score, issues, the grader's reason). Time is the sum of
+attempt durations, from `next` to `decide`/`reject`; it is not split by
+phase. All document text is HTML-escaped.
 
 ## `plan.py` — what needs an agent, and batch sizes
 

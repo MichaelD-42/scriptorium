@@ -1,0 +1,234 @@
+{%- set STATUS = {
+  "passed": ("good", "✓", "Passed"),
+  "needs-human": ("critical", "✕", "Needs human"),
+  "retrying": ("warning", "!", "Retrying"),
+  "pending": ("warning", "!", "Pending"),
+} -%}
+{%- macro status(value) -%}
+{%- set s = STATUS.get(value, ("warning", "!", value)) -%}
+<span class="status"><span class="mark {{ s[0] }}" aria-hidden="true">{{ s[1] }}</span>{{ s[2] }}</span>
+{%- endmacro -%}
+{%- macro page_mark(p) -%}
+<span class="mark {{ p.status }}" aria-hidden="true">{{ {"good": "✓", "warning": "!", "critical": "✕"}[p.status] }}</span>
+{%- endmacro -%}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Extraction Report</title>
+<style>
+:root {
+  --surface: #ffffff;
+  --surface-2: #f2f3f5;
+  --line: #d9dbe0;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --good: #0ca30c;
+  --warning: #fab219;
+  --critical: #d03b3b;
+  --accent: #2a78d6;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    --surface: #1a1a19;
+    --surface-2: #242423;
+    --line: #3a3a38;
+    --text-primary: #f0efec;
+    --text-secondary: #c3c2b7;
+    --accent: #3987e5;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --surface: #1a1a19;
+  --surface-2: #242423;
+  --line: #3a3a38;
+  --text-primary: #f0efec;
+  --text-secondary: #c3c2b7;
+  --accent: #3987e5;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--text-primary);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+main { max-width: 1100px; margin: 0 auto; padding: 32px 16px 64px; }
+h1 { font-size: 28px; margin: 0 0 4px; letter-spacing: -0.01em; }
+h2 { font-size: 19px; margin: 40px 0 12px; }
+h3 { font-size: 15px; margin: 20px 0 8px; }
+.meta { color: var(--text-secondary); margin: 0; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-top: 24px; }
+.tile { background: var(--surface-2); border-radius: 8px; padding: 14px 16px; border-left: 4px solid var(--line); }
+.tile.good { border-left-color: var(--good); }
+.tile.critical { border-left-color: var(--critical); }
+.tile .value { font-size: 28px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.tile .label { color: var(--text-secondary); font-size: 13px; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--text-secondary); font-weight: 600; font-size: 13px; }
+td.num, th.num { text-align: right; }
+.status { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.mark {
+  display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 4px;
+  font-size: 11px; font-weight: 700; color: #ffffff; flex: none;
+}
+.mark.good { background: var(--good); }
+.mark.warning { background: var(--warning); color: #0b0b0b; }
+.mark.critical { background: var(--critical); }
+.strip { display: flex; flex-wrap: wrap; gap: 2px; max-width: 320px; }
+.strip .cell { width: 10px; height: 14px; border-radius: 2px; }
+.cell.good { background: var(--good); }
+.cell.warning { background: var(--warning); }
+.cell.critical { background: var(--critical); }
+details { border: 1px solid var(--line); border-radius: 8px; margin: 12px 0; padding: 0 16px; }
+summary { cursor: pointer; padding: 14px 0; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+summary .name { font-weight: 650; }
+summary .facts { color: var(--text-secondary); }
+details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+.reason { background: var(--surface-2); border-left: 4px solid var(--critical); padding: 10px 12px; border-radius: 4px; overflow-wrap: anywhere; }
+.muted { color: var(--text-secondary); }
+.legend { display: flex; gap: 16px; flex-wrap: wrap; color: var(--text-secondary); font-size: 13px; margin-top: 8px; }
+a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+<h1>Extraction report</h1>
+<p class="meta">
+  Generated {{ summary.generated | when }}
+  {%- if summary.started %} · run {{ summary.started | when }} to {{ summary.finished | when or "still open" }}{% endif %}
+</p>
+
+{%- if not docs %}
+<p>No documents in the queue.</p>
+{%- else %}
+<div class="tiles">
+  <div class="tile"><div class="value">{{ summary.documents }}</div><div class="label">Documents</div></div>
+  <div class="tile good"><div class="value">{{ summary.passed }}</div><div class="label">Passed</div></div>
+  <div class="tile {{ 'critical' if summary.needs_human else '' }}"><div class="value">{{ summary.needs_human }}</div><div class="label">Need a human</div></div>
+  {%- if summary.open %}<div class="tile"><div class="value">{{ summary.open }}</div><div class="label">Still open</div></div>{% endif %}
+  <div class="tile"><div class="value">{{ summary.pages }}</div><div class="label">Pages</div></div>
+  <div class="tile"><div class="value">{{ summary.attempts }}</div><div class="label">Attempts</div></div>
+  <div class="tile"><div class="value">{{ summary.duration }}</div><div class="label">Extraction time</div></div>
+</div>
+
+<h2>Documents</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr>
+    <th>Document</th><th>Status</th><th>Format</th><th class="num">Pages</th>
+    <th class="num">Attempts</th><th class="num">Score</th><th class="num">Time</th><th>Page grades</th>
+  </tr></thead>
+  <tbody>
+  {%- for d in docs %}
+  <tr>
+    <td><a href="#doc-{{ loop.index }}">{{ d.name }}</a></td>
+    <td>{{ status(d.entry.status) }}</td>
+    <td>{{ d.entry.input_format }} → {{ d.entry.format }}</td>
+    <td class="num">{{ d.page_count }}</td>
+    <td class="num">{{ d.attempts | length }}</td>
+    <td class="num">{{ "%.2f" | format(d.score) if d.score is not none else "–" }}</td>
+    <td class="num">{{ d.duration }}</td>
+    <td><div class="strip" role="img" aria-label="Page grades for {{ d.name }}; see the page table below">
+      {%- for p in d.pages %}<span class="cell {{ p.status }}" title="Page {{ p.page_number }}: {{ '%.2f' | format(p.score) }}{% if p.issues %} · {{ p.issues | join(', ') }}{% endif %}"></span>{% endfor -%}
+    </div></td>
+  </tr>
+  {%- endfor %}
+  </tbody>
+</table>
+</div>
+<div class="legend">
+  <span class="status"><span class="mark good" aria-hidden="true">✓</span>no issue</span>
+  <span class="status"><span class="mark warning" aria-hidden="true">!</span>figure issue (counts through the score)</span>
+  <span class="status"><span class="mark critical" aria-hidden="true">✕</span>text issue (fails the document)</span>
+</div>
+
+<h2>Details</h2>
+{%- for d in docs %}
+<details id="doc-{{ loop.index }}"{% if d.entry.status != "passed" %} open{% endif %}>
+  <summary>
+    <span class="name">{{ d.name }}</span>{{ status(d.entry.status) }}
+    <span class="facts">{{ d.page_count }} page{{ "s" if d.page_count != 1 }}{% for tier, n in d.tiers %} · {{ n }} {{ tier }}{% endfor %} · {{ d.duration }}</span>
+  </summary>
+
+  {%- if d.entry.reason %}
+  <p class="reason">{{ d.entry.reason }}</p>
+  {%- endif %}
+
+  {%- if d.attempts %}
+  <h3>Attempts</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th class="num">#</th><th>Started</th><th class="num">Time</th><th>Outcome</th><th class="num">Score</th><th>Escalated pages</th></tr></thead>
+    <tbody>
+    {%- for a in d.attempts %}
+    <tr>
+      <td class="num">{{ a.attempt }}</td>
+      <td>{{ a.started_at | when }}</td>
+      <td class="num">{{ a.duration if a.finished_at else "running" }}</td>
+      <td>{{ status(a.status) if a.status else "–" }}</td>
+      <td class="num">{{ "%.2f" | format(a.score) if a.score is defined and a.score is not none else "–" }}</td>
+      <td>
+        {%- for page, e in (a.escalated_pages or {}).items() %}
+        <div>Page {{ page }} → {{ e.tier }}{% if e.recheck_images %} (images){% endif %}: <span class="muted">{{ e.reason }}</span></div>
+        {%- else %}–{% endfor %}
+      </td>
+    </tr>
+    {%- endfor %}
+    </tbody>
+  </table></div>
+  {%- endif %}
+
+  {%- set failed = d.checks | rejectattr("passed") | list %}
+  {%- if d.checks %}
+  <h3>Gates</h3>
+  {%- if failed %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>Check</th><th>Result</th><th>Detail</th></tr></thead>
+    <tbody>
+    {%- for c in failed %}
+    <tr><td>{{ c.name }}</td><td>{{ status("needs-human") | replace("Needs human", "Failed") }}</td><td>{{ c.detail }}</td></tr>
+    {%- endfor %}
+    </tbody>
+  </table></div>
+  {%- endif %}
+  <p class="muted">{{ d.checks | length - failed | length }} of {{ d.checks | length }} checks passed.</p>
+  {%- endif %}
+
+  {%- if d.warnings %}
+  <h3>Warnings</h3>
+  <ul>
+  {%- for w in d.warnings %}
+    <li>{{ w.name }}{% if w.page %} on page {{ w.page }}{% endif %}{% if w.caption %}: {{ w.caption }}{% elif w.reason %}: {{ w.reason }}{% endif %}</li>
+  {%- endfor %}
+  </ul>
+  {%- endif %}
+
+  {%- if d.pages %}
+  <h3>Pages</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th class="num">Page</th><th>Tier</th><th class="num">Score</th><th>Issues</th><th>Reason</th></tr></thead>
+    <tbody>
+    {%- for p in d.pages %}
+    <tr>
+      <td class="num">{{ p.page_number }}</td>
+      <td>{{ p.tier }}</td>
+      <td class="num"><span class="status">{{ page_mark(p) }}{{ "%.2f" | format(p.score) }}</span></td>
+      <td>{{ p.issues | join(", ") if p.issues else "–" }}</td>
+      <td>{{ p.reason or "" }}</td>
+    </tr>
+    {%- endfor %}
+    </tbody>
+  </table></div>
+  {%- endif %}
+</details>
+{%- endfor %}
+{%- endif %}
+</main>
+</body>
+</html>

@@ -46,7 +46,7 @@ workspace "scriptorium" "Document-to-Markdown extraction pipeline run as a Claud
         scriptorium.orchestrator -> scriptorium.scripts.queue "Runs init / next / decide / plan"
         scriptorium.scripts.queue -> scriptorium.state "Reads and writes"
         scriptorium.scripts.queue -> scriptorium.work "Reads triage, shards, elements.json"
-        scriptorium.scripts.queue -> scriptorium.output "Reads grade-report.json"
+        scriptorium.scripts.queue -> scriptorium.output "Reads grade-report.json, writes report.html"
         scriptorium.orchestrator -> scriptorium.scripts.extractText "Runs on text-tier pages"
         scriptorium.orchestrator -> scriptorium.scripts.images "Runs on every page"
         scriptorium.orchestrator -> scriptorium.extractor "Spawns one per planned batch, in parallel"
