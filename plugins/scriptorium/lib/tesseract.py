@@ -10,7 +10,9 @@ on where the binary and its language data actually are.
 """
 
 import os
+import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -46,11 +48,21 @@ def find_tesseract() -> str | None:
 
 
 def tessdata_dir_for(tesseract_path: str) -> Path | None:
-    """The tessdata dir tesseract itself would use — a sibling `tessdata/`
-    directory next to the binary. None if it doesn't exist (rare, but
-    possible right after a partial install)."""
+    """The tessdata dir tesseract itself would use: a sibling `tessdata/`
+    directory next to the binary (Windows installs), else the one tesseract
+    names in its `--list-langs` header (Linux packages: /usr/share/...).
+    None if neither exists (rare, but possible right after a partial
+    install)."""
     sibling = Path(tesseract_path).resolve().parent / "tessdata"
-    return sibling if sibling.is_dir() else None
+    if sibling.is_dir():
+        return sibling
+    try:
+        result = subprocess.run([tesseract_path, "--list-langs"], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    match = re.search(r'"([^"]+)"', (result.stdout + result.stderr).partition("\n")[0])
+    reported = Path(match.group(1)) if match else None
+    return reported if reported and reported.is_dir() else None
 
 
 def user_tessdata_dir() -> Path:

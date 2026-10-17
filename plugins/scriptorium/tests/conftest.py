@@ -29,6 +29,14 @@ EXAMPLES_ROOT = PLUGIN_ROOT / "examples"
 sys.path.insert(0, str(LIB_ROOT))
 
 
+
+@pytest.fixture(autouse=True)
+def _no_claude_session(monkeypatch):
+    """state.py prices each attempt with ccusage when it runs inside a Claude
+    Code session; a test run from one must not read the real usage logs."""
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+
+
 def load_script(relpath: str, name: str):
     """Import tools/<relpath> as a module registered under a unique
     `name`, so pure functions inside it can be called directly.

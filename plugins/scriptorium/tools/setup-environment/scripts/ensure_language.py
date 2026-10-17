@@ -6,7 +6,7 @@ This is coarse by design: tesseract's OSD (orientation & script detection)
 tells you the *script* (Latin, Han, Cyrillic, ...), not the exact language —
 Latin-script documents in German, French, etc. all detect as "Latin" and
 fall back to `eng` unless you pass --extra with additional language codes
-(the orchestrator does this from the plugin's userConfig.ocr_languages).
+(the orchestrator passes the plugin's userConfig.ocr_languages).
 The point is closing the "pipeline silently fails because a language pack
 is missing" failure mode, not solving language identification exactly.
 
@@ -17,6 +17,7 @@ any) were newly installed.
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -149,7 +150,7 @@ def download_language(lang: str) -> bool:
 
 
 def resolve_tessdata_override(languages: list[str]) -> str | None:
-    """Only reached on Windows or when no package manager was found. If the
+    """If the
     tesseract install's own tessdata dir already has every wanted language,
     no override is needed. Otherwise assemble a self-sufficient dir (system
     files copied in where available, downloaded otherwise) and return its
@@ -175,6 +176,19 @@ def resolve_tessdata_override(languages: list[str]) -> str | None:
     return str(fallback_dir)
 
 
+def extra_languages(value: str) -> list[str]:
+    """The tesseract codes in a comma list. The codes reach package-manager
+    commands and a download URL, so anything else is dropped; an unset plugin
+    option arrives as its literal `${user_config...}` placeholder."""
+    codes = []
+    for item in (v.strip() for v in value.split(",")):
+        if re.fullmatch(r"[A-Za-z0-9_]+", item):
+            codes.append(item)
+        elif item and not item.startswith("${user_config."):
+            print(f"warning: --extra {item!r} is not a tesseract language code; ignored", file=sys.stderr)
+    return codes
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("image", help="path to a rendered PNG of a representative OCR-tier page")
@@ -183,7 +197,7 @@ def main() -> None:
 
     script = detect_script(args.image)
     wanted = {SCRIPT_TO_LANG.get(script, DEFAULT_LANG)}
-    wanted |= {lang.strip() for lang in args.extra.split(",") if lang.strip()}
+    wanted |= set(extra_languages(args.extra))
 
     installed = installed_languages()
     missing = sorted(wanted - installed)
@@ -212,7 +226,9 @@ def main() -> None:
     final_installed = installed_languages()
     languages = sorted(wanted & final_installed) or [DEFAULT_LANG]
 
-    tessdata_prefix = resolve_tessdata_override(languages) if use_download_fallback else None
+    # installed_languages() counts the fallback dir on every OS, so tesseract
+    # must be pointed there whenever a wanted pack only exists there.
+    tessdata_prefix = resolve_tessdata_override(languages)
 
     print(json.dumps({
         "detected_script": script,

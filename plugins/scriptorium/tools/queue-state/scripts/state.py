@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -131,6 +132,11 @@ def page_tiers(doc: str) -> dict[int, str]:
 
 
 def cmd_init(args) -> None:
+    try:
+        Path("input").mkdir(exist_ok=True)
+    except OSError as e:
+        print(f"error: cannot create input/: {e}", file=sys.stderr)
+        sys.exit(1)
     state = load_state()
     for path in sorted(Path("input").iterdir()):
         ext = path.suffix.lstrip(".").lower()
@@ -179,10 +185,36 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def session_cost() -> float | None:
+    """This Claude Code session's cost so far in USD, orchestrator and
+    subagents, from ccusage; None without ccusage or a session id."""
+    session, ccusage = os.environ.get("CLAUDE_CODE_SESSION_ID"), shutil.which("ccusage")
+    if not (session and ccusage):
+        return None
+    try:
+        result = subprocess.run([ccusage, "session", "--id", session, "--json"], capture_output=True, text=True, timeout=60)
+        return float(json.loads(result.stdout)["totalCost"])
+    except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, TypeError):
+        return None
+
+
+def _open_attempt(entry: dict) -> None:
+    entry.setdefault("attempts", []).append({
+        "attempt": entry["attempt"], "started_at": _now(),
+        "session_id": os.environ.get("CLAUDE_CODE_SESSION_ID"), "cost_at_start": session_cost(),
+    })
+
+
 def _close_attempt(entry: dict, **fields) -> None:
-    """Finish the open attempt record that `next` started (report.py's timing)."""
+    """Finish the open attempt record that `next` or a retry started
+    (report.py's timing and cost)."""
     if entry.get("attempts") and "finished_at" not in entry["attempts"][-1]:
-        entry["attempts"][-1].update(finished_at=_now(), **fields)
+        attempt = entry["attempts"][-1]
+        start, end = attempt.get("cost_at_start"), session_cost()
+        # Another session's total says nothing about this one's spend.
+        same_session = attempt.get("session_id") == os.environ.get("CLAUDE_CODE_SESSION_ID")
+        cost = round(end - start, 4) if None not in (start, end) and same_session else None
+        attempt.update(finished_at=_now(), cost_usd=cost, **fields)
 
 
 def cmd_next(args) -> None:
@@ -191,9 +223,9 @@ def cmd_next(args) -> None:
     names = [args.doc] if args.doc else list(docs)
     doc = next((n for n in names if docs.get(n, {}).get("status") in OPEN_STATUSES), "")
     if doc:  # picking a document starts its attempt; asking again starts nothing new
-        attempts = docs[doc].setdefault("attempts", [])
+        attempts = docs[doc].get("attempts")
         if not attempts or "finished_at" in attempts[-1]:
-            attempts.append({"attempt": docs[doc]["attempt"], "started_at": _now()})
+            _open_attempt(docs[doc])
             save_state(state)
     print(doc)
 
@@ -224,6 +256,8 @@ def cmd_decide(args) -> None:
         entry["grade_report"] = str(report_path)
     escalated = {"escalated_pages": entry["escalated_pages"]} if entry["escalated_pages"] else {}
     _close_attempt(entry, status=entry["status"], score=report["rubric_verdict"].get("score"), **escalated)
+    if entry["status"] == "retrying":  # the orchestrator loops back to extraction without `next`
+        _open_attempt(entry)
     state["docs"][args.doc] = entry
     save_state(state)
     out = {k: entry[k] for k in ("status", "attempt", "reason", "escalated_pages") if k in entry}

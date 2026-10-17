@@ -1,5 +1,5 @@
 ---
-description: Run the elastic-loop PDF extraction pipeline over the input/ queue — bootstrap the environment, triage, extract and grade in parallel page batches, escalate on failure, repeat until the queue is empty.
+description: Run the elastic-loop document extraction pipeline over the input/ queue — bootstrap the environment, triage, extract and grade in parallel page batches, escalate on failure, repeat until the queue is empty.
 ---
 
 # /scriptorium:extract
@@ -61,8 +61,10 @@ that actually have scanned pages, and that's handled per-document below.
 
 ## Setup
 
-`state.py init --format <output format>` creates `runs/state.json` if needed
-and adds every new supported file in `input/` as `pending`. Pass any
+`state.py init --format <output format>` creates `input/` and
+`runs/state.json` if needed and adds every new supported file in `input/` as
+`pending`. **Exit 1** (`error: cannot create input/`): report the error line
+to the user and stop. Pass any
 `warning:` lines it prints on to the user (e.g. a finished document is not
 re-queued for a new `--format`). If `--doc` was
 given, pass `--doc <name>` to every `state.py next` below.
@@ -94,7 +96,9 @@ documents with warnings) with the report's path, and **stop**.
   triage's `non_text_pages`, an `image` document, or a retry tier) and the
   queue entry's `lang_flag` is `null`: run
   `setup-environment/scripts/ensure_language.py` on one such page's rendered
-  PNG (render it first via `render-pages`), then `state.py set-lang --doc
+  PNG (render it first via `render-pages`) with `--extra
+  '${user_config.ocr_languages}'` (the user's extra languages, e.g. `deu`;
+  keep the single quotes), then `state.py set-lang --doc
   <name> --lang-flag <lang_flag> [--tessdata-prefix <prefix>]`. Pass both
   to every extractor batch with an `ocr`/`vision` page as `--lang` and (only
   when set) `--tessdata-dir`. Once per document, not per attempt.

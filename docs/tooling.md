@@ -27,14 +27,14 @@ step needs its detail.
 | Tool | Scripts | Role |
 |---|---|---|
 | `setup-environment` | `check_env.sh` / `check_env.ps1`, `ensure_language.py` | bootstrap `uv`/Python/`tesseract`/`soffice` (LibreOffice, for pptx rendering); detect and install the OCR language pack a document actually needs |
-| `queue-state` | `state.py`, `plan.py`, `report.py` | orchestrator only. `state.py` owns `runs/state.json` (init, next, reject, set-lang, decide, summary) and applies the pass / retry / needs-human rules to `grade-report.json`; `plan.py` lists the pages to extract by script, then batches the pages that need an agent by estimated turns against each agent's `maxTurns`; `report.py` writes the end-of-run `output/report.html` (summary, durations, grades per document) |
+| `queue-state` | `state.py`, `plan.py`, `report.py` | orchestrator only. `state.py` owns `runs/state.json` (init, next, reject, set-lang, decide, summary) and applies the pass / retry / needs-human rules to `grade-report.json`; `plan.py` lists the pages to extract by script, then batches the pages that need an agent by estimated turns against each agent's `maxTurns`; `report.py` writes the end-of-run `output/report.html` (summary, durations, ccusage cost, grades per document) |
 | `pdf-triage` | `triage.py` | classify PDF pages into tiers + document loop size (`loose`/`tight`); preflight rejects unreadable input and starts garbled-text or stamped-scan pages at `ocr` |
 | `pptx-triage` | `triage.py` | classify pptx slides (always tier `text`) + loop size (`tight` if any slide has a picture/chart) |
 | `docx-triage` | `triage.py` | split a docx into logical pages (Heading-1 sections, via `lib/docx_pages.split_pages`) + loop size (`tight` if any page has a table/image); its `page_count` is the pipeline's own pagination, not an independent source-file property |
 | `xlsx-triage` | `triage.py` | classify workbook sheets (always tier `text`, one sheet = one page) + loop size (`tight` if any sheet has an image/chart); its `page_count` (`workbook.sheetnames`) **is** an independent source-file property, like pptx |
 | `html-triage` | `triage.py` | classify an HTML document as a single page (always tier `text`, `page_count` always `1` — HTML has no page concept at all) + loop size (`tight` if the page has a table or a saveable image) |
 | `image-triage` | `triage.py` | classify a standalone image document as a single page (always tier `ocr`, `page_count` always `1` — same fixed rule as html-triage, but on the pdf-style ocr/vision ladder, not the digital-native one) + loop size (always `tight`) |
-| `render-pages` | `render.py` | page → PNG. PDF pages rasterize directly; pptx is converted to PDF via LibreOffice first, then rasterized the same way; a standalone image document is normalized straight to PNG (no dpi/zoom step). Not used for docx/xlsx/html (no rendered page — see `grade-output/text-rubric.md`) |
+| `render-pages` | `render.py`, `render_region.py` | page → PNG; `render_region.py` crops one element's bbox at high dpi for a closer look. PDF pages rasterize directly; pptx is converted to PDF via LibreOffice first, then rasterized the same way; a standalone image document is normalized straight to PNG (no dpi/zoom step). Not used for docx/xlsx/html (no rendered page — see `grade-output/text-rubric.md`) |
 | `extract-text` | `extract_text.py` | PDF Tier 1: PyMuPDF text + pdfplumber tables → a shard per page. Removes page furniture (running headers/footers, frame borders) and skips printed-TOC pages before extraction; classifies headings from `toc.json` when present (fallback: font-size ranking) with no level cap; recognizes bullet/enumerator lines as `list_item`; excludes figure-region and caption lines (landed on the matching `image` element instead) |
 | `ocr-page` | `ocr.py`, `write_vision_page.py` | PDF Tier 2: Tesseract (pluggable backend, `--lang`-aware); Tier 3 (vision) is agent-native, landed via `write_vision_page.py`. pptx also lands its vision escalation through `write_vision_page.py`; docx/xlsx/html have no vision rung. image documents always start here (there's no Tier 1 for image — no text layer to check) |
 | `extract-images` | `extract_images.py`, `describe_image.py`, `mermaid_image.py` | PDF: bitmaps + region-level vector-graphic detection (`lib/figures.py`, shared with `extract-text`, frame-vs-figure disambiguated by furniture repetition, not size) → an independent shard per page, each dropped candidate recorded in `excluded_regions`; a standalone image document instead lands the whole file as page 1's one bitmap element. For a PDF/image element, `caption` is script-authoritative (a nearby "Figure n"/"Table n" text-layer line); the agent always writes `--description` via `describe_image.py` (renamed from the old `caption_image.py`), plus `--data-table`/`--mermaid`/`--figure-text` where they apply, and `--caption` only for pptx/docx/xlsx/html (no script-side detection there). `mermaid_image.py` lands a `mermaid` field standalone, same as `describe_image.py --mermaid` |
@@ -43,7 +43,7 @@ step needs its detail.
 | `xlsx-extract` | `extract_xlsx.py` | xlsx Tier 1: sheet name → heading, used range → one table element (full rectangle, blank interior rows kept), embedded images (own shard) — charts not extracted (no rendering engine) |
 | `html-extract` | `extract_html.py` | html Tier 1: `<h1>`-`<h6>` → headings (clamped to level 1-3), `<p>`/`<li>`/`<pre>`/`<blockquote>` → paragraphs, `<table>` → table, `<img>` (`data:` URI, or an image file inside the HTML file's own folder — remote sources and paths outside the folder skipped) → image — body + image shards in one call, single page always |
 | `assemble-output` | `merge.py`, `assemble.py`, `zip_output.py` | `merge.py` combines every page's shards into `elements.json` (page count from `paths.true_page_count`, format-aware; also joins a paragraph/list item cut by a page break); `assemble.py` renders Markdown, HTML, an OKF bundle, `md-tree` (nested folders/files split at a heading depth, with a stable per-heading anchor — a byte-for-byte contract with a downstream consumer), or a ReqIF document (XML built by the internal `reqif_builder.py` helper, stdlib `xml.etree.ElementTree`, no new dependency); `zip_output.py` (optional, `/scriptorium:extract --zip`) packages `output/<doc>/` into `output/<doc>.zip` |
-| `grade-output` | `gates.py`, `write_grade_shard.py`, `merge_grades.py`, `text_mode_grade.py` | `gates.py` (deterministic, whole-doc, any format — page count, empty pages, dangling asset refs, OCR confidence floor, output file exists, plus PDF-only: furniture absent, TOC headings matched, figures complete, and a `large_region_excluded` warning) + `rubric.md` (vision judge, per page batch, applied by the `grader` agent via `write_grade_shard.py` — `pdf`/`pptx`/`image` only) **or** `text_mode_grade.py` (deterministic structural check re-reading the source file directly, no agent — `docx`/`xlsx`/`html`, see `text-rubric.md`) + `merge_grades.py` (deterministic, combines every batch's grade shards identically either way) |
+| `grade-output` | `gates.py`, `write_grade_shard.py`, `merge_grades.py`, `text_mode_grade.py` | `gates.py` (deterministic, whole-doc, any format — page count, empty pages, dangling asset refs, OCR confidence floor, output file exists, figures complete, plus furniture absent and TOC headings matched, which only find something on PDFs; and the warnings `large_region_excluded`, `orphan_figure_caption`, `table_as_figure`) + `rubric.md` (vision judge, per page batch, applied by the `grader` agent via `write_grade_shard.py` — `pdf`/`pptx`/`image` only) **or** `text_mode_grade.py` (deterministic structural check re-reading the source file directly, no agent — `docx`/`xlsx`/`html`, see `text-rubric.md`) + `merge_grades.py` (deterministic, combines every batch's grade shards identically either way) |
 
 `lib/` holds the shard read/write/merge helpers and path
 conventions every tool script imports: `paths.py` (path conventions and
@@ -55,13 +55,18 @@ iteration, Heading-1 pagination, and inline-image extraction, shared by
 `data:`-URI/local-file image resolution, shared by `html-triage`,
 `html-extract`, and `text_mode_grade.py`'s html path), `preflight.py`
 (triage's one-line rejection of an input the extract step cannot read),
-`grades.py` (the failure taxonomy, split into content and image issues).
+`grades.py` (the failure taxonomy, split into content and image issues),
+`figures.py` (bitmap and vector figure regions, shared by `extract-text` and
+`extract-images`), `furniture.py` (page-furniture matching), `glyphs.py`
+(repairs text a PDF's own text layer gets wrong), `toc.py` (outline and printed-TOC detection).
 
 ### Key script arguments
 
 - `queue-state/scripts/state.py init|next|reject|set-lang|decide|summary ...`
 - `queue-state/scripts/plan.py --doc <name> --stage scripts|extract|grade [--max-pages <n>]`
 - `queue-state/scripts/report.py` (writes `output/report.html`)
+- `render-pages/scripts/render.py --doc <name> [--pages <csv>] [--dpi <n>] [--force]`
+- `render-pages/scripts/render_region.py --doc <name> --page <n> --bbox x0,y0,x1,y1 [--dpi 400]`
 - `pdf-triage/scripts/triage.py --doc <name>`
 - `pptx-triage/scripts/triage.py --doc <name>`
 - `docx-triage/scripts/triage.py --doc <name>`
@@ -72,6 +77,8 @@ iteration, Heading-1 pagination, and inline-image extraction, shared by
   (`--body-size` is triage's document-wide measurement, passed through — not
   recomputed per batch)
 - `ocr-page/scripts/ocr.py --doc <name> --pages <csv> [--backend tesseract] [--lang eng] [--tessdata-dir <path>]`
+- `ocr-page/scripts/write_vision_page.py --doc <name> --page <n>` (elements JSON on stdin)
+- `extract-images/scripts/extract_images.py --doc <name> --pages <csv>`
 - `pptx-extract/scripts/extract_pptx.py --doc <name> --pages <csv>`
 - `docx-extract/scripts/extract_docx.py --doc <name> --pages <csv>`
 - `xlsx-extract/scripts/extract_xlsx.py --doc <name> --pages <csv>`
@@ -87,15 +94,16 @@ iteration, Heading-1 pagination, and inline-image extraction, shared by
 - `grade-output/scripts/gates.py --doc <name> [--format md|html|okf|md-tree|reqif|reqifz]`
   (for `md-tree`, `output_file_exists` checks `index.md` plus the
   `NN-slug/NN.MM-slug.md` files or `00-front-matter.md`)
-- `grade-output/scripts/write_grade_shard.py --doc <name> --page <n> --score <0-1> [--issues <csv>]`
+- `grade-output/scripts/write_grade_shard.py --doc <name> --page <n> --score <0-1> [--issues <csv>] [--reason <text>]`
 - `grade-output/scripts/text_mode_grade.py --doc <name>` (docx/xlsx/html only — grades every page in one call, no batching)
 - `grade-output/scripts/merge_grades.py --doc <name> [--attempt <n>]`
 - `setup-environment/scripts/ensure_language.py <image> [--extra <csv>]`
 
 ## File & shard layout
 
-Paths are resolved by `lib/paths.py` against the project root
-(`${CLAUDE_PROJECT_DIR}`), not the plugin's install location:
+Paths are resolved by `lib/paths.py` against the current working
+directory, which is the project root when the orchestrator runs the scripts,
+not the plugin's install location:
 
 ```
 input/<doc>.{pdf,pptx,xlsx,docx,html,png,jpg,jpeg,webp,tiff}  one supported input extension
@@ -153,26 +161,28 @@ runs/state.json                                     per-document queue state
 - **`gates-report.json`** — `gates.py`'s deterministic hard-backpressure result:
   `passed` plus the structural checks (page count, empty pages, dangling asset
   refs, OCR confidence floor, output file exists) that run for every input
-  format, plus three PDF-only structure checks — `furniture_absent`,
-  `toc_headings_match`, `figures_complete` — each carrying its own `pages`
-  list and structured detail. Also a top-level `warnings` list (currently
-  just `large_region_excluded`, a large dropped figure-region candidate) that
+  format, plus `figures_complete`, `furniture_absent` and
+  `toc_headings_match` (the last two only find something on PDFs, the one
+  format whose triage detects furniture and a TOC), each carrying its own
+  `pages` list and structured detail. Also a top-level `warnings` list
+  (`large_region_excluded`, `orphan_figure_caption`, `table_as_figure`) that
   never affects `passed` — see `grade-output/README.md`.
 - **`grade-report.json`** — `merge_grades.py`'s output: `overall_passed`
   (`gates.passed AND rubric_passed`) and `rubric_verdict.per_page`, each entry
   a score (0-1) and any failure-taxonomy tags. Shards come from
-  `write_grade_shard.py` (a `grader` subagent's visual judgment, `pdf`/`pptx`)
+  `write_grade_shard.py` (a `grader` subagent's visual judgment, `pdf`/`pptx`/`image`)
   or `text_mode_grade.py` (a deterministic structural check, `docx`/`xlsx`/
-  `html`) — the shape is identical either way. `pdf`/`pptx`/`image` are the
-  rendered-page formats that go through `write_grade_shard.py`.
+  `html`) — the shape is identical either way.
 - **`runs/state.json`** — one entry per document keyed by stem: `status`
   (`pending`/`retrying`/`passed`/`needs-human`), `attempt`, `input_format`
   (the source file's extension — `pdf`, `pptx`, `docx`, `xlsx`, `html`, or
   `image`; the five image extensions all normalize to `image`, see
   `lib/paths.detect_input_format`), `format`
-  (the output format), `escalated_pages` (page → reason, the retained
-  feedback), `lang_flag`, `tessdata_prefix`. See `runs/state.example.json`
-  for a worked example.
+  (the output format), `escalated_pages` (page → tier, `recheck_images`,
+  reason: the retained feedback), `lang_flag`, `tessdata_prefix`,
+  `warnings`, `reason` and `grade_report` (needs-human), and `attempts[]`
+  (`started_at`, `finished_at`, `status`, `score`, `cost_usd`, escalations).
+  See `tools/queue-state/README.md`.
 
 ## Environment bootstrap
 
@@ -210,10 +220,7 @@ subagent's own Read tool.
 - `--format md-tree` (multi-file bundle split into nested folders/files at a
   heading depth, `--split-depth 2` only; every inline heading gets a stable
   cross-repo anchor — see `tools/assemble-output/README.md`'s "md-tree
-  format" section. This is an `assemble.py`-level format for a downstream
-  consumer; it is not currently one of `/scriptorium:extract`'s own
-  `--format` choices, and `gates.py` has no dedicated `output_file_exists`
-  case for it)
+  format" section)
 - `--format reqif` / `--format reqifz` ([OMG ReqIF](https://www.omg.org/spec/ReqIF/About-ReqIF/)
   — the standard requirements-interchange XML format, one `SPEC-OBJECT` per
   element with a `SPEC-HIERARCHY` mirroring the heading tree; `reqifz`

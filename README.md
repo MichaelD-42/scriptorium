@@ -4,125 +4,17 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.11 | 3.12](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](plugins/scriptorium/pyproject.toml)
 
-A Claude Code plugin that turns your documents into clean, structured text —
-tables, pictures and all — that you can actually read, search, or hand to
-another tool. Feed it a PDF, a Word doc, a PowerPoint deck, an Excel sheet, an
-HTML page, or even a plain scanned image; it reads the thing so you don't have
-to squint at it.
+A Claude Code plugin that extracts documents into structured text — headings,
+tables, figures with descriptions — and checks its own result before handing
+it back. PDF, Word, PowerPoint, Excel, HTML and images go in; Markdown, HTML,
+a split Markdown bundle or ReqIF comes out.
 
-Under the hood it's a small team of AI agents checking each other's work
-(more on that later, for the curious). From where you're standing, it's just:
-drop a file in, get a tidy document out.
+Cheap deterministic extraction runs first. OCR and Claude reading the rendered
+page are used only on the pages that need them. A separate grader agent
+compares every page against the original and sends failing pages back one
+tier up, until the document passes or is handed to a human.
 
-## What goes in, what comes out
-
-| You give it | It gives you back |
-|---|---|
-| PDF, Word (`.docx`), PowerPoint (`.pptx`), Excel (`.xlsx`), HTML, or an image (`.png`/`.jpg`/`.jpeg`/`.webp`/`.tiff`) | Markdown, HTML, an OKF bundle, an md-tree bundle, or ReqIF — your pick |
-
-Not sure which output to pick? A quick cheat sheet:
-
-- **Markdown** (default) — the safe, everyday choice. Readable anywhere, easy
-  to skim, easy to paste into other tools.
-- **HTML** — same content, browser-ready, diagrams render inline.
-- **OKF bundle** — the document split into small linked files instead of one
-  big one. Handy if the doc is huge or you're feeding it into a search/RAG
-  pipeline later.
-- **md-tree bundle** — the document split into one folder per chapter and one
-  file per section, with a stable anchor on each heading. Use
-  `--split-depth 2` (the only depth supported now).
-- **ReqIF** (`.reqif`/`.reqifz`) — the standard requirements-interchange
-  format. Only reach for this if you're feeding a requirements-management tool
-  (DOORS, Polarion, etc.) — otherwise it's more format than you need.
-
-## How to use it
-
-You don't need to memorize commands. Just talk to Claude:
-
-1. Drop your file(s) into the project's `input/` folder.
-2. Tell Claude something like *"extract the text from spec.pdf"* — it'll run
-   the extraction pipeline for you.
-3. Open `output/<your-file>/` and there's your result.
-
-Nothing to install by hand — the plugin sets up its own environment (Python,
-OCR engine, the works) the first time it runs. If you'd rather drive it
-yourself instead of asking Claude, the direct command is
-`/scriptorium:extract` (see [Command reference](#command-reference) below for
-the flags) — but for day-to-day use, just asking Claude is the easier path.
-
-## Reading your results
-
-Once a document finishes, `output/<your-file>/` contains:
-
-- **`<your-file>.md`** (or `.html` / `.reqif`, depending on the format you
-  picked) — your actual document, extracted and cleaned up.
-- **`assets/`** — every picture and diagram it pulled out, referenced from
-  the document above.
-- **`grade-report.json`** — the pipeline's own quality check. You don't need
-  to read this unless something looks off; it's there so you can trust a
-  passing result without re-checking it by hand.
-
-Run the extraction again later and already-finished documents are simply
-skipped — only new or retrying ones get processed.
-
-## "It said `needs-human` — now what?"
-
-Every document is checked by an independent reviewer step before it's handed
-back to you — it's not just trusting the first attempt. Most documents pass
-on the first or second try. Occasionally one doesn't: the pipeline tried its
-best techniques (including having Claude read the page directly, like a
-person would) and still wasn't confident enough to call it done.
-
-That's what `needs-human` means: not "broken," just "this one's worth a
-five-minute look before you trust it." Go to `output/<your-file>/`, check
-`grade-report.json` for which pages it flagged and why, and take a look at
-those pages yourself. Common culprits: a very messy scan, handwriting, or a
-page that's mostly a complex diagram.
-
-## Quick troubleshooting
-
-- **Nothing happened when I asked Claude** — check your file actually landed
-  in `input/` and has a supported extension (see the table above).
-- **It's taking a while on a scanned document** — that's expected. Scanned
-  pages and photos need OCR (and sometimes Claude reading the image directly),
-  which is slower than a document with real, selectable text.
-- **A picture or diagram looks wrong in the output** — flag it; the grading
-  step usually catches this and retries automatically, but it's not
-  infallible.
-- **First run seems slow** — that's one-time environment setup (installing
-  the OCR engine, etc.). Later runs skip straight to extraction.
-
-## Command reference
-
-If you're driving it directly instead of asking Claude in plain English:
-
-```
-/scriptorium:extract [--doc <name>] [--format md|html|okf|md-tree|reqif|reqifz] [--split-depth 2] [--zip]
-```
-
-- `--doc <name>` — process just one file from `input/` instead of everything
-  waiting there.
-- `--format` — pick the output format from the table above (default: `md`).
-- `--zip` — also package the result folder into a single `.zip`.
-
-## How it works (for the curious)
-
-Under the friendly exterior, Scriptorium is a small team of AI agents rather
-than one big model doing everything at once. A document gets triaged
-page-by-page, cheap and reliable extraction runs first, and the expensive
-stuff (OCR, then Claude actually looking at the page) only kicks in where
-it's genuinely needed. An independent grader — never the agent that did the
-extracting, because grading your own homework is a bit of a conflict of
-interest — decides whether the result is good enough or needs another pass.
-
-If you want the full architectural tour — the agent tree, the escalation
-ladder, why pages are processed in isolated batches — see
-[`docs/architecture.md`](docs/architecture.md) for the design and
-[`docs/tooling.md`](docs/tooling.md) for the tools/scripts/schemas that
-implement it. If you're a developer looking to modify this repo, see
-[`AGENTS.md`](AGENTS.md).
-
-## Installing this plugin
+## Install
 
 In a Claude Code session:
 
@@ -131,5 +23,115 @@ In a Claude Code session:
 /plugin install scriptorium@scriptorium
 ```
 
-Pull future updates with `/plugin marketplace update scriptorium`.
+Update with `/plugin marketplace update scriptorium`.
 
+The first run sets up the Python environment with [`uv`](https://docs.astral.sh/uv/)
+(installed if missing). System tools are only needed for some inputs:
+
+| Tool | Needed for | If missing |
+|---|---|---|
+| Tesseract | scanned pages and images (OCR) | install attempted via the package manager when `sudo` needs no password, or brew; otherwise text-layer documents still work |
+| LibreOffice (`soffice`) | `.pptx` (renders slides for grading) | same install attempt; pptx documents fail to render |
+| [ccusage](https://github.com/ryoppippi/ccusage) | cost per document in the run report | cost shows as "–" |
+
+OCR detects the script, not the language: a German or French scan reads as
+English unless you list its language codes (e.g. `deu,fra`) in the plugin's
+**Extra OCR languages** option (`/plugin` → scriptorium → configure).
+
+## Use
+
+Work from the project directory where you want the results. Put your files
+in `input/` there (the first run creates the folder if it is missing), then
+run:
+
+```
+/scriptorium:extract
+```
+
+or ask Claude in plain words ("extract the text from the documents in
+input/"). The command processes every new file in `input/` and stops when the
+queue is empty.
+
+```
+/scriptorium:extract [--doc <name>] [--format md|html|okf|md-tree|reqif|reqifz]
+                     [--split-depth 2] [--max-attempts 3] [--batch-size <n>] [--zip]
+```
+
+| Flag | Effect |
+|---|---|
+| `--doc <name>` | process only this file (name without extension) |
+| `--format` | output format, default `md` (see below) |
+| `--split-depth` | `md-tree` only; `2` is the only accepted value |
+| `--max-attempts` | extraction attempts before a document goes to a human, default 3 |
+| `--batch-size` | cap on pages per subagent; by default batches are sized by work |
+| `--zip` | also write `output/<doc>.zip` for each passed document |
+
+Supported inputs: `.pdf`, `.docx`, `.pptx`, `.xlsx`, `.html`, `.png`, `.jpg`,
+`.jpeg`, `.webp`, `.tiff`. To try it, copy a file from
+[`plugins/scriptorium/examples/`](plugins/scriptorium/examples/) into `input/`.
+
+### Output formats
+
+| Format | Result | Use for |
+|---|---|---|
+| `md` | `output/<doc>/<doc>.md` | default; reading, diffing, pasting into other tools |
+| `html` | `output/<doc>/<doc>.html` | viewing in a browser; diagrams render inline |
+| `okf` | `output/<doc>/index.md` + one file per section | large documents, search/RAG pipelines |
+| `md-tree` | `output/<doc>/index.md` + one folder per chapter, one file per section, stable heading anchors | the same, split by chapter |
+| `reqif`, `reqifz` | `output/<doc>/<doc>.reqif(z)` | requirements tools (DOORS, Polarion) |
+
+## Results
+
+| Path | Contents |
+|---|---|
+| `output/<doc>/` | the extracted document and `assets/` (figures, referenced from it) |
+| `output/<doc>/grade-report.json` | gates and per-page grades with the grader's reasons |
+| `output/report.html` | the run report: status, score, attempts, time and cost per document, page grades, failed gates, warnings |
+| `runs/state.json` | the queue: each document's status, attempts and escalations |
+| `work/<doc>/` | intermediate files (triage, page renders, shards, merged `elements.json`); needed to resume a document or re-render it in another format |
+
+A document ends as `passed` or `needs-human`. Running the command again skips
+finished documents and resumes open ones; a file whose content changed starts
+over from scratch.
+
+`needs-human` means the pipeline ran out of options: a page failed at the
+highest tier, attempts ran out, or a document-level check failed (e.g. page
+furniture leaked into the text, or the headings don't match the printed
+table of contents). The reason is in the run report and in `state.json`; the
+flagged pages and the grader's reasons are in `grade-report.json`. Typical
+causes are poor scans, handwriting and pages that are mostly a complex
+diagram.
+
+Warnings never block a pass but are always reported, for example a large
+region excluded from the text that might have been a figure.
+
+## How it works
+
+`/scriptorium:extract` is the orchestrator. It runs deterministic scripts for
+triage, text and image extraction, assembly and checks, and spawns two
+subagent roles in parallel over page batches: `extractor` (OCR, vision, figure
+descriptions) and `grader` (independent check against the rendered page). A
+failing page moves up one tier: a text-layer page to vision, a scanned page
+from OCR to vision. The orchestrator
+reads only compact summaries, never page content, so long documents don't
+exhaust its context.
+
+- [`docs/architecture.md`](docs/architecture.md) — the loop, agent tree,
+  escalation ladder, why per-page shards
+- [`docs/tooling.md`](docs/tooling.md) — every script, argument and file schema
+- [`plugins/scriptorium/README.md`](plugins/scriptorium/README.md) — changelog
+
+## For agents
+
+- **Running the pipeline**: follow
+  [`plugins/scriptorium/commands/extract.md`](plugins/scriptorium/commands/extract.md),
+  the orchestrator's step-by-step spec. Read script stdout, `runs/state.json`
+  and `grade-report.json` summaries only; never page images or
+  `elements.json`.
+- **Changing this repo**: read [`AGENTS.md`](AGENTS.md) first — setup, tests
+  (`cd plugins/scriptorium && uv run pytest`) and the invariants that break
+  silently.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
