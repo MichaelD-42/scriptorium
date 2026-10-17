@@ -131,11 +131,17 @@ def cmd_init(args) -> None:
         if ext not in paths.SUPPORTED_INPUT_EXTS:
             continue
         doc = path.stem
+        if doc in (".", ".."):  # work/<doc> would be work/ or the project root, and init deletes it
+            print(f"warning: {path} skipped; not a usable document name", file=sys.stderr)
+            continue
         chosen = paths.input_file(doc)
-        if chosen != path:  # the scripts read paths.input_file's pick, so the queue must too
+        # The scripts read paths.input_file's pick, so the queue must too;
+        # samefile, not ==, since macOS finds Report.pdf for Report.PDF.
+        if chosen is None or not chosen.samefile(path):
             print(f"warning: {path} skipped; the scripts read {chosen} for '{doc}'", file=sys.stderr)
             continue
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        with path.open("rb") as f:
+            digest = hashlib.file_digest(f, "sha256").hexdigest()
         entry = state["docs"].get(doc)
         if entry and entry.get("input_sha256", digest) == digest:
             entry["input_sha256"] = digest  # an entry from before 0.5.1 keeps its status

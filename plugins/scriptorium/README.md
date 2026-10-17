@@ -19,6 +19,15 @@ PDF, PowerPoint (`.pptx`), Word (`.docx`), Excel (`.xlsx`), HTML (`.html`),
 and standalone images (`.png`/`.jpg`/`.jpeg`/`.webp`/`.tiff`) are
 implemented today.
 
+## 0.5.2
+
+- **Fix (data loss)**: an input named `...pdf` or `..pdf` made
+  `state.py init` delete the project folder or all of `work/` and
+  `output/`. Such names are now skipped with a warning.
+- **Fix (macOS)**: an input with an upper-case extension (`Report.PDF`)
+  is queued again; 0.5.1 skipped it.
+- `init` hashes inputs in chunks instead of reading each file into memory.
+
 ## 0.5.1
 
 - **Run report**: when the queue is empty, `output/report.html` sums up the

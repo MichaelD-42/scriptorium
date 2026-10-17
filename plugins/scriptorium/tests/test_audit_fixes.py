@@ -3,6 +3,7 @@
 import json
 import os
 import stat
+from pathlib import Path
 
 from bs4 import BeautifulSoup
 from docx import Document
@@ -153,3 +154,36 @@ class TestPptxConversion:
         assert out == paths.work_dir("deck") / "deck.pdf"
         assert out.read_bytes() == b"%PDF-1.4"
         assert sorted(p.name for p in paths.work_dir("deck").iterdir()) == ["deck.pdf"]
+
+
+class TestQueueInitSafety:
+    """0.5.2: findings from the 0.5.1 review."""
+
+    def test_a_dot_name_input_deletes_nothing(self, tmp_project):
+        (tmp_project / "input" / "...pdf").write_bytes(b"%PDF-1.4")
+        (tmp_project / "input" / "..pdf").write_bytes(b"%PDF-1.4")
+        (tmp_project / "work" / "other").mkdir()
+        (tmp_project / "output" / "other").mkdir()
+        (tmp_project / "keep.txt").write_text("x")
+
+        result = run_script("queue-state/scripts/state.py", "init", cwd=tmp_project)
+
+        assert result.returncode == 0, result.stderr
+        assert (tmp_project / "keep.txt").exists()
+        assert (tmp_project / "work" / "other").exists()
+        assert (tmp_project / "output" / "other").exists()
+        assert json.loads((tmp_project / "runs" / "state.json").read_text())["docs"] == {}
+        assert "not a usable document name" in result.stderr
+
+    def test_the_scripts_spelling_of_the_same_file_is_queued(self, tmp_project, monkeypatch):
+        # A case-insensitive file system (macOS) finds input/Report.pdf for
+        # input/Report.PDF: another spelling of the same file, not another file.
+        state = load_script("queue-state/scripts/state.py", "state_052")
+        (tmp_project / "input" / "Report.PDF").write_bytes(b"%PDF-1.4")
+        monkeypatch.setattr(state.paths, "input_file", lambda doc: Path("input") / ".." / "input" / f"{doc}.PDF")
+        monkeypatch.setattr(state.paths, "detect_input_format", lambda doc: "pdf")
+        monkeypatch.setattr("sys.argv", ["state.py", "init"])
+
+        state.main()
+
+        assert list(json.loads((tmp_project / "runs" / "state.json").read_text())["docs"]) == ["Report"]
