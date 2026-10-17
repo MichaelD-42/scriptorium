@@ -36,7 +36,9 @@ Run each as `uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_RO
 
 The rubric is `${CLAUDE_PLUGIN_ROOT}/tools/grade-output/rubric.md`; read it
 before grading. `tools/grade-output/README.md` explains the gates and
-their warnings if you need more than step 2 below.
+their warnings if you need more than step 2 below. The plugin root is
+`${CLAUDE_PLUGIN_ROOT}`. `rubric.md` and the README write it as a variable
+that Bash doesn't have; put this path in its place.
 
 ## Your job
 

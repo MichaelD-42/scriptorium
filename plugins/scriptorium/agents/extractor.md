@@ -34,7 +34,9 @@ its `reason`: use it to know what the previous extraction got wrong.
 
 Run each as `uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/tools/<path>" <args>`.
 Each tool's `README.md` next to its `scripts/` folder has the details;
-read one only when a step below needs more than the line here.
+read one only when a step below needs more than the line here. The plugin
+root is `${CLAUDE_PLUGIN_ROOT}`. A README writes it as a variable that
+Bash doesn't have; put this path in its place.
 
 - `render-pages/scripts/render.py --doc <doc> [--pages 1,3]` — page PNGs
   to `work/<doc>/pages/page{N}.png`; skips pages already rendered.
