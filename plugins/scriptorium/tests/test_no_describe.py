@@ -5,7 +5,7 @@ a description."""
 import json
 import shutil
 
-from conftest import EXAMPLES_ROOT, run_script
+from conftest import EXAMPLES_ROOT, gates_report, run_script
 
 import paths
 
@@ -16,8 +16,8 @@ def _ok(*args, cwd):
     return result.stdout
 
 
-def _gate(stdout, name):
-    return next(c for c in json.loads(stdout)["checks"] if c["name"] == name)
+def _gate(report, name):
+    return next(c for c in report["checks"] if c["name"] == name)
 
 
 def test_furniture_sample_passes_the_gates_with_no_agent(tmp_project):
@@ -31,9 +31,12 @@ def test_furniture_sample_passes_the_gates_with_no_agent(tmp_project):
     _ok("assemble-output/scripts/merge.py", "--doc", "f", cwd=tmp_project)
     _ok("assemble-output/scripts/assemble.py", "--doc", "f", "--format", "md", cwd=tmp_project)
 
-    strict = run_script("grade-output/scripts/gates.py", "--doc", "f", cwd=tmp_project).stdout
+    strict = gates_report("f", cwd=tmp_project)
     assert not _gate(strict, "figures_complete")["passed"]
+    # stdout is the orchestrator's summary: failed checks and their pages only.
+    summary = json.loads(_ok("grade-output/scripts/gates.py", "--doc", "f", cwd=tmp_project))
+    assert summary["failed"] == {"figures_complete": _gate(strict, "figures_complete")["pages"]}
 
-    out = _ok("grade-output/scripts/gates.py", "--doc", "f", "--no-describe", cwd=tmp_project)
+    out = gates_report("f", "--no-describe", cwd=tmp_project)
     assert _gate(out, "figures_complete")["detail"] == "skipped: --no-describe"
-    assert json.loads(out)["passed"], out
+    assert out["passed"], out

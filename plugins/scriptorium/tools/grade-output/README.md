@@ -48,7 +48,9 @@ uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
   "${CLAUDE_PLUGIN_ROOT}/tools/grade-output/scripts/merge_grades.py" --doc <doc-name> --attempt <n>
 ```
 
-`gates.py` writes `work/<doc>/gates-report.json`. `merge_grades.py` writes
+`gates.py` writes `work/<doc>/gates-report.json` and prints only a summary
+(`passed`, each failed check with its pages, the warning count), so the
+orchestrator never reads the full report. `merge_grades.py` writes
 the final `output/<doc>/grade-report.json` — read that one file for the
 pass/fail decision. It exits 1, writing nothing, when a page in
 `elements.json` has no grade shard.

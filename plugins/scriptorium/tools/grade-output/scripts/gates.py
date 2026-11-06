@@ -708,7 +708,13 @@ def main() -> None:
     out_path = paths.gates_report_json(args.doc)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(result, indent=2), encoding="utf-8", newline="")
-    print(json.dumps(result, indent=2))
+    # Context-rot rule: a summary for the orchestrator; merge_grades.py reads the full report.
+    print(json.dumps({
+        "doc": args.doc,
+        "passed": result["passed"],
+        "failed": {c["name"]: c.get("pages", []) for c in checks if not c["passed"]},
+        "warnings": len(warnings),
+    }, indent=2))
 
 
 if __name__ == "__main__":

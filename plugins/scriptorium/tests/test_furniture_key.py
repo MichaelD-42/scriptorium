@@ -17,7 +17,7 @@ from pathlib import Path
 import fitz  # PyMuPDF
 import furniture as furniture_lib
 import paths
-from conftest import load_script, run_script
+from conftest import gates_report, load_script, run_script
 
 gates = load_script("grade-output/scripts/gates.py", "gates_module_furniture_key")
 
@@ -135,16 +135,7 @@ class TestSpacedFooterEndToEnd:
             "md",
             cwd=tmp_project,
         )
-        report = json.loads(
-            _run_ok(
-                "grade-output/scripts/gates.py",
-                "--doc",
-                DOC,
-                "--format",
-                "md",
-                cwd=tmp_project,
-            )
-        )
+        report = gates_report(DOC, "--format", "md", cwd=tmp_project)
         furniture_check = next(
             c for c in report["checks"] if c["name"] == "furniture_absent"
         )
