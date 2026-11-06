@@ -25,6 +25,9 @@ import paths  # noqa: E402
 
 MIN_UNIT_LEN = 15  # shorter fragments are too generic to reliably match/mismatch
 GENERIC_CAPTIONS = {"image", "figure", "picture", ""}
+# A source word for the coverage check: letters only, 4+ long (gates.py's
+# text_layer_coverage rule).
+_WORD = re.compile(r"[^\W\d_]{4,}")
 
 
 def normalize(text: str) -> str:
@@ -41,8 +44,16 @@ def output_page_text(page: dict) -> str:
     return normalize(" ".join(parts))
 
 
-def write_grade_shard(doc: str, page_number: int, issues: list[str]) -> None:
-    shard = grades.write_shard(doc, page_number, issues)
+def missing_words(source_text: str, page: dict) -> list[str]:
+    """Source words the page's output lacks. The source text is read
+    straight from the file, not through the extractor's block walk, so a
+    walk that skips content (or glues words) cannot hide it from this check."""
+    return sorted(set(_WORD.findall(source_text.lower())) - set(_WORD.findall(output_page_text(page))))
+
+
+def write_grade_shard(doc: str, page_number: int, issues: list[str], missing: list[str] | None = None) -> None:
+    reason = f"source words not in the output: {', '.join(missing[:8])}" if missing else None
+    shard = grades.write_shard(doc, page_number, issues, reason)
     print(f"page {page_number}: score={shard['score']} issues={issues}")
 
 
@@ -84,11 +95,7 @@ def docx_check_table_corruption(blocks: list, output_elements: list) -> bool:
 
 
 def docx_check_images(blocks: list, output_elements: list, document) -> tuple[bool, bool]:
-    from docx.text.paragraph import Paragraph
-
-    source_image_count = sum(
-        len(docx_pages.paragraph_images(b, document)) for b in blocks if isinstance(b, Paragraph)
-    )
+    source_image_count = sum(len(docx_pages.block_images(b, document)) for b in blocks)
     output_images = [el for el in output_elements if el["type"] == "image"]
     missing_image = source_image_count > len(output_images)
     bad_caption = any((el.get("caption") or "").strip().lower() in GENERIC_CAPTIONS for el in output_images)
@@ -121,7 +128,8 @@ def grade_docx_page(blocks: list, page: dict, document) -> list[str]:
     output_text = output_page_text(page)
 
     issues = []
-    if docx_check_dropped_text(blocks, output_text):
+    source_text = " ".join(docx_pages.block_source_text(b) for b in blocks)
+    if docx_check_dropped_text(blocks, output_text) or missing_words(source_text, page):
         issues.append("dropped_text")
     if docx_check_table_corruption(blocks, output_elements):
         issues.append("table_corruption")
@@ -145,7 +153,8 @@ def grade_docx(doc: str, docx_path: Path, doc_data: dict) -> None:
     for page_number, blocks in enumerate(source_pages, start=1):
         page = doc_data["pages"].get(page_number, {"elements": []})
         issues = grade_docx_page(blocks, page, document)
-        write_grade_shard(doc, page_number, issues)
+        source_text = " ".join(docx_pages.block_source_text(b) for b in blocks)
+        write_grade_shard(doc, page_number, issues, missing_words(source_text, page))
 
 
 # --- xlsx -------------------------------------------------------------------
@@ -228,7 +237,7 @@ def html_check_dropped_text(blocks: list, output_text: str) -> bool:
                     if len(text) >= MIN_UNIT_LEN and normalize(text) not in output_text:
                         return True
         else:
-            text = block.get_text(strip=True)
+            text = html_pages.block_text(block)
             if len(text) >= MIN_UNIT_LEN and normalize(text) not in output_text:
                 return True
     return False
@@ -262,7 +271,7 @@ def html_check_wrong_heading_level(blocks: list, output_elements: list) -> bool:
     expected = []
     for block in blocks:
         level = html_pages.heading_level(block)
-        text = block.get_text(strip=True)
+        text = html_pages.block_text(block)
         if level is not None and text:
             expected.append((normalize(text), min(level, 3)))
     return headings_missing(expected, output_elements)
@@ -273,7 +282,7 @@ def grade_html_page(blocks: list, page: dict, soup, html_dir: Path) -> list[str]
     output_text = output_page_text(page)
 
     issues = []
-    if html_check_dropped_text(blocks, output_text):
+    if html_check_dropped_text(blocks, output_text) or missing_words(html_pages.visible_text(soup), page):
         issues.append("dropped_text")
     if html_check_table_corruption(blocks, output_elements):
         issues.append("table_corruption")
@@ -293,7 +302,7 @@ def grade_html(doc: str, html_path: Path, doc_data: dict) -> None:
     blocks = list(html_pages.iter_block_items(soup))
     page = doc_data["pages"].get(1, {"elements": []})
     issues = grade_html_page(blocks, page, soup, html_path.parent)
-    write_grade_shard(doc, 1, issues)
+    write_grade_shard(doc, 1, issues, missing_words(html_pages.visible_text(soup), page))
 
 
 # --- entry point --------------------------------------------------------

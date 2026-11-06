@@ -49,7 +49,7 @@ def main() -> None:
 
     page_numbers = [int(p) for p in args.pages.split(",") if p.strip()]
     xlsx_path = paths.input_file(args.doc)
-    if xlsx_path is None or xlsx_path.suffix != ".xlsx":
+    if xlsx_path is None or paths.detect_input_format(args.doc) != "xlsx":
         print(f"error: input/{args.doc}.xlsx not found", file=sys.stderr)
         sys.exit(1)
 

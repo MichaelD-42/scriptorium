@@ -19,6 +19,38 @@ PDF, PowerPoint (`.pptx`), Word (`.docx`), Excel (`.xlsx`), HTML (`.html`),
 and standalone images (`.png`/`.jpg`/`.jpeg`/`.webp`/`.tiff`) are
 implemented today.
 
+## 0.7.1
+
+Fixes from a repository audit.
+
+- **HTML text**: inline markup no longer glues words together
+  (`Hello <b>world</b>` came out as `Helloworld`), a `<br>` separates the
+  words around it, and text held directly in a `<div>`, `<span>` or the
+  `<body>` is extracted instead of dropped.
+- **Text-mode grader** (docx, html): `dropped_text` now also fires when a
+  word of the source is missing from the output, with the words read
+  straight from the file rather than through the extractor's own block
+  walk, so it catches what that walk skips. The shard's `reason` names the
+  missing words. A docx whose text boxes were silently lost now goes to a
+  human instead of passing.
+- **docx images in tables** are extracted and counted (they were dropped
+  and the grader did not see them either).
+- **pptx groups**: pictures and text inside a group shape, and a filled
+  picture placeholder, are extracted. A grouped picture used to be tagged
+  `missing_image` on every attempt and end as needs-human.
+- **Upper-case extensions** for docx, pptx, xlsx and html (`Report.DOCX`)
+  are triaged and extracted; triage rejected them as unreadable.
+- **`describe_image.py --data-table`** refuses anything but a JSON array
+  of rows; a malformed table crashed `assemble.py` for the whole document.
+- **Image-only retries** keep the page's body: an escalation for a figure
+  problem (`missing_image`, `bad_caption`, `bad_mermaid`,
+  `figures_complete`) records `body: false`, and the extractor redoes only
+  the images instead of transcribing an `ocr`/`vision` page again.
+- **HTML output** loads a pinned Mermaid (10.9.1) instead of the latest
+  10.x.
+- **Internal**: the body-size measure lives once, in `lib/fonts.py`
+  (pdf-triage and extract-text each had a copy).
+
 ## 0.7.0
 
 - **Graders tag, scripts score**: `write_grade_shard.py` no longer takes

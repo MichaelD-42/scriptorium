@@ -18,7 +18,12 @@ that page:
 
 1. **`dropped_text`** — a source paragraph/cell of meaningful length
    (≥15 chars) whose normalized text doesn't appear anywhere in that
-   page's assembled output.
+   page's assembled output; or (docx, html) a source word (letters only,
+   4+ long) missing from the output. The words are read straight from the
+   file (every `w:p` of the page's blocks, text boxes and table cells
+   included; every visible HTML text node), not through the extractor's
+   block walk, so a walk that skips or glues text is caught. The shard's
+   `reason` names up to eight missing words.
 2. **`table_corruption`** — docx: a source table's row/column count doesn't
    match the corresponding output table element (or the table is missing
    entirely). xlsx: the sheet's used-range dimensions

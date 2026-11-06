@@ -31,7 +31,7 @@ batches can't race on the same shard file.
 - Every other non-empty paragraph becomes a `paragraph` element.
 - **Tables** become `table` elements (row-major list of lists, cell text
   as-is, via `cell.text` which already joins a cell's own paragraphs).
-- **Inline images** (`lib.docx_pages.paragraph_images`) are saved to
+- **Images** in a paragraph or a table cell (`lib.docx_pages.block_images`) are saved to
   `output/<doc>/assets/page{N}_bitmap{idx}.<ext>` and become `image`
   elements with an empty caption — same contract as `extract-images`/
   `pptx-extract`, so the same `describe_image.py` (its `--caption` alias —

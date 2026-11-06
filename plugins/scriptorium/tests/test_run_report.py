@@ -91,7 +91,7 @@ class TestAttemptTiming:
         first = _state(tmp_project)["a"]["attempts"][0]
         assert first["status"] == "retrying"
         assert first["escalated_pages"] == {
-            "1": {"tier": "text", "recheck_images": True, "reason": "logo missing"}
+            "1": {"tier": "text", "recheck_images": True, "body": False, "reason": "logo missing"}
         }
 
         run_script(

@@ -63,6 +63,7 @@ class TestDecide:
             "3": {
                 "tier": "vision",
                 "recheck_images": False,
+                "body": True,
                 "reason": "second paragraph missing",
             }
         }
@@ -117,6 +118,7 @@ class TestDecide:
         assert out["escalated_pages"]["1"] == {
             "tier": "text",
             "recheck_images": True,
+            "body": False,
             "reason": "missing_image",
         }
 
@@ -137,6 +139,7 @@ class TestDecide:
             "2": {
                 "tier": "ocr",
                 "recheck_images": True,
+                "body": False,
                 "reason": "page 2: image without text",
             }
         }
@@ -196,6 +199,7 @@ class TestDecide:
             "2": {
                 "tier": "vision",
                 "recheck_images": True,
+                "body": True,
                 "reason": "image without text; caption missing",
             }
         }
@@ -205,7 +209,9 @@ class TestDecide:
                  "detail": "page 2: 9 of 80 text-layer words missing, e.g. firmware"}
         out = _decide(_report(checks=[check]), {1: "text", 2: "text"})
         assert out["status"] == "retrying"
-        assert out["escalated_pages"] == {"2": {"tier": "vision", "recheck_images": False, "reason": check["detail"]}}
+        assert out["escalated_pages"] == {
+            "2": {"tier": "vision", "recheck_images": False, "body": True, "reason": check["detail"]}
+        }
 
     def test_low_ocr_confidence_goes_to_vision(self):
         check = {
@@ -236,7 +242,7 @@ class TestDecide:
         check = {"name": "text_layer_coverage", "passed": False, "pages": [3], "detail": "words missing"}
         out = _decide(_report([_page(3, ["bad_caption"], "caption wrong")], checks=[check]), {3: "text"})
         assert out["escalated_pages"] == {
-            "3": {"tier": "vision", "recheck_images": True, "reason": "words missing; caption wrong"}
+            "3": {"tier": "vision", "recheck_images": True, "body": True, "reason": "words missing; caption wrong"}
         }
 
 

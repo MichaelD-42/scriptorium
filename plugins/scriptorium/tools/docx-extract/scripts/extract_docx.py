@@ -29,18 +29,16 @@ def extract_page(blocks: list, page_number: int, document, assets_dir: Path) -> 
     for block in blocks:
         if isinstance(block, Table):
             body_elements.append({"type": "table", "rows": table_rows(block)})
-            continue
+        else:
+            level = docx_pages.heading_level(block)
+            text = block.text.strip()
+            if level is not None:
+                if text:
+                    body_elements.append({"type": "heading", "level": min(level, 3), "text": text})
+            elif text:
+                body_elements.append({"type": "paragraph", "text": text})
 
-        # block is a Paragraph
-        level = docx_pages.heading_level(block)
-        text = block.text.strip()
-        if level is not None:
-            if text:
-                body_elements.append({"type": "heading", "level": min(level, 3), "text": text})
-        elif text:
-            body_elements.append({"type": "paragraph", "text": text})
-
-        for image_part in docx_pages.paragraph_images(block, document):
+        for image_part in docx_pages.block_images(block, document):
             bitmap_idx += 1
             ext = Path(image_part.partname).suffix.lstrip(".") or "png"
             out_name = f"page{page_number}_bitmap{bitmap_idx}.{ext}"
@@ -58,7 +56,7 @@ def main() -> None:
 
     page_numbers = [int(p) for p in args.pages.split(",") if p.strip()]
     docx_path = paths.input_file(args.doc)
-    if docx_path is None or docx_path.suffix != ".docx":
+    if docx_path is None or paths.detect_input_format(args.doc) != "docx":
         print(f"error: input/{args.doc}.docx not found", file=sys.stderr)
         sys.exit(1)
 

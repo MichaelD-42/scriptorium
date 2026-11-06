@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 import elements as elements_lib  # noqa: E402
 import figures as figures_lib  # noqa: E402
+import fonts  # noqa: E402
 import furniture as furniture_lib  # noqa: E402
 import glyphs  # noqa: E402
 import paths  # noqa: E402
@@ -1305,29 +1306,6 @@ def extract_page_text_blocks(page, body_size: float | None) -> tuple[list[dict],
     return text_blocks, resolved_body_size
 
 
-def resolve_document_body_size(fitz_doc) -> float:
-    """Document-wide, character-weighted median body text size -- the same
-    computation as `pdf-triage`'s `document_body_size()`, duplicated here
-    (rather than imported cross-tool) so this script stays runnable
-    standalone without triage having run, same convention as
-    `load_furniture`/`load_page_roles`/`load_toc_entries`. Only used
-    to size the fallback (no-TOC) heading ranking document-wide when
-    `--body-size` wasn't passed in; per-page extraction keeps its own
-    existing sparser per-page fallback in `extract_page_text_blocks`,
-    unchanged."""
-    weighted_sizes = []
-    for page in fitz_doc:
-        for block in page.get_text("dict").get("blocks", []):
-            if block.get("type") != 0:
-                continue
-            for line in block.get("lines", []):
-                for span in line.get("spans", []):
-                    text_len = len(span["text"].strip())
-                    if text_len:
-                        weighted_sizes.extend([span["size"]] * text_len)
-    return statistics.median(weighted_sizes) if weighted_sizes else 0.0
-
-
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--doc", required=True)
@@ -1359,7 +1337,7 @@ def main() -> None:
     heading_size_ranks: dict[float, int] = {}
     ranking_body_size = args.body_size or 0.0
     if not toc_lookup:
-        ranking_body_size = args.body_size if args.body_size else resolve_document_body_size(fitz_doc)
+        ranking_body_size = args.body_size if args.body_size else fonts.document_body_size(fitz_doc)
         heading_size_ranks = document_heading_size_ranks(fitz_doc, ranking_body_size, furniture_masked, furniture)
 
     # Task A4b: list-marker x-position levels are document-wide too, for the

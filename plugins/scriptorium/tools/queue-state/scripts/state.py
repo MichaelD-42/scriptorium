@@ -68,13 +68,15 @@ def decide(entry: dict, report: dict, tiers: dict[int, str], max_attempts: int) 
     human: list[str] = []
     unretryable: list[str] = []
 
-    def escalate(page: int, tier: str, recheck: bool, reason: str) -> None:
+    def escalate(page: int, tier: str, recheck: bool, reason: str, body: bool = True) -> None:
+        """`body`: the page's body is redone at `tier`; False when only its images are."""
         old = escalations.get(page)
         if old:
             tier = max(tier, old["tier"], key=TIER_ORDER.index)  # never back down to a tier that failed
             reason = f"{old['reason']}; {reason}"
             recheck = recheck or old["recheck_images"]
-        escalations[page] = {"tier": tier, "recheck_images": recheck, "reason": reason}
+            body = body or old["body"]
+        escalations[page] = {"tier": tier, "recheck_images": recheck, "body": body, "reason": reason}
 
     for check in report["gates"]["checks"]:
         if check["passed"]:
@@ -83,7 +85,7 @@ def decide(entry: dict, report: dict, tiers: dict[int, str], max_attempts: int) 
             human.append(f"{check['name']}: {check['detail']}")
         elif check["name"] == "figures_complete":
             for page in check.get("pages", []):
-                escalate(page, tiers.get(page, "text"), True, check["detail"])
+                escalate(page, tiers.get(page, "text"), True, check["detail"], body=False)
         elif check["name"] in ("ocr_confidence_floor", "text_layer_coverage") and check.get("pages"):
             for page in check["pages"]:
                 escalate(page, "vision", False, check["detail"])
@@ -107,7 +109,7 @@ def decide(entry: dict, report: dict, tiers: dict[int, str], max_attempts: int) 
             else:
                 escalate(page, next_tier, bool(issues & grades.IMAGE_ISSUES), reason)
         else:
-            escalate(page, tier, True, reason)
+            escalate(page, tier, True, reason, body=False)
 
     human += unretryable  # a retry re-extracts pages; it cannot fix a document-level gate
     if human:

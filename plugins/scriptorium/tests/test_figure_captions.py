@@ -195,6 +195,24 @@ class TestDescribeImageCli:
             describe_image.main()
         assert exc_info.value.code == 1
 
+    @pytest.mark.parametrize("table", ['{"Q1": 10}', "[1, 2]", '[["a", "b"], "cd"]'])
+    def test_data_table_that_is_not_rows_exits_with_error(self, tmp_project, monkeypatch, table):
+        """assemble.py renders data_table row by row; anything else would crash it."""
+        shard_path = paths.shard_path("doc", 1, "image")
+        elements_lib.write_shard(shard_path, 1, [{"type": "image", "asset": "assets/a.png", "bbox": [0, 0, 1, 1]}])
+
+        monkeypatch.setattr(
+            "sys.argv",
+            [
+                "describe_image.py", "--doc", "doc", "--page", "1", "--asset", "assets/a.png",
+                "--description", "x", "--data-table", table,
+            ],
+        )
+        with pytest.raises(SystemExit) as exc_info:
+            describe_image.main()
+        assert exc_info.value.code == 1
+        assert "data_table" not in json.loads(shard_path.read_text())["elements"][0]
+
     def test_writes_mermaid_verbatim(self, tmp_project, monkeypatch):
         shard_path = paths.shard_path("doc", 1, "image")
         elements_lib.write_shard(shard_path, 1, [{"type": "image", "asset": "assets/a.png", "bbox": [0, 0, 1, 1]}])

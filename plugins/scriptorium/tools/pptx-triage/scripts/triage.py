@@ -10,23 +10,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 import paths  # noqa: E402
+import pptx_shapes  # noqa: E402
 import preflight  # noqa: E402
 
 from pptx import Presentation
-from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 
 def slide_has_visual(slide) -> bool:
-    for shape in slide.shapes:
-        if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
-            return True
-        if shape.has_chart:
-            return True
-    return False
+    return any(pptx_shapes.is_picture(s) or s.has_chart for s in pptx_shapes.iter_shapes(slide.shapes))
 
 
 def classify_slide(slide, page_number: int) -> dict:
-    image_count = sum(1 for shape in slide.shapes if shape.shape_type == MSO_SHAPE_TYPE.PICTURE)
+    image_count = sum(1 for shape in pptx_shapes.iter_shapes(slide.shapes) if pptx_shapes.is_picture(shape))
     return {
         "page_number": page_number,
         "tier": "text",
@@ -42,7 +37,7 @@ def main() -> None:
     args = parser.parse_args()
 
     pptx_path = paths.input_file(args.doc)
-    if pptx_path is None or pptx_path.suffix != ".pptx":
+    if pptx_path is None or paths.detect_input_format(args.doc) != "pptx":
         print(f"error: input/{args.doc}.pptx not found", file=sys.stderr)
         sys.exit(1)
 

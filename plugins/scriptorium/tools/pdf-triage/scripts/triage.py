@@ -6,12 +6,12 @@ import argparse
 import itertools
 import json
 import math
-import statistics
 import sys
 import unicodedata
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+import fonts  # noqa: E402
 import furniture as furniture_lib  # noqa: E402
 import paths  # noqa: E402
 import toc as toc_lib  # noqa: E402
@@ -78,26 +78,6 @@ FRAME_MIN_PAGE_COUNT = 3
 # (_find_frame_tables), so frame_tables alone was never enough -- but a
 # genuinely large, one-off real diagram that happens to be large is NOT a
 # frame_drawing, because it doesn't repeat.
-
-
-def document_body_size(document) -> float:
-    """The document's dominant running-text font size, character-weighted
-    across every page. Computed once, document-wide, because a per-page
-    median is unstable on sparse pages (a page with only a heading and one
-    caption line has no reliable "body" sample of its own) — extract_text.py
-    uses this as a stable reference for classifying headings by relative
-    size instead of recomputing it per page."""
-    weighted_sizes = []
-    for page in document:
-        for block in page.get_text("dict").get("blocks", []):
-            if block.get("type") != 0:
-                continue
-            for line in block.get("lines", []):
-                for span in line.get("spans", []):
-                    text_len = len(span["text"].strip())
-                    if text_len:
-                        weighted_sizes.extend([span["size"]] * text_len)
-    return statistics.median(weighted_sizes) if weighted_sizes else 0.0
 
 
 def _image_area_fraction(page) -> float:
@@ -539,7 +519,7 @@ def main() -> None:
     for i, page in enumerate(document, start=1):
         classification = classify_page(page)
         pages.append({"page_number": i, **classification})
-    body_size = document_body_size(document)
+    body_size = fonts.document_body_size(document)
     toc_entries, toc_pages, toc_unparsed = toc_lib.detect_toc_with_unparsed(document)
     body_pages = {p["page_number"] for p in pages} - set(toc_pages)
     furniture, furniture_text = detect_furniture(document, pdf_path, body_pages)

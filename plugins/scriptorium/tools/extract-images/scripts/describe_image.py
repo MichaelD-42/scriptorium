@@ -128,6 +128,10 @@ def main() -> None:
         except json.JSONDecodeError as exc:
             print(f"error: --data-table is not valid JSON: {exc}", file=sys.stderr)
             sys.exit(1)
+        if not (isinstance(parsed_table, list) and all(isinstance(r, list) for r in parsed_table)):
+            # assemble.py renders it row by row; anything else would crash the whole document there.
+            print("error: --data-table must be a JSON array of rows, e.g. '[[\"Q1\", 10], [\"Q2\", 14]]'", file=sys.stderr)
+            sys.exit(1)
 
     if args.mermaid is not None:
         error = mermaid_image.validate_diagram_source(args.mermaid)

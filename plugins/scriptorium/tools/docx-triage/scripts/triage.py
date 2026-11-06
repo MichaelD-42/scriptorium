@@ -14,14 +14,11 @@ import preflight  # noqa: E402
 
 from docx import Document
 from docx.table import Table
-from docx.text.paragraph import Paragraph
 
 
 def classify_page(blocks: list, page_number: int, document) -> dict:
     has_table = any(isinstance(b, Table) for b in blocks)
-    image_count = sum(
-        len(docx_pages.paragraph_images(b, document)) for b in blocks if isinstance(b, Paragraph)
-    )
+    image_count = sum(len(docx_pages.block_images(b, document)) for b in blocks)
     return {
         "page_number": page_number,
         "tier": "text",
@@ -37,7 +34,7 @@ def main() -> None:
     args = parser.parse_args()
 
     docx_path = paths.input_file(args.doc)
-    if docx_path is None or docx_path.suffix != ".docx":
+    if docx_path is None or paths.detect_input_format(args.doc) != "docx":
         print(f"error: input/{args.doc}.docx not found", file=sys.stderr)
         sys.exit(1)
 

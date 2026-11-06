@@ -15,30 +15,58 @@ from urllib.parse import unquote, urlsplit
 
 from bs4 import BeautifulSoup
 from PIL import Image
-from bs4.element import Tag
+from bs4.element import NavigableString, Tag
 
 BLOCK_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6", "p", "table", "pre", "blockquote", "li"}
 SKIP_TAGS = {"script", "style", "head", "template"}
 
 
 def parse(html_path: Path) -> BeautifulSoup:
-    return BeautifulSoup(html_path.read_text(encoding="utf-8", errors="replace"), "html.parser")
+    soup = BeautifulSoup(html_path.read_text(encoding="utf-8", errors="replace"), "html.parser")
+    for br in soup.find_all("br"):
+        br.replace_with("\n")  # a line break separates words; block_text turns it into a space
+    return soup
+
+
+def _texts(tag: Tag) -> list[str]:
+    """Every text node under `tag` outside SKIP_TAGS, comments left out."""
+    return [
+        s for s in tag.find_all(string=True)
+        if type(s) is NavigableString and not any(p.name in SKIP_TAGS for p in s.parents)
+    ]
+
+
+def block_text(tag: Tag) -> str:
+    """A tag's text with its whitespace collapsed. get_text(strip=True)
+    would glue "Hello <b>world</b>" into "Helloworld"."""
+    return " ".join("".join(_texts(tag)).split())
 
 
 def iter_block_items(root: Tag):
     """Yield block-level tags (see BLOCK_TAGS) in document order. Does not
     recurse into a yielded block (its own get_text() already covers nested
     inline content); does recurse into plain containers so blocks nested
-    inside divs/sections/lists are still found. `<img>` is not a block tag
-    here — images are collected independently via saveable_images(),
-    mirroring the pipeline's separate body-shard/image-shard split."""
+    inside divs/sections/lists are still found. A container with text of
+    its own and no block inside (`<div>Notice</div>`) is yielded as a block
+    too. `<img>` is not a block tag here — images are collected
+    independently via saveable_images(), mirroring the pipeline's separate
+    body-shard/image-shard split."""
     for child in root.find_all(recursive=False):
         if not isinstance(child, Tag) or child.name in SKIP_TAGS:
             continue
-        if child.name in BLOCK_TAGS:
+        own_text = any(type(c) is NavigableString and c.strip() for c in child.children)
+        if child.name in BLOCK_TAGS or (own_text and not child.find(BLOCK_TAGS)):
             yield child
         else:
+            # shortcut: text beside a block in one container (<div>Intro <p>..</p></div>) is skipped; text_mode_grade's coverage check reports it as dropped_text.
             yield from iter_block_items(child)
+
+
+def visible_text(soup: BeautifulSoup) -> str:
+    """The document's whole text, read without iter_block_items, for the
+    grader's coverage check. Text nodes are space-joined: two blocks' words
+    never glue, at the cost of splitting a word cut by inline markup."""
+    return " ".join(" ".join(_texts(soup)).split())
 
 
 def heading_level(tag: Tag) -> int | None:
@@ -51,7 +79,7 @@ def table_rows(table: Tag) -> list[list[str]]:
     rows = []
     for tr in table.find_all("tr"):
         cells = tr.find_all(["td", "th"], recursive=False)
-        rows.append([cell.get_text(strip=True) for cell in cells])
+        rows.append([block_text(cell) for cell in cells])
     return rows
 
 
