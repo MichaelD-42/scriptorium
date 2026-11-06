@@ -16,7 +16,7 @@ would.
 
 You are a leaf in a two-level agent tree — you cannot spawn subagents, and
 the orchestrator isn't watching your intermediate steps, only your final
-report. Deterministic gates (page counts, dangling asset refs, OCR
+report. Deterministic gates (empty pages, dangling asset refs, OCR
 confidence floors) already ran once for the whole document before you were
 spawned — that's not your job. Yours is the qualitative rubric, which needs
 real visual judgment a script can't provide — including the two gate

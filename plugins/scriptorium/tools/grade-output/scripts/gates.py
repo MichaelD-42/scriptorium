@@ -64,16 +64,6 @@ COVERAGE_MAX_MISSING_FRACTION = 0.05
 _COVERAGE_WORD = re.compile(r"[^\W\d_]{4,}")
 
 
-def check_page_count_match(doc_data: dict, true_page_count: int) -> dict:
-    got = len(doc_data["pages"])
-    passed = got == true_page_count
-    return {
-        "name": "page_count_match",
-        "passed": passed,
-        "detail": f"expected {true_page_count} pages, elements.json has {got}",
-    }
-
-
 def check_no_empty_pages(doc_data: dict) -> dict:
     # Follow-up R21: a page whose content was joined into another page's
     # element (a table cut by the page break) is listed in that element's
@@ -581,9 +571,8 @@ def _pdf_page_areas(input_path: Path) -> dict[int, float]:
     """{page_number: width*height in points^2} for a PDF input -- the
     geometry check_large_region_excluded needs to turn an excluded region's
     bbox into a page-area fraction. gates.py otherwise never opens the
-    source PDF (it works entirely from elements.json + the independent
-    true_page_count oracle), so this import is local to keep that the
-    common case."""
+    source PDF (it works entirely from elements.json), so this import is
+    local to keep that the common case."""
     import fitz  # PyMuPDF
 
     with fitz.open(input_path) as doc:
@@ -667,7 +656,6 @@ def main() -> None:
         print(f"error: no input file found for doc '{args.doc}' in input/", file=sys.stderr)
         sys.exit(1)
     input_format = paths.detect_input_format(args.doc)
-    true_page_count = paths.true_page_count(args.doc, input_format)
 
     elements_path = paths.elements_json(args.doc)
     if not elements_path.exists():
@@ -678,7 +666,6 @@ def main() -> None:
     furniture = _load_json(paths.triage_json(args.doc)).get("furniture") or furniture_lib.empty_furniture()
 
     checks = [
-        check_page_count_match(doc_data, true_page_count),
         check_no_empty_pages(doc_data),
         check_image_refs_resolve(doc_data, paths.output_dir(args.doc)),
         check_ocr_confidence_floor(doc_data),

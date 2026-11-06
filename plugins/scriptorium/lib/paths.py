@@ -54,17 +54,13 @@ def detect_input_format(doc: str, root: Path = Path(".")) -> str | None:
 
 
 def true_page_count(doc: str, input_format: str, root: Path = Path(".")) -> int:
-    """The page count merge.py/gates.py check elements.json against.
+    """The page count merge.py builds elements.json with.
 
-    For pdf/pptx/xlsx this is a genuinely independent oracle read straight
-    from the source file (never derived from triage.json or any other
-    pipeline output, or the page_count_match gate becomes tautological) —
-    a workbook's sheets, like a pptx's slides, are a real source-file
-    property. docx has no such oracle to read — Word pagination is
+    For pdf/pptx/xlsx it is read straight from the source file — a
+    workbook's sheets, like a pptx's slides, are a real source-file
+    property. docx has no such count to read — Word pagination is
     layout-computed and invisible to python-docx, so "page" is this
-    plugin's own Heading-1 split, decided once by docx-triage. For docx,
-    page_count_match therefore checks "did extraction cover every section
-    triage declared", not an independent source-file property — see
+    plugin's own Heading-1 split, decided once by docx-triage — see
     lib/docx_pages.py. html has no page concept at all — the whole file is
     always one page, a fixed rule rather than something triage decides.
     image is the same fixed rule as html: one image file is one page."""

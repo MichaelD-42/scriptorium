@@ -14,16 +14,6 @@ def _doc_data(pages: dict) -> dict:
     return {"doc": "sample", "pages": pages}
 
 
-class TestCheckPageCountMatch:
-    def test_passes_when_counts_match(self):
-        result = gates.check_page_count_match(_doc_data({1: {}, 2: {}}), true_page_count=2)
-        assert result["passed"] is True
-
-    def test_fails_when_counts_differ(self):
-        result = gates.check_page_count_match(_doc_data({1: {}}), true_page_count=2)
-        assert result["passed"] is False
-
-
 class TestCheckNoEmptyPages:
     def test_passes_when_every_page_has_elements(self):
         pages = {1: {"page_number": 1, "elements": [{"type": "paragraph", "text": "x"}]}}

@@ -57,7 +57,6 @@ pass/fail decision. It exits 1, writing nothing, when a page in
 
 | check | fails when |
 |---|---|
-| `page_count_match` | pages in `elements.json` != the PDF's actual page count |
 | `no_empty_pages` | a page has zero elements (a page whose merged shard has `"skipped": "toc"` or `"skipped": "blank"` — a printed TOC page, or a page with nothing but furniture, see `pdf-triage`/`extract-text` — is exempt: zero elements there is expected, not a failure) |
 | `image_refs_resolve` | an `image` element's `asset` path doesn't exist on disk |
 | `ocr_confidence_floor` | a tier-`ocr` page's `ocr_confidence` < 0.5 (its `pages` go to `vision` on retry) |

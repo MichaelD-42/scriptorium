@@ -168,13 +168,13 @@ class TestDecide:
         """A document-level gate, or low scores with no tags, gives no page
         to re-extract; a retry would rerun nothing and burn an attempt."""
         check = {
-            "name": "page_count_match",
+            "name": "output_file_exists",
             "passed": False,
-            "detail": "expected 5 pages, elements.json has 4",
+            "detail": "no assembled md output found",
         }
         out = _decide(_report([_page(1, [])], checks=[check]), {1: "text"})
         assert out["status"] == "needs-human"
-        assert "page_count_match" in out["reason"]
+        assert "output_file_exists" in out["reason"]
 
     def test_low_scores_without_tags_are_needs_human(self):
         out = _decide(_report([_page(1, [])]), {1: "text"})
