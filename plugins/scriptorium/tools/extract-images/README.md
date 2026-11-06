@@ -78,6 +78,14 @@ uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
 
 For an image document, `--pages` is always `1` — there's only ever page 1.
 
+`--ocr-lang <lang>` (and `--tessdata-dir <dir>`), the document's resolved
+OCR language: each PDF bitmap without a caption gets the lines Tesseract
+reads with confidence 80 or better on every word, as `figure_text` with
+`"figure_text_source": "ocr"` (images under 1500 px are upscaled 3x
+first). Nothing when Tesseract is missing or reads nothing sure. The
+extractor may replace such a `figure_text` with `describe_image.py
+--figure-text`; a text-layer `figure_text` stays refused.
+
 ## Output
 
 - Saves assets to `output/<doc>/assets/page{N}_{bitmap|vector}{idx}.png`

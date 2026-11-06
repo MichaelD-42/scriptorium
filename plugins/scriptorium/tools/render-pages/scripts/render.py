@@ -53,6 +53,17 @@ def convert_pptx_to_pdf(pptx_path: Path, doc: str) -> Path:
     return out_pdf
 
 
+def save_atomically(out_path: Path, save) -> None:
+    """`save(tmp_path)`, then move it into place: a cached PNG is reused and
+    read by parallel agents, so it must never exist half-written."""
+    tmp = out_path.with_name(f"{out_path.stem}.{os.getpid()}.tmp{out_path.suffix}")
+    try:
+        save(tmp)
+        os.replace(tmp, out_path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 def render_image(input_path: Path, doc: str, force: bool) -> str:
     """A standalone image document is already raster — there's no dpi/zoom
     rasterization step, just a normalize-to-PNG copy so downstream tooling
@@ -63,7 +74,7 @@ def render_image(input_path: Path, doc: str, force: bool) -> str:
         return str(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with Image.open(input_path) as img:
-        img.convert("RGB").save(out_path)
+        save_atomically(out_path, img.convert("RGB").save)
     return str(out_path)
 
 
@@ -107,7 +118,7 @@ def main() -> None:
         page = document[n - 1]
         zoom = args.dpi / 72
         pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom))
-        pix.save(out_path)
+        save_atomically(out_path, pix.save)
         rendered.append(str(out_path))
     document.close()
 

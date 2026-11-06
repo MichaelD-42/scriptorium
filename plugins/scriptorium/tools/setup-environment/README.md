@@ -30,7 +30,7 @@ Same contract on both platforms, in order:
    the official installer, re-checks. Still missing → **exits 1** (fatal —
    nothing downstream can run without it).
 2. `uv sync` — this also fetches a matching Python per `pyproject.toml`, so
-   there's no separate Python bootstrap step.
+   there's no separate Python bootstrap step. Fails → **exits 1**.
 3. `tesseract` binary missing → detects the package manager (`apt-get`,
    `pacman`, `dnf`, `zypper`, `brew` on POSIX; `scoop`, `winget`, `choco` on
    Windows, each checked in that order — `scoop` first since it needs no
@@ -71,10 +71,14 @@ reach package-manager commands and a download URL.
 **This is coarse, not exact language ID.** The goal is closing the
 missing-language-pack failure mode, not solving language identification.
 
-**Windows note:** `scoop`/`winget`/`choco` don't ship per-language tesseract
-packages, so a missing language on Windows (or on any OS with no supported
-package manager at all) falls back to downloading `<lang>.traineddata`
-directly into a user-writable tessdata dir — no admin rights needed. When
+**Download fallback:** a language the package manager could not install
+(no passwordless sudo, no supported manager, or Windows, whose
+`scoop`/`winget`/`choco` don't ship per-language tesseract packages) is
+downloaded as `<lang>.traineddata` directly into a user-writable tessdata
+dir — no admin rights needed. The
+download is pinned to one `tessdata_fast` commit and checked against the
+git blob hash in `scripts/tessdata_fast.json`; a file that doesn't match
+is discarded, and a language not in that table isn't downloaded. When
 a wanted language exists only in that fallback dir (on any OS, e.g. a pack
 an earlier run downloaded), the JSON also reports `tessdata_prefix` (its path); pass that through to `ocr-page` as
 `--tessdata-dir` alongside `--lang`. `tessdata_prefix: null` means the

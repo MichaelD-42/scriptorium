@@ -10,6 +10,7 @@ Two ways of exercising a script:
 """
 
 import importlib.util
+import json
 import shutil
 import subprocess
 import sys
@@ -68,6 +69,14 @@ def run_script(relpath: str, *args: str, cwd: Path, stdin: str | None = None) ->
         text=True,
         input=stdin,
     )
+
+
+def gates_report(doc: str, *args: str, cwd: Path) -> dict:
+    """Run gates.py and return the full report it wrote; its stdout is only
+    a summary."""
+    result = run_script("grade-output/scripts/gates.py", "--doc", doc, *args, cwd=cwd)
+    assert result.returncode == 0, result.stderr
+    return json.loads((cwd / "work" / doc / "gates-report.json").read_text(encoding="utf-8"))
 
 
 def describe_all_images(doc: str, cwd: Path, pages: set[int] | None = None) -> None:

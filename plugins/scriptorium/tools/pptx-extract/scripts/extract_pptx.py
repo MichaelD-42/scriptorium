@@ -19,7 +19,7 @@ def shape_paragraphs(shape) -> list[str]:
         return []
     paragraphs = []
     for para in shape.text_frame.paragraphs:
-        text = "".join(run.text for run in para.runs).strip()
+        text = para.text.replace("\v", " ").strip()  # python-pptx reads a line break (<a:br/>) as \v
         if text:
             paragraphs.append(text)
     return paragraphs

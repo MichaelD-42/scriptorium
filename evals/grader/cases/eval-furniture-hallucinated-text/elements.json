@@ -1,0 +1,1017 @@
+{
+  "doc": "eval-furniture-hallucinated-text",
+  "source_file": "input/eval-furniture.pdf",
+  "page_count": 11,
+  "furniture_text": "Doc No. SYN-FUR-0001\nRev. B\npage 1 (11)",
+  "pages": [
+    {
+      "page_number": 1,
+      "tier": "vision",
+      "elements": [
+        {
+          "type": "paragraph",
+          "text": "Synthetic Furniture Fixture The controller also uploads every reading to a public cloud service each night.",
+          "bbox": [
+            152.63999938964844,
+            194.32000732421875,
+            459.3599853515625,
+            227.3679962158203
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "A Golden Extraction Test Document",
+          "bbox": [
+            194.75900268554688,
+            236.08999633789062,
+            417.2409973144531,
+            253.99099731445312
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "This synthetic document combines a bordered page frame, running header and footer furniture, a two-page printed table of contents, four levels of body headings, a vector diagram, a vector bar chart, a ruled table, and a nested bullet list, all built purely for automated testing -- it contains no real customer content.",
+          "bbox": [
+            72.0,
+            278.17498779296875,
+            488.3719787597656,
+            338.28900146484375
+          ]
+        }
+      ],
+      "excluded_regions": [
+        {
+          "bbox": [
+            24.0,
+            24.0,
+            588.0,
+            768.0
+          ],
+          "reason": "frame_drawing"
+        }
+      ],
+      "furniture_images": [
+        {
+          "asset": "assets/furniture1.png",
+          "bbox": [
+            40.0,
+            34.0,
+            66.0,
+            60.0
+          ]
+        }
+      ]
+    },
+    {
+      "page_number": 2,
+      "tier": "vision",
+      "elements": [],
+      "skipped": "toc"
+    },
+    {
+      "page_number": 3,
+      "tier": "vision",
+      "elements": [],
+      "skipped": "toc"
+    },
+    {
+      "page_number": 4,
+      "tier": "vision",
+      "elements": [
+        {
+          "type": "image",
+          "kind": "bitmap",
+          "asset": "assets/page4_bitmap1.png",
+          "bbox": [
+            546.0,
+            34.0,
+            572.0,
+            60.0
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 1,
+          "text": "1 Introduction",
+          "bbox": [
+            72.0,
+            80.73999786376953,
+            192.00599670410156,
+            105.5260009765625
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "This section describes the purpose of the furniture fixture and the structural extraction cases it is designed to exercise across the pages that follow.",
+          "bbox": [
+            72.0,
+            122.97499084472656,
+            487.7450256347656,
+            153.0889892578125
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 2,
+          "text": "1.1 Purpose and Scope",
+          "bbox": [
+            72.0,
+            167.67999267578125,
+            248.06398010253906,
+            189.7119903564453
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "The scope of this specification covers every furniture element a real document might carry, including running headers, footers, and a bordered page frame that must never be mistaken for genuine page content such as a ruled table or a printed figure, which is exactly why this paragraph is deliberately split across a page boundary without terminating punctuation.",
+          "bbox": [
+            72.0,
+            88.17500305175781,
+            501.8250427246094,
+            249.68902587890625
+          ],
+          "pages": [
+            4,
+            5
+          ]
+        }
+      ],
+      "excluded_regions": [
+        {
+          "bbox": [
+            24.0,
+            24.0,
+            588.0,
+            768.0
+          ],
+          "reason": "frame_drawing"
+        }
+      ]
+    },
+    {
+      "page_number": 5,
+      "tier": "vision",
+      "elements": [
+        {
+          "type": "heading",
+          "level": 2,
+          "text": "1.2 Document Overview",
+          "bbox": [
+            72.0,
+            132.8800048828125,
+            252.51197814941406,
+            154.91200256347656
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "This document is organized into numbered sections that mirror the printed table of contents on the preceding two pages, so every heading below can be matched against its TOC entry by number and title.",
+          "bbox": [
+            72.0,
+            169.7749786376953,
+            533.6259765625,
+            214.88897705078125
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 1,
+          "text": "2 System Requirements",
+          "bbox": [
+            72.0,
+            227.33998107910156,
+            276.06597900390625,
+            252.1259765625
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "The synthetic body pages that follow combine headings, paragraphs, figures, and lists to give the extraction pipeline a realistic mixture of structural elements to classify.",
+          "bbox": [
+            72.0,
+            269.5749816894531,
+            501.8249816894531,
+            299.6889953613281
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 2,
+          "text": "2.1 Functional Requirements",
+          "bbox": [
+            72.0,
+            314.2799987792969,
+            290.7200012207031,
+            336.3119812011719
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "Functional requirements in this fixture are limited to reproducing the structural shapes a real specification exhibits, not to describing any actual product behavior.",
+          "bbox": [
+            72.0,
+            351.17498779296875,
+            496.28094482421875,
+            381.28900146484375
+          ]
+        }
+      ],
+      "excluded_regions": [
+        {
+          "bbox": [
+            24.0,
+            24.0,
+            588.0,
+            768.0
+          ],
+          "reason": "frame_drawing"
+        }
+      ]
+    },
+    {
+      "page_number": 6,
+      "tier": "vision",
+      "elements": [
+        {
+          "type": "heading",
+          "level": 3,
+          "text": "2.1.1 Data Processing Pipeline",
+          "bbox": [
+            72.0,
+            85.0199966430664,
+            274.31396484375,
+            104.29800415039062
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "The data processing section below demonstrates a two-level bullet list, used elsewhere in real specifications to enumerate the sub-steps of a larger procedure.",
+          "bbox": [
+            72.0,
+            116.57502746582031,
+            507.29193115234375,
+            146.68902587890625
+          ]
+        },
+        {
+          "type": "list_item",
+          "marker": "-",
+          "level": 1,
+          "text": "Ingestion",
+          "bbox": [
+            72.0,
+            161.5750274658203,
+            123.3589859008789,
+            176.68902587890625
+          ],
+          "text_x": 78.72100067138672
+        },
+        {
+          "type": "list_item",
+          "marker": "-",
+          "level": 2,
+          "text": "Normalize incoming documents before parsing.",
+          "bbox": [
+            90.0,
+            180.5750274658203,
+            326.57696533203125,
+            195.68902587890625
+          ],
+          "text_x": 96.72100067138672
+        },
+        {
+          "type": "list_item",
+          "marker": "-",
+          "level": 2,
+          "text": "Validate structural markers such as headings and page numbers.",
+          "bbox": [
+            90.0,
+            199.5750274658203,
+            414.0269470214844,
+            214.68902587890625
+          ],
+          "text_x": 96.72100067138672
+        },
+        {
+          "type": "list_item",
+          "marker": "-",
+          "level": 1,
+          "text": "Transformation",
+          "bbox": [
+            72.0,
+            218.5750274658203,
+            152.6849822998047,
+            233.68902587890625
+          ],
+          "text_x": 78.72100067138672
+        },
+        {
+          "type": "list_item",
+          "marker": "-",
+          "level": 2,
+          "text": "Apply extraction rules for each recognized element type.",
+          "bbox": [
+            90.0,
+            237.5750274658203,
+            370.6209411621094,
+            252.68902587890625
+          ],
+          "text_x": 96.72100067138672
+        }
+      ],
+      "excluded_regions": [
+        {
+          "bbox": [
+            24.0,
+            24.0,
+            588.0,
+            768.0
+          ],
+          "reason": "frame_drawing"
+        }
+      ]
+    },
+    {
+      "page_number": 7,
+      "tier": "vision",
+      "elements": [
+        {
+          "type": "heading",
+          "level": 3,
+          "text": "2.1.2 Edge Case Handling",
+          "bbox": [
+            72.0,
+            87.16000366210938,
+            218.05197143554688,
+            103.68399810791016
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "Edge cases recorded here are fixture-generation edge cases only: a heading printed at the smallest of the four bold sizes used across this document.",
+          "bbox": [
+            72.0,
+            113.37501525878906,
+            512.8469848632812,
+            143.489013671875
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 2,
+          "text": "2.2 Non-Functional Requirements",
+          "bbox": [
+            72.0,
+            163.08001708984375,
+            327.1519775390625,
+            185.1120147705078
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "Non-functional requirements in this fixture take the form of a vector-drawn flow diagram placed beside several lines of body text, so the diagram is never the only content on its page -- the case the old whole-page rule misses.",
+          "bbox": [
+            72.0,
+            199.97499084472656,
+            495.65399169921875,
+            245.0889892578125
+          ]
+        },
+        {
+          "type": "image",
+          "kind": "vector",
+          "asset": "assets/page7_vector1.png",
+          "bbox": [
+            62.0,
+            276.79998779296875,
+            447.0,
+            396.79998779296875
+          ],
+          "caption": "Figure 1: Process Diagram",
+          "figure_text": "Start\nProcess\nDecision\nEnd"
+        }
+      ],
+      "excluded_regions": [
+        {
+          "bbox": [
+            24.0,
+            24.0,
+            588.0,
+            768.0
+          ],
+          "reason": "frame_drawing"
+        }
+      ]
+    },
+    {
+      "page_number": 8,
+      "tier": "vision",
+      "elements": [
+        {
+          "type": "heading",
+          "level": 1,
+          "text": "3 Process Diagrams",
+          "bbox": [
+            72.0,
+            80.73999786376953,
+            244.07998657226562,
+            105.5260009765625
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "This section pairs a vector-drawn bar chart with a short caption, again surrounded by body paragraph text rather than standing alone on an otherwise blank page.",
+          "bbox": [
+            72.0,
+            122.97499084472656,
+            510.9659729003906,
+            153.0889892578125
+          ]
+        },
+        {
+          "type": "image",
+          "kind": "vector",
+          "asset": "assets/page8_vector1.png",
+          "bbox": [
+            72.0,
+            179.79998779296875,
+            302.0,
+            304.79998779296875
+          ],
+          "caption": "Figure 2: Revenue by Quarter",
+          "figure_text": "Q1\nQ2\nQ3\nQ4"
+        },
+        {
+          "type": "heading",
+          "level": 2,
+          "text": "3.1 Workflow Overview",
+          "bbox": [
+            72.0,
+            347.67999267578125,
+            246.28797912597656,
+            369.71197509765625
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "The ruled table below summarizes a short set of values and is positioned so that it does not cover the entire page, distinguishing it from the page-frame border drawn around every page.",
+          "bbox": [
+            72.0,
+            384.5749816894531,
+            512.81396484375,
+            429.6889953613281
+          ]
+        },
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Stage",
+              "Input",
+              "Output"
+            ],
+            [
+              "Triage",
+              "Raw document",
+              "Tier assignment"
+            ],
+            [
+              "Extract",
+              "Tier assignment",
+              "Element shards"
+            ]
+          ],
+          "bbox": [
+            72.0,
+            456.4,
+            402.0,
+            522.4
+          ]
+        }
+      ],
+      "excluded_regions": [
+        {
+          "bbox": [
+            24.0,
+            24.0,
+            588.0,
+            768.0
+          ],
+          "reason": "frame_drawing"
+        },
+        {
+          "bbox": [
+            62.0,
+            446.3999938964844,
+            412.0,
+            532.4000244140625
+          ],
+          "reason": "table_overlap"
+        }
+      ]
+    },
+    {
+      "page_number": 9,
+      "tier": "vision",
+      "elements": [
+        {
+          "type": "table",
+          "rows": [
+            [
+              "Field",
+              "Value"
+            ],
+            [
+              "Status",
+              "Draft"
+            ],
+            [
+              "Owner",
+              "Fixture"
+            ]
+          ],
+          "bbox": [
+            156.0,
+            356.0,
+            456.0,
+            422.0
+          ]
+        }
+      ],
+      "excluded_regions": [
+        {
+          "bbox": [
+            24.0,
+            24.0,
+            588.0,
+            768.0
+          ],
+          "reason": "frame_drawing"
+        },
+        {
+          "bbox": [
+            146.0,
+            346.0,
+            466.0,
+            432.0
+          ],
+          "reason": "table_overlap"
+        }
+      ]
+    },
+    {
+      "page_number": 10,
+      "tier": "vision",
+      "elements": [
+        {
+          "type": "heading",
+          "level": 1,
+          "text": "4 Appendix A: Glossary",
+          "bbox": [
+            72.0,
+            80.73999786376953,
+            275.0580139160156,
+            105.5260009765625
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "This appendix section is a placeholder for synthetic test content.",
+          "bbox": [
+            72.0,
+            118.97499084472656,
+            383.81707763671875,
+            134.0889892578125
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 2,
+          "text": "4.1 Terms and Definitions",
+          "bbox": [
+            72.0,
+            140.67999267578125,
+            266.7200012207031,
+            162.7119903564453
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "This appendix section is a placeholder for synthetic test content.",
+          "bbox": [
+            72.0,
+            173.5750274658203,
+            383.81707763671875,
+            188.68902587890625
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 2,
+          "text": "4.2 Abbreviations",
+          "bbox": [
+            72.0,
+            195.280029296875,
+            205.37599182128906,
+            217.31202697753906
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "This appendix section is a placeholder for synthetic test content.",
+          "bbox": [
+            72.0,
+            228.1750030517578,
+            383.81707763671875,
+            243.28900146484375
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 1,
+          "text": "5 Appendix B: References",
+          "bbox": [
+            72.0,
+            259.739990234375,
+            295.05596923828125,
+            284.5260009765625
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "This appendix section is a placeholder for synthetic test content.",
+          "bbox": [
+            72.0,
+            297.9749755859375,
+            383.81707763671875,
+            313.0889892578125
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 2,
+          "text": "5.1 Normative References",
+          "bbox": [
+            72.0,
+            319.67999267578125,
+            267.6319885253906,
+            341.71197509765625
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "This appendix section is a placeholder for synthetic test content.",
+          "bbox": [
+            72.0,
+            352.5749816894531,
+            383.81707763671875,
+            367.6889953613281
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 2,
+          "text": "5.2 Informative References",
+          "bbox": [
+            72.0,
+            374.2799987792969,
+            275.6319885253906,
+            396.3119812011719
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "This appendix section is a placeholder for synthetic test content.",
+          "bbox": [
+            72.0,
+            407.17498779296875,
+            383.81707763671875,
+            422.28900146484375
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 1,
+          "text": "6 Appendix C: Revision History",
+          "bbox": [
+            72.0,
+            438.739990234375,
+            340.0559387207031,
+            463.5260009765625
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "This appendix section is a placeholder for synthetic test content.",
+          "bbox": [
+            72.0,
+            476.9749755859375,
+            383.81707763671875,
+            492.0889892578125
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 2,
+          "text": "6.1 Change Log",
+          "bbox": [
+            72.0,
+            498.67999267578125,
+            191.13600158691406,
+            520.7119750976562
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "This appendix section is a placeholder for synthetic test content.",
+          "bbox": [
+            72.0,
+            531.5750122070312,
+            383.81707763671875,
+            546.6890258789062
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 2,
+          "text": "6.2 Approval Record",
+          "bbox": [
+            72.0,
+            553.280029296875,
+            227.59999084472656,
+            575.31201171875
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "This appendix section is a placeholder for synthetic test content.",
+          "bbox": [
+            72.0,
+            586.1749877929688,
+            383.81707763671875,
+            601.2890014648438
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 1,
+          "text": "7 Appendix D: Index",
+          "bbox": [
+            72.0,
+            617.739990234375,
+            245.03399658203125,
+            642.5260009765625
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "This appendix section is a placeholder for synthetic test content.",
+          "bbox": [
+            72.0,
+            655.9749755859375,
+            383.81707763671875,
+            671.0889892578125
+          ]
+        }
+      ],
+      "excluded_regions": [
+        {
+          "bbox": [
+            24.0,
+            24.0,
+            588.0,
+            768.0
+          ],
+          "reason": "frame_drawing"
+        }
+      ]
+    },
+    {
+      "page_number": 11,
+      "tier": "vision",
+      "elements": [
+        {
+          "type": "heading",
+          "level": 1,
+          "text": "8 Appendix E: Contact Information",
+          "bbox": [
+            72.0,
+            80.73999786376953,
+            368.0279235839844,
+            105.5260009765625
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "This appendix section is a placeholder for synthetic test content.",
+          "bbox": [
+            72.0,
+            118.97499084472656,
+            383.81707763671875,
+            134.0889892578125
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 2,
+          "text": "8.1 Program Office",
+          "bbox": [
+            72.0,
+            140.67999267578125,
+            214.27198791503906,
+            162.7119903564453
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "This appendix section is a placeholder for synthetic test content.",
+          "bbox": [
+            72.0,
+            173.5750274658203,
+            383.81707763671875,
+            188.68902587890625
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 2,
+          "text": "8.2 Technical Support",
+          "bbox": [
+            72.0,
+            195.280029296875,
+            238.27200317382812,
+            217.31202697753906
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "This appendix section is a placeholder for synthetic test content.",
+          "bbox": [
+            72.0,
+            228.1750030517578,
+            383.81707763671875,
+            243.28900146484375
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 1,
+          "text": "9 Appendix F: Safety Notes",
+          "bbox": [
+            72.0,
+            259.739990234375,
+            305.04595947265625,
+            284.5260009765625
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "This appendix section is a placeholder for synthetic test content.",
+          "bbox": [
+            72.0,
+            297.9749755859375,
+            383.81707763671875,
+            313.0889892578125
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 2,
+          "text": "9.1 Handling Precautions",
+          "bbox": [
+            72.0,
+            319.67999267578125,
+            263.1679992675781,
+            341.71197509765625
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "This appendix section is a placeholder for synthetic test content.",
+          "bbox": [
+            72.0,
+            352.5749816894531,
+            383.81707763671875,
+            367.6889953613281
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 2,
+          "text": "9.2 Compliance Statement",
+          "bbox": [
+            72.0,
+            374.2799987792969,
+            271.1679992675781,
+            396.3119812011719
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "This appendix section is a placeholder for synthetic test content.",
+          "bbox": [
+            72.0,
+            407.17498779296875,
+            383.81707763671875,
+            422.28900146484375
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 1,
+          "text": "10 Appendix G: Standards Referenced",
+          "bbox": [
+            72.0,
+            438.739990234375,
+            400.0859375,
+            463.5260009765625
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "This appendix section is a placeholder for synthetic test content.",
+          "bbox": [
+            72.0,
+            476.9749755859375,
+            383.81707763671875,
+            492.0889892578125
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 2,
+          "text": "10.1 Industry Standards",
+          "bbox": [
+            72.0,
+            498.67999267578125,
+            253.39198303222656,
+            520.7119750976562
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "This appendix section is a placeholder for synthetic test content.",
+          "bbox": [
+            72.0,
+            531.5750122070312,
+            383.81707763671875,
+            546.6890258789062
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 2,
+          "text": "10.2 Internal Standards",
+          "bbox": [
+            72.0,
+            553.280029296875,
+            248.06399536132812,
+            575.31201171875
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "This appendix section is a placeholder for synthetic test content.",
+          "bbox": [
+            72.0,
+            586.1749877929688,
+            383.81707763671875,
+            601.2890014648438
+          ]
+        },
+        {
+          "type": "heading",
+          "level": 1,
+          "text": "11 Closing Notes",
+          "bbox": [
+            72.0,
+            617.739990234375,
+            218.03399658203125,
+            642.5260009765625
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "This appendix section is a placeholder for synthetic test content.",
+          "bbox": [
+            72.0,
+            655.9749755859375,
+            383.81707763671875,
+            671.0889892578125
+          ]
+        }
+      ],
+      "excluded_regions": [
+        {
+          "bbox": [
+            24.0,
+            24.0,
+            588.0,
+            768.0
+          ],
+          "reason": "frame_drawing"
+        }
+      ]
+    }
+  ]
+}

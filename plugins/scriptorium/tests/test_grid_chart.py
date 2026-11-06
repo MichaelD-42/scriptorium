@@ -15,7 +15,7 @@ import json
 
 import fitz  # PyMuPDF
 import paths
-from conftest import run_script
+from conftest import gates_report, run_script
 
 W, H = 595.0, 842.0
 GX0, GY0, COLS, ROWS, STEP = 100.0, 200.0, 6, 5, 50.0
@@ -84,12 +84,10 @@ def _run(tmp_project, doc: str, draw) -> tuple[dict, dict, dict]:
     ):
         result = run_script(*args, cwd=tmp_project)
         assert result.returncode == 0, f"{args[0]}: {result.stderr}"
-    gates = run_script(
-        "grade-output/scripts/gates.py", "--doc", doc, "--format", "md", cwd=tmp_project
-    )
+    report = gates_report(doc, "--format", "md", cwd=tmp_project)
     text = json.loads(paths.shard_path(doc, 1, "text").read_text())
     image = json.loads(paths.shard_path(doc, 1, "image").read_text())
-    return text, image, json.loads(gates.stdout)
+    return text, image, report
 
 
 def _types(shard: dict) -> list[str]:

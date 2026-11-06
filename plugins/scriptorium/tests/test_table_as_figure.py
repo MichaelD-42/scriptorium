@@ -23,7 +23,7 @@ import json
 import figures as figures_lib
 import fitz  # PyMuPDF
 import paths
-from conftest import load_script, run_script
+from conftest import gates_report, load_script, run_script
 
 gates = load_script("grade-output/scripts/gates.py", "gates_table_as_figure")
 
@@ -127,12 +127,10 @@ def _run(tmp_project, doc: str, draw) -> tuple[dict, dict, dict]:
     ):
         result = run_script(*args, cwd=tmp_project)
         assert result.returncode == 0, f"{args[0]}: {result.stderr}"
-    report = run_script(
-        "grade-output/scripts/gates.py", "--doc", doc, "--format", "md", cwd=tmp_project
-    )
+    report = gates_report(doc, "--format", "md", cwd=tmp_project)
     text = json.loads(paths.shard_path(doc, 1, "text").read_text())
     image = json.loads(paths.shard_path(doc, 1, "image").read_text())
-    return text, image, json.loads(report.stdout)
+    return text, image, report
 
 
 def _tables(shard: dict) -> list[dict]:

@@ -22,6 +22,13 @@ class TestDetectInputFormat:
         (tmp_path / "input" / f"doc.{ext}").write_bytes(b"x")
         assert paths.detect_input_format("doc", root=tmp_path) == "image"
 
+    def test_an_upper_case_extension_is_found(self, tmp_path):
+        """Scanners and Windows tools write Scan.PDF; Linux paths are case-sensitive."""
+        (tmp_path / "input").mkdir()
+        (tmp_path / "input" / "Scan.PDF").write_bytes(b"x")
+        assert paths.input_file("Scan", root=tmp_path) == tmp_path / "input" / "Scan.PDF"
+        assert paths.detect_input_format("Scan", root=tmp_path) == "pdf"
+
     def test_none_when_no_input_file(self, tmp_path):
         (tmp_path / "input").mkdir()
         assert paths.detect_input_format("missing", root=tmp_path) is None

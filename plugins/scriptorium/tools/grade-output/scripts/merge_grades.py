@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+import elements as elements_lib  # noqa: E402
 import grades  # noqa: E402
 import paths  # noqa: E402
 
@@ -37,13 +38,19 @@ def main() -> None:
         print(f"error: no grade shards found in {shards_dir} — run the grader first", file=sys.stderr)
         sys.exit(1)
     per_page = [json.loads(p.read_text(encoding="utf-8")) for p in shard_paths]
+    # A grader that ran out of turns leaves pages unwritten; averaging the
+    # rest would pass pages nobody looked at.
+    ungraded = sorted(set(elements_lib.load_doc(paths.elements_json(args.doc))["pages"]) - {p["page_number"] for p in per_page})
+    if ungraded:
+        print(f"error: no grade shard for pages {ungraded} — grade them, then run this again", file=sys.stderr)
+        sys.exit(1)
 
     score = round(sum(p["score"] for p in per_page) / len(per_page), 3)
     failure_taxonomy = sorted({issue for p in per_page for issue in p.get("issues", [])})
-    # Wrong body text on any page fails the document: an average over clean
-    # pages would let it ship without a retry.
-    content_issue_pages = [p["page_number"] for p in per_page if grades.CONTENT_ISSUES & set(p.get("issues", []))]
-    rubric_passed = score >= THRESHOLD and not content_issue_pages
+    # Wrong or missing content on any page fails the document: an average
+    # over clean pages would let it ship without a retry.
+    blocking_issue_pages = [p["page_number"] for p in per_page if grades.BLOCKING_ISSUES & set(p.get("issues", []))]
+    rubric_passed = score >= THRESHOLD and not blocking_issue_pages
 
     result = {
         "doc": args.doc,
@@ -55,7 +62,7 @@ def main() -> None:
             "threshold": THRESHOLD,
             "per_page": per_page,
             "failure_taxonomy": failure_taxonomy,
-            "content_issue_pages": content_issue_pages,
+            "blocking_issue_pages": blocking_issue_pages,
         },
         "overall_passed": gates["passed"] and rubric_passed,
         # Task A5b fix round 1 (controller finding 2): gates.py's warnings

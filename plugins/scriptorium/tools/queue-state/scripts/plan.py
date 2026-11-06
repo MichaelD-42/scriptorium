@@ -84,12 +84,12 @@ def scripts_stage(doc: str) -> dict:
     return {"format_extract": image_pages}
 
 
-def extract_stage(doc: str, max_pages: int | None) -> dict:
+def extract_stage(doc: str, max_pages: int | None, describe: bool = True) -> dict:
     entry, tiers = _context(doc)
     work = []
     for page, tier in sorted(tiers.items()):
         shard = elements_lib.read_shard(paths.shard_path(doc, page, "image")) or {"elements": []}
-        turns = BODY_TURNS.get(tier, 0) + sum(
+        turns = BODY_TURNS.get(tier, 0) + describe * sum(
             IMAGE_TURNS if el.get("caption") or el.get("figure_text") else UNLABELLED_IMAGE_TURNS
             for el in shard["elements"]
             if el.get("type") == "image" and not el.get("description")
@@ -133,11 +133,12 @@ def main() -> None:
     parser.add_argument("--doc", required=True)
     parser.add_argument("--stage", required=True, choices=("scripts", "extract", "grade"))
     parser.add_argument("--max-pages", type=int, help="cap on pages per batch (the old --batch-size)")
+    parser.add_argument("--no-describe", action="store_true", help="images need no agent: no description, figure_text or mermaid")
     args = parser.parse_args()
     if args.stage == "scripts":
         out = scripts_stage(args.doc)
     elif args.stage == "extract":
-        out = extract_stage(args.doc, args.max_pages)
+        out = extract_stage(args.doc, args.max_pages, describe=not args.no_describe)
     else:
         out = grade_stage(args.doc, args.max_pages)
     print(json.dumps(out))

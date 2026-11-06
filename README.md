@@ -9,10 +9,18 @@ tables, figures with descriptions — and checks its own result before handing
 it back. PDF, Word, PowerPoint, Excel, HTML and images go in; Markdown, HTML,
 a split Markdown bundle or ReqIF comes out.
 
-Cheap deterministic extraction runs first. OCR and Claude reading the rendered
-page are used only on the pages that need them. A separate grader agent
-compares every page against the original and sends failing pages back one
-tier up, until the document passes or is handed to a human.
+Before anything is extracted, a PDF is pre-analysed: which detectors will
+find something (furniture, a table of contents, scans, figures, tables, the
+text's language) and which known quirks it has, such as a layout table or a
+heading set apart only by colour; each quirk already has a measure in the
+scripts. Cheap deterministic extraction runs first. OCR and Claude reading the rendered
+page are used only on the pages that need them. Scripts check what can be
+checked without judgment (every text-layer word is in the output, page
+furniture removed, headings match the printed table of contents); a
+separate grader agent judges the rest against the rendered page and sends
+failing pages back one tier up, until the document passes or is handed to a
+human. The output is a linear document: paragraphs cut by a page break are
+joined, the visual layout is not reproduced.
 
 ## Install
 
@@ -23,7 +31,24 @@ In a Claude Code session:
 /plugin install scriptorium@scriptorium
 ```
 
-Update with `/plugin marketplace update scriptorium`.
+Update with `/plugin marketplace update scriptorium`, then restart Claude
+Code.
+
+From a shell (scripts, CI images, or an agent that has no `/plugin` UI),
+the same steps are:
+
+```bash
+claude plugin marketplace add MichaelD-42/scriptorium
+claude plugin install scriptorium@scriptorium            # --scope user|project|local
+claude plugin marketplace update scriptorium              # later: fetch the new version
+claude plugin update scriptorium@scriptorium --scope user # ...and install it
+```
+
+The plugin can be installed once per scope, and each install keeps its own
+version. If `/plugin` lists scriptorium at more than one scope, update each
+one (`--scope user`, `--scope project`, `--scope local`), or an old copy
+keeps loading its old commands. `~/.claude/plugins/installed_plugins.json`
+shows every install with its version. Changes load on the next restart.
 
 The first run sets up the Python environment with [`uv`](https://docs.astral.sh/uv/)
 (installed if missing). System tools are only needed for some inputs:
@@ -53,18 +78,21 @@ input/"). The command processes every new file in `input/` and stops when the
 queue is empty.
 
 ```
-/scriptorium:extract [--doc <name>] [--format md|html|okf|md-tree|reqif|reqifz]
-                     [--split-depth 2] [--max-attempts 3] [--batch-size <n>] [--zip]
+/scriptorium:extract [--doc <name>] [--format md|html|okf|md-tree|jsonl|reqif|reqifz]
+                     [--split-depth 1-6] [--max-attempts 3] [--batch-size <n>] [--zip]
+                     [--no-describe] [--findings <dir>]
 ```
 
 | Flag | Effect |
 |---|---|
 | `--doc <name>` | process only this file (name without extension) |
-| `--format` | output format, default `md` (see below) |
-| `--split-depth` | `md-tree` only; `2` is the only accepted value |
+| `--format` | output format (see below); default: the plugin's **Default output format** option (`/plugin` → scriptorium → configure), else `md` |
+| `--split-depth` | `md-tree` only: the heading level that starts a new file, 1-6, default 2 |
 | `--max-attempts` | extraction attempts before a document goes to a human, default 3 |
 | `--batch-size` | cap on pages per subagent; by default batches are sized by work |
 | `--zip` | also write `output/<doc>.zip` for each passed document |
+| `--findings <dir>` | for each passed PDF, save every page the scripts got wrong and a vision retry got right into `<dir>` as a suggested correction (page PDF, reference, script output, the grader's reasons); see [`evals/README.md`](evals/README.md). Off by default: it copies document pages |
+| `--no-describe` | leave figures undescribed (no description, diagram or chart data; bitmap labels still come from OCR). A document with a text layer then needs no extractor agent |
 
 Supported inputs: `.pdf`, `.docx`, `.pptx`, `.xlsx`, `.html`, `.png`, `.jpg`,
 `.jpeg`, `.webp`, `.tiff`. To try it, copy a file from
@@ -77,7 +105,8 @@ Supported inputs: `.pdf`, `.docx`, `.pptx`, `.xlsx`, `.html`, `.png`, `.jpg`,
 | `md` | `output/<doc>/<doc>.md` | default; reading, diffing, pasting into other tools |
 | `html` | `output/<doc>/<doc>.html` | viewing in a browser; diagrams render inline |
 | `okf` | `output/<doc>/index.md` + one file per section | large documents, search/RAG pipelines |
-| `md-tree` | `output/<doc>/index.md` + one folder per chapter, one file per section, stable heading anchors | the same, split by chapter |
+| `md-tree` | `output/<doc>/index.md` + one file per heading at `--split-depth` (1: per chapter, 2: per section, 3: per subsection), in nested folders, stable heading anchors | the same, split at the level you need |
+| `jsonl` | `output/<doc>/<doc>.jsonl`, one JSON object per element (paragraph, heading, table, figure) with its heading path and source pages; furniture left out | chunking for search/RAG, per-element processing |
 | `reqif`, `reqifz` | `output/<doc>/<doc>.reqif(z)` | requirements tools (DOORS, Polarion) |
 
 ## Results
@@ -110,8 +139,11 @@ region excluded from the text that might have been a figure.
 `/scriptorium:extract` is the orchestrator. It runs deterministic scripts for
 triage, text and image extraction, assembly and checks, and spawns two
 subagent roles in parallel over page batches: `extractor` (OCR, vision, figure
-descriptions) and `grader` (independent check against the rendered page). A
-failing page moves up one tier: a text-layer page to vision, a scanned page
+descriptions) and `grader` (independent check against the rendered page). The
+grader only names defects from a fixed list; the score is computed from them,
+and a defect in the body text, a missing figure or a paragraph left split
+across pages fails the document whatever the average. A failing page moves
+up one tier: a text-layer page to vision, a scanned page
 from OCR to vision. The orchestrator
 reads only compact summaries, never page content, so long documents don't
 exhaust its context.
@@ -119,18 +151,26 @@ exhaust its context.
 - [`docs/architecture.md`](docs/architecture.md) — the loop, agent tree,
   escalation ladder, why per-page shards
 - [`docs/tooling.md`](docs/tooling.md) — every script, argument and file schema
+- [`docs/glossary.md`](docs/glossary.md) — the terms (tier, shard, gate,
+  furniture, escalation...) in the sense this repo uses them
 - [`plugins/scriptorium/README.md`](plugins/scriptorium/README.md) — changelog
+- [`evals/README.md`](evals/README.md) — grader calibration on injected
+  defects, and the LLM-free extraction eval
 
 ## For agents
 
+- **Installing or updating**: use the `claude plugin ...` commands under
+  [Install](#install), not the interactive `/plugin` menu, and update every
+  scope that has an install. Tell the user to restart Claude Code
+  afterwards; the running session keeps the old version.
 - **Running the pipeline**: follow
   [`plugins/scriptorium/commands/extract.md`](plugins/scriptorium/commands/extract.md),
   the orchestrator's step-by-step spec. Read script stdout, `runs/state.json`
   and `grade-report.json` summaries only; never page images or
   `elements.json`.
 - **Changing this repo**: read [`AGENTS.md`](AGENTS.md) first — setup, tests
-  (`cd plugins/scriptorium && uv run pytest`) and the invariants that break
-  silently.
+  (`cd plugins/scriptorium && uv run pytest`), how to run the plugin from the
+  checkout, the evals, and the invariants that break silently.
 
 ## License
 

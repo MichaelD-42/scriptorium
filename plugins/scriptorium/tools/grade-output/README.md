@@ -30,12 +30,12 @@ Three steps:
 ```bash
 # once per document, before dispatching graders
 uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
-  "${CLAUDE_PLUGIN_ROOT}/tools/grade-output/scripts/gates.py" --doc <doc-name> [--format md|html|okf|md-tree|reqif|reqifz]
+  "${CLAUDE_PLUGIN_ROOT}/tools/grade-output/scripts/gates.py" --doc <doc-name> [--format md|html|okf|md-tree|jsonl|reqif|reqifz]
 
 # inside each grader subagent, per page it graded — see rubric.md
 uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
   "${CLAUDE_PLUGIN_ROOT}/tools/grade-output/scripts/write_grade_shard.py" \
-  --doc <doc-name> --page <n> --score 0.93 --issues dropped_text --reason "<what is wrong, specifically>"
+  --doc <doc-name> --page <n> --issues dropped_text --reason "<what is wrong, specifically>"
 
 # OR, for a no-rendered-page format (docx/xlsx/html) — note this does NOT
 # apply to image, which is a rendered-page format like pdf/pptx: one script call
@@ -48,22 +48,25 @@ uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
   "${CLAUDE_PLUGIN_ROOT}/tools/grade-output/scripts/merge_grades.py" --doc <doc-name> --attempt <n>
 ```
 
-`gates.py` writes `work/<doc>/gates-report.json`. `merge_grades.py` writes
+`gates.py` writes `work/<doc>/gates-report.json` and prints only a summary
+(`passed`, each failed check with its pages, the warning count), so the
+orchestrator never reads the full report. `merge_grades.py` writes
 the final `output/<doc>/grade-report.json` — read that one file for the
-pass/fail decision.
+pass/fail decision. It exits 1, writing nothing, when a page in
+`elements.json` has no grade shard.
 
 ## Gate checks
 
 | check | fails when |
 |---|---|
-| `page_count_match` | pages in `elements.json` != the PDF's actual page count |
 | `no_empty_pages` | a page has zero elements (a page whose merged shard has `"skipped": "toc"` or `"skipped": "blank"` — a printed TOC page, or a page with nothing but furniture, see `pdf-triage`/`extract-text` — is exempt: zero elements there is expected, not a failure) |
 | `image_refs_resolve` | an `image` element's `asset` path doesn't exist on disk |
 | `ocr_confidence_floor` | a tier-`ocr` page's `ocr_confidence` < 0.5 (its `pages` go to `vision` on retry) |
-| `output_file_exists` | the assembled output is missing or near-empty (format-aware: single file for `md`/`html`, `index.md` + section files for `okf`, `index.md` + `NN-slug/NN.MM-slug.md` files or `00-front-matter.md` for `md-tree`) |
+| `output_file_exists` | the assembled output is missing or near-empty (format-aware: single file for `md`/`html`, `index.md` + section files for `okf`, `index.md` whose links all resolve to files for `md-tree` (any `--split-depth`), every line valid JSON for `jsonl`) |
 | `furniture_absent` | a heading/paragraph/list_item, table cell, image `figure_text` or `caption`, or a whole line of the `.md`/`.html` files under `output/<doc>/`, has a furniture key (`lib/furniture.py`'s `furniture_key`: whitespace removed, digit runs as `#`) equal to a `triage.json` furniture `line_patterns` entry; or a `table` element's bbox matches a `frame_tables` entry (3pt). An element with a bbox matches any pattern only when its bbox is in the furniture band (`lib/furniture.py`'s `band_limits`: the top/bottom 12% of the page, or exactly the area outside `furniture.content_rect` when triage found one) of its PDF page; an element without a bbox (OCR, vision) matches a letter-bearing pattern anywhere (follow-up R14). An output line is flagged only when its pattern is a whole line at least max(3, 10% of the body pages) times in one output (a single-file md/html, or one split bundle). A digit-only pattern (no letters, e.g. `#` for a bare page-number footer) is not checked in the output files. Passes trivially with no furniture. Furniture images are not checked: no element records its source xref |
 | `toc_headings_match` | a `toc.json` entry has no `heading` with the same normalized text (`lib/toc.py`'s `normalize_toc_text`) within ±1 page, or the heading's level differs from the entry's `level`; or a heading matches no entry; or `toc.json`'s `unparsed` list (TOC dot-leader lines and numbered lines that gave no entry) is not empty. Passes trivially when `toc.json` has no entries and no unparsed lines |
-| `figures_complete` | an `image` element has no non-empty `caption`, no non-empty `figure_text` and no `no_visible_text: true` flag (`describe_image.py --no-visible-text`; counts for pdf and image documents only), or no non-empty `description` |
+| `text_layer_coverage` | (pdf) a `text`-tier page's text layer has at least 3 words (letters only, 4+ characters; furniture bands and side-margin lines left out) that are not in the output of that page or its neighbours (a page-break join), and they are at least 5% of the page's words. Its `pages` go to `vision` on retry, the missing words in the `detail` as reason |
+| `figures_complete` | (skipped with `--no-describe`) an `image` element has no non-empty `caption`, no non-empty `figure_text` and no `no_visible_text: true` flag (`describe_image.py --no-visible-text`; counts for pdf and image documents only), or no non-empty `description` |
 
 The three Task A9 checks also carry a `pages` list (the pages to act on)
 and structured details: `offenders` (`furniture_absent`); `missing`,

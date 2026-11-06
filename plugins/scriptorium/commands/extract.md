@@ -26,13 +26,22 @@ yourself about to `Read` a page image or `elements.json` directly: stop,
 that's a subagent's job, not yours.
 
 Arguments (`$ARGUMENTS`, all optional): `--doc <name>` to process a single
-named document instead of the whole queue; `--format md|html|okf|md-tree|reqif|reqifz`
-(default `md`); `--split-depth <n>` (`md-tree` only, default `2`; only `2` is
-accepted); `--max-attempts <n>` (default `3`); `--batch-size <n>` (optional cap
+named document instead of the whole queue; `--format md|html|okf|md-tree|jsonl|reqif|reqifz`
+(default: the plugin's **Default output format** option,
+`${user_config.default_format}`; when that is empty or still reads
+`${user_config.default_format}` literally, `md`); `--split-depth <n>`
+(`md-tree` only, 1-6, default `2`: the heading level that starts a new
+file — `1` one file per chapter, `2` per section, `3` per subsection); `--max-attempts <n>` (default `3`); `--batch-size <n>` (optional cap
 on pages per subagent, passed to `plan.py` as `--max-pages`; without it,
 batches are sized by work, see step 2); `--zip` to also package each
 document's `output/<doc>/` into `output/<doc>.zip` once it passes (off by
-default).
+default); `--no-describe` to leave images undescribed (no description,
+mermaid or data table; `figure_text` only where a script finds it), so a
+document with a text layer needs no extractor agent at all; `--findings
+<dir>` to save, for every passed PDF, each page that failed at a script
+tier and passed at `vision` as a suggested correction in `<dir>` (e.g.
+`evals/findings` in the scriptorium repo; off by default, since it copies
+document pages).
 
 Two scripts carry the bookkeeping, so you never edit `runs/state.json` or
 size a batch by hand (`queue-state` tool):
@@ -55,7 +64,7 @@ On Windows:
 powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}\tools\setup-environment\scripts\check_env.ps1" "${CLAUDE_PLUGIN_ROOT}"
 ```
 
-Exit code 1 is fatal (uv couldn't be obtained) — stop and report it. Any
+Exit code 1 is fatal (uv couldn't be obtained, or `uv sync` failed) — stop and report it. Any
 other outcome, proceed; a missing `tesseract` only matters for documents
 that actually have scanned pages, and that's handled per-document below.
 
@@ -86,19 +95,25 @@ documents with warnings) with the report's path, and **stop**.
   (`pdf`, `pptx`, `docx`, `xlsx`, `html`, `image`; a script, no agent).
   **Exit 1** means the input is unreadable, password-protected, empty or
   damaged: `state.py reject --doc <name> --reason "<the error: line>"`, next
-  document. A retry cannot fix the input file. Triage's `loop_size` tells
+  document. A retry cannot fix the input file. PDF triage also runs the
+  pre-analysis: its stdout names the document's `quirks` (each already has
+  a measure in the scripts, recorded in `triage.json`'s `pre_analysis`),
+  its `text_languages` and its `bitmap_pages`. Pass the quirk names on to
+  the user once; nothing else to do for them. Triage's `loop_size` tells
   you how closely to read the reports that follow: `loose` (all tier
   `text`, no visuals) — dispatch and wait; `tight` — expect a retry and read
   each batch's summary closely.
 - **Retry** (attempt > 0): don't re-triage. `plan.py` reads the escalated
   pages from `runs/state.json`.
 - **OCR language**: if this attempt has an `ocr` or `vision` page (PDF
-  triage's `non_text_pages`, an `image` document, or a retry tier) and the
-  queue entry's `lang_flag` is `null`: run
+  triage's `non_text_pages`, an `image` document, or a retry tier), or PDF
+  triage's `bitmap_pages` is not empty (bitmap labels are OCR'd too), and
+  the queue entry's `lang_flag` is `null`: run
   `setup-environment/scripts/ensure_language.py` on one such page's rendered
   PNG (render it first via `render-pages`) with `--extra
-  '${user_config.ocr_languages}'` (the user's extra languages, e.g. `deu`;
-  keep the single quotes), then `state.py set-lang --doc
+  '${user_config.ocr_languages},<text_languages>'` (the user's extra
+  languages, e.g. `deu`, then the languages PDF triage read off the text
+  layer, comma-joined; keep the single quotes), then `state.py set-lang --doc
   <name> --lang-flag <lang_flag> [--tessdata-prefix <prefix>]`. Pass both
   to every extractor batch with an `ocr`/`vision` page as `--lang` and (only
   when set) `--tessdata-dir`. Once per document, not per attempt.
@@ -112,7 +127,9 @@ with no pages):
 - `extract_text` → `extract-text/scripts/extract_text.py --doc <name>
   --pages <list> --body-size <triage body_size>`
 - `extract_images` → `extract-images/scripts/extract_images.py --doc <name>
-  --pages <list>`
+  --pages <list>`, plus `--ocr-lang <lang_flag>` (and `--tessdata-dir
+  <tessdata_prefix>` when set) when the entry has a `lang_flag`: bitmaps
+  then get Tesseract's sure lines as `figure_text`
 - `format_extract` → the format's extract script
   (`pptx-extract/scripts/extract_pptx.py`, `docx-extract/scripts/extract_docx.py`,
   `xlsx-extract/scripts/extract_xlsx.py`, `html-extract/scripts/extract_html.py`)
@@ -120,14 +137,15 @@ with no pages):
 
 Their stdout is one short line per page; that is all you read.
 
-**2b. Agents.** `plan.py --doc <name> --stage extract [--max-pages <n>]`
+**2b. Agents.** `plan.py --doc <name> --stage extract [--max-pages <n>] [--no-describe]`
 prints `batches`: only the pages that still need judgment (an `ocr`/`vision`
 body, or an image without a description). Each batch is sized to fit in an
 extractor's turn limit. **In a single message, spawn one `extractor` per
 batch** (multiple Agent calls together, so they run in parallel). Give each:
 the doc name, `input_format`, its `pages` and `tiers` (verbatim), the note
 that text-tier bodies and image shards for its pages are already on disk,
-`--lang`/`--tessdata-dir` if it has an `ocr`/`vision` page, and on a retry its
+`--lang`/`--tessdata-dir` if it has an `ocr`/`vision` page, "no image work"
+under `--no-describe`, and on a retry its
 `recheck_images` pages and `reasons` (verbatim). No batches → skip the
 spawn. A page in `over_budget_pages` has more figures than one extractor
 can describe in its turn limit: tell that batch's extractor to describe as
@@ -145,12 +163,15 @@ uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/tools/ass
 uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/tools/grade-output/scripts/gates.py" --doc <name> --format <format>
 ```
 
-For `--format md-tree`, run `assemble.py` twice: first `--format md`, then
-`--format md-tree --split-depth <n>`. Then run `gates.py --format md-tree`.
-The grader in step 4 reads the single-file `output/<doc>/<doc>.md`: md-tree
-renders the heading that opens a file only as frontmatter, so a grader that
-reads the split files would flag every level-1/level-2 heading as missing.
-Both formats use the same element renderers.
+Under `--no-describe`, pass `--no-describe` to every `gates.py` call too.
+
+For `--format md-tree` or `jsonl`, run `assemble.py` twice: first `--format
+md`, then the format itself (with `--split-depth <n>` for md-tree). Then run
+`gates.py --format <format>`. The grader in step 4 reads the single-file
+`output/<doc>/<doc>.md`: md-tree renders the heading that opens a file only
+as frontmatter, so a grader that reads the split files would flag those
+headings as missing, and jsonl is not meant for reading by eye. All
+formats use the same elements.
 
 ```bash
 uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/tools/assemble-output/scripts/assemble.py" --doc <name> --format md
@@ -167,15 +188,19 @@ retry that only re-extracted 2 pages still produces a complete document.
 - **`pdf`/`pptx`/`image`**: `plan.py --doc <name> --stage grade
   [--max-pages <n>]` prints `batches`, weighted by each page's figure count.
   **Spawn one `grader` per batch in parallel**, each with its `pages` and
-  the assembled output's location (for `md-tree`, `output/<doc>/<doc>.md`,
+  the assembled output's location (for `md-tree` and `jsonl`, `output/<doc>/<doc>.md`,
   see step 3). Wait for all of them. On a retry only the escalated pages are
-  regraded; the others' grade shards are still valid.
+  regraded (`decide` deleted their old grade shards); the others' are still valid.
 - **`docx`/`xlsx`/`html`** (`plan.py` prints `text_mode: true`; no rendered
   page, see `grade-output/text-rubric.md`): no agents. Run
   `grade-output/scripts/text_mode_grade.py --doc <name>` once.
 
 Then `grade-output/scripts/merge_grades.py --doc <name> --attempt <attempt>`.
 Its stdout is a summary; you never need to read `grade-report.json`.
+**Exit 1** with `no grade shard for pages [...]` means a grader stopped
+before it wrote those pages: spawn one `grader` for them and run
+`merge_grades.py` again. Still failing after that: `state.py reject --doc
+<name> --reason "<the error: line>"`, next document.
 
 ### 5. Decide
 
@@ -183,7 +208,8 @@ Its stdout is a summary; you never need to read `grade-report.json`.
 and prints the document's new `status`:
 
 - `passed` → if `--zip`, run `assemble-output/scripts/zip_output.py --doc
-  <name>`. Next document.
+  <name>`. If `--findings <dir>`, run `queue-state/scripts/findings.py --doc
+  <name> --dest <dir>` and report the folders it prints. Next document.
 - `retrying` → loop to step 2 for this document. `escalated_pages` holds
   each page's new tier, `recheck_images` flag and the grader's `reason`;
   `plan.py` reads them from the queue file.

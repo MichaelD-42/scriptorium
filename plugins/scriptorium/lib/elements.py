@@ -155,7 +155,9 @@ def merge_shards(
                     furniture_lib.page_content_rect(furniture, page_widths.get(n), page_heights.get(n)),
                 )
             combined = body_elements + image_elements
-            combined.sort(key=lambda e: e.get("bbox", [0, 0, 0, 0])[1])
+            # An ocr paragraph has no bbox, only its `top` (ocr.py).
+            # shortcut: a vision body has neither, so its figures trail its text; upgrade if graders tag wrong_reading_order on vision pages.
+            combined.sort(key=lambda e: e["bbox"][1] if "bbox" in e else e.get("top", 0))
             pages[n] = {
                 "page_number": n,
                 "tier": body_tier,
@@ -287,22 +289,27 @@ def apply_page_break_joins(pages: dict[int, dict]) -> None:
             continue
         if next_el["type"] != "paragraph":
             continue
-        if "bbox" not in prev_el or "bbox" not in next_el:
-            continue  # defensive: real elements always carry bbox (Task A2); a hand-built fixture without one just never joins
-        # Follow-up R27: a label/value row continues only in its value
-        # column ("To Be" | "Selected"); the body after it is not the row.
-        join_x = prev_el.get("row_value_x", prev_el.get("text_x", prev_el["bbox"][0]))
-        if abs(next_el["bbox"][0] - join_x) > JOIN_X_TOLERANCE:
+        if "bbox" in prev_el and "bbox" in next_el:
+            # Follow-up R27: a label/value row continues only in its value
+            # column ("To Be" | "Selected"); the body after it is not the row.
+            join_x = prev_el.get("row_value_x", prev_el.get("text_x", prev_el["bbox"][0]))
+            if abs(next_el["bbox"][0] - join_x) > JOIN_X_TOLERANCE:
+                continue
+        elif not next_el["text"][:1].islower():
+            # An ocr/vision element has no bbox, so no x check: only a
+            # lowercase start says the sentence goes on.
+            # shortcut: misses a continuation that starts with a capitalised noun (German); upgrade if graders tag split_paragraph on such pages.
             continue
 
         prev_el["text"] = join_text(prev_el["text"], next_el["text"])
         prev_el["pages"] = [n, n_next]
-        prev_el["bbox"] = [
-            min(prev_el["bbox"][0], next_el["bbox"][0]),
-            min(prev_el["bbox"][1], next_el["bbox"][1]),
-            max(prev_el["bbox"][2], next_el["bbox"][2]),
-            max(prev_el["bbox"][3], next_el["bbox"][3]),
-        ]
+        if "bbox" in prev_el and "bbox" in next_el:
+            prev_el["bbox"] = [
+                min(prev_el["bbox"][0], next_el["bbox"][0]),
+                min(prev_el["bbox"][1], next_el["bbox"][1]),
+                max(prev_el["bbox"][2], next_el["bbox"][2]),
+                max(prev_el["bbox"][3], next_el["bbox"][3]),
+            ]
         pages[n_next]["elements"] = [el for el in pages[n_next]["elements"] if el is not next_el]
 
 

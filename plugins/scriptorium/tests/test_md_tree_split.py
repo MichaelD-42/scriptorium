@@ -34,6 +34,7 @@ reading tests first:
 """
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -149,15 +150,15 @@ class TestBuildMdTreeSections:
 
         ch1 = folders[0]
         assert (ch1["number"], ch1["title"], ch1["level"]) == ("1", "Chapter One", 1)
-        assert ch1["pre"]["elements"] == [_para("chapter one intro")]
-        assert [f["number"] for f in ch1["files"]] == ["1.1", "1.2"]
-        assert ch1["files"][0]["elements"] == [_para("section one body")]
-        assert ch1["files"][1]["elements"] == [_para("section two body")]
+        assert ch1["elements"] == [_para("chapter one intro")]
+        assert [f["number"] for f in ch1["children"]] == ["1.1", "1.2"]
+        assert ch1["children"][0]["elements"] == [_para("section one body")]
+        assert ch1["children"][1]["elements"] == [_para("section two body")]
 
         ch2 = folders[1]
         assert (ch2["number"], ch2["title"]) == ("2", "Chapter Two")
-        assert ch2["pre"]["elements"] == []  # no content between "2" and "2.1"
-        assert [f["number"] for f in ch2["files"]] == ["2.1"]
+        assert ch2["elements"] == []  # no content between "2" and "2.1"
+        assert [f["number"] for f in ch2["children"]] == ["2.1"]
 
     def test_heading_deeper_than_split_depth_stays_inline(self):
         pages = [{
@@ -173,7 +174,7 @@ class TestBuildMdTreeSections:
             ],
         }]
         _front_matter, folders = assemble.build_md_tree_sections(pages, split_depth=2)
-        file_elements = folders[0]["files"][0]["elements"]
+        file_elements = folders[0]["children"][0]["elements"]
         assert file_elements == [
             _para("body"),
             _heading(3, "1.1.1 Subsection"),
@@ -192,15 +193,28 @@ class TestBuildMdTreeSections:
         }]
         _front_matter, folders = assemble.build_md_tree_sections(pages, split_depth=2)
         assert len(folders) == 1
-        assert folders[0]["files"] == []
-        assert folders[0]["pre"]["elements"] == [_para("only content, no subsections")]
+        assert folders[0]["children"] == []
+        assert folders[0]["elements"] == [_para("only content, no subsections")]
 
     def test_chapter_with_no_content_and_no_children_is_still_tracked(self):
         pages = [{"page_number": 1, "elements": [_heading(1, "5 Empty Chapter")]}]
         _front_matter, folders = assemble.build_md_tree_sections(pages, split_depth=2)
         assert len(folders) == 1
-        assert folders[0]["pre"]["elements"] == []
-        assert folders[0]["files"] == []
+        assert folders[0]["elements"] == []
+        assert folders[0]["children"] == []
+
+    def test_split_depth_3_nests_level_2_folders_under_their_chapter(self):
+        pages = [{"page_number": 1, "elements": [
+            _heading(1, "1 A"), _heading(2, "1.1 B"), _heading(3, "1.1.1 C"), _para("c body"),
+            _heading(2, "1.2 D"), _para("d body"), _heading(1, "2 E"), _heading(3, "2.0.1 F"),
+        ]}]
+        _front, roots = assemble.build_md_tree_sections(pages, split_depth=3)
+        assert [r["number"] for r in roots] == ["1", "2"]
+        assert [c["number"] for c in roots[0]["children"]] == ["1.1", "1.2"]
+        assert roots[0]["children"][0]["children"][0]["elements"] == [_para("c body")]
+        assert roots[0]["children"][1]["elements"] == [_para("d body")]
+        # A skipped level: the file sits directly in its chapter's folder.
+        assert [c["number"] for c in roots[1]["children"]] == ["2.0.1"]
 
     def test_source_pages_track_every_contributing_page_in_order(self):
         pages = [
@@ -208,7 +222,7 @@ class TestBuildMdTreeSections:
             {"page_number": 2, "elements": [_para("p2 continues on the next page")]},
         ]
         _front_matter, folders = assemble.build_md_tree_sections(pages, split_depth=2)
-        assert folders[0]["files"][0]["source_pages"] == [1, 2]
+        assert folders[0]["children"][0]["source_pages"] == [1, 2]
 
 
 # --------------------------------------------------------------------------
@@ -342,6 +356,26 @@ class TestWriteMdTreeIndex:
         assert "[Front Matter](00-front-matter.md)" in index_md
         assert "[1 Chapter One](01-chapter-one/01.00-chapter-one.md)" in index_md
         assert "[1.1 Section](01-chapter-one/01.01-section.md)" in index_md
+
+    def test_a_repeated_section_number_gets_its_own_file(self, tmp_project):
+        """Two bundled parts that both number "1 General / 1.1 Scope" map to
+        one path; the second must not overwrite the first."""
+        part = lambda text: [  # noqa: E731
+            {"type": "heading", "level": 1, "text": "1 General"},
+            {"type": "heading", "level": 2, "text": "1.1 Scope"},
+            {"type": "paragraph", "text": text},
+        ]
+        doc_data = {"doc": "d", "pages": {
+            1: {"page_number": 1, "elements": part("first part")},
+            2: {"page_number": 2, "elements": part("second part")},
+        }}
+        written = assemble.write_md_tree(doc_data, "d", split_depth=2)
+        bodies = [p.read_text() for p in written if p.name != "index.md"]
+        assert sum("first part" in b for b in bodies) == 1
+        assert sum("second part" in b for b in bodies) == 1
+        index_md = next(p for p in written if p.name == "index.md").read_text()
+        links = re.findall(r"\]\(([^)]+)\)", index_md)
+        assert len(set(links)) == 2 and all((paths.output_dir("d") / link).is_file() for link in links)
 
     def test_empty_chapter_gets_a_plain_label_not_a_dead_link(self, tmp_project):
         doc_data = {
@@ -581,21 +615,42 @@ class TestFurnitureSampleMdTree:
         md_single = paths.output_file(furniture_doc, "md")
         assert b"\r" not in md_single.read_bytes()
 
-    def test_split_depth_other_than_2_is_rejected(self, furniture_doc, tmp_project):
-        # build_md_tree_sections only implements true nested-folder
-        # splitting for split_depth == 2 -- any other value silently
-        # produces wrong output (colliding folder numbers across unrelated
-        # chapters) rather than crashing, so it must be rejected at the CLI
-        # instead. Confirmed against the real CLI subprocess, not just a
-        # direct function call, so this covers argparse wiring too.
+    def _tree(self, furniture_doc, tmp_project, depth):
+        self._extract(furniture_doc, tmp_project)
+        _run_ok("assemble-output/scripts/assemble.py", "--doc", furniture_doc,
+                "--format", "md-tree", "--split-depth", str(depth), cwd=tmp_project)
+        out = paths.output_dir(furniture_doc)
+        index = (out / "index.md").read_text()
+        links = re.findall(r"\]\(([^)]+)\)", index)
+        assert links and all((out / link).is_file() for link in links)
+        return out, index
+
+    def test_split_depth_1_writes_one_file_per_chapter(self, furniture_doc, tmp_project):
+        out, index = self._tree(furniture_doc, tmp_project, 1)
+        assert (out / "01-introduction.md").is_file()
+        assert not (out / "01-introduction").exists()
+        assert "* [1 Introduction](01-introduction.md)" in index
+        assert "1.1 Purpose and Scope" not in index  # level 2 stays inline
+        assert "## 1.1 Purpose and Scope" in (out / "01-introduction.md").read_text()
+
+    def test_split_depth_3_nests_a_folder_per_level_2_heading(self, furniture_doc, tmp_project):
+        out, index = self._tree(furniture_doc, tmp_project, 3)
+        sub = out / "02-system-requirements" / "02.01-functional-requirements"
+        assert (sub / "02.01.00-functional-requirements.md").is_file()
+        assert (sub / "02.01.01-data-processing-pipeline.md").is_file()
+        assert "    * [2.1.1 Data Processing Pipeline](02-system-requirements/02.01-functional-requirements/02.01.01-data-processing-pipeline.md)" in index
+        nested = out / "02-system-requirements" / "02.02-non-functional-requirements" / "02.02.00-non-functional-requirements.md"
+        assert "(../../assets/page7_vector1.png)" in nested.read_text()  # two folders deep
+
+    @pytest.mark.parametrize("depth", ["0", "7"])
+    def test_split_depth_outside_1_6_is_rejected(self, furniture_doc, tmp_project, depth):
         self._extract(furniture_doc, tmp_project)
         result = run_script(
             "assemble-output/scripts/assemble.py", "--doc", furniture_doc,
-            "--format", "md-tree", "--split-depth", "3", cwd=tmp_project,
+            "--format", "md-tree", "--split-depth", depth, cwd=tmp_project,
         )
         assert result.returncode != 0
         assert "split-depth" in result.stderr.lower()
-        assert "2" in result.stderr
         assert not (paths.output_dir(furniture_doc) / "index.md").exists()
 
     def test_gates_accepts_md_tree_end_to_end(self, furniture_doc, tmp_project):
@@ -619,3 +674,26 @@ class TestFurnitureSampleMdTree:
         assert checks["output_file_exists"]["passed"] is True, checks["output_file_exists"]
         assert checks["furniture_absent"]["passed"] is True, checks["furniture_absent"]
         assert checks["toc_headings_match"]["passed"] is True, checks["toc_headings_match"]
+
+
+@pytest.mark.parametrize("fmt", ["md-tree", "okf"])
+def test_a_reassembly_drops_the_previous_bundle(tmp_project, fmt):
+    """A retry that fixes a heading renames its file; the old file must not
+    ship beside the new one. The single-file <doc>.md stays, even for a
+    document whose name starts with digits like a section file."""
+    doc = "2024-report"
+
+    def doc_data(heading):
+        elements = [{"type": "heading", "level": 1, "text": heading}, {"type": "paragraph", "text": "Body."}]
+        return {"doc": doc, "source_file": "", "pages": {1: {"page_number": 1, "tier": "text", "elements": elements}}}
+
+    write = (lambda d: assemble.write_md_tree(d, doc, split_depth=1)) if fmt == "md-tree" else (lambda d: assemble.write_okf(d, doc))
+    out = paths.output_dir(doc)
+    out.mkdir(parents=True)
+    (out / f"{doc}.md").write_text("single file")
+    write(doc_data("1 Intrduction"))
+    written = write(doc_data("1 Introduction"))
+
+    on_disk = {p for p in out.rglob("*.md")}
+    assert on_disk == set(written) | {out / f"{doc}.md"}
+    assert not any("intrduction" in p.name for p in on_disk)

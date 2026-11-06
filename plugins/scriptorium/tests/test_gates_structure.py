@@ -15,7 +15,7 @@ import pytest
 
 import elements as elements_lib
 import paths
-from conftest import EXAMPLES_ROOT, describe_all_images, load_script, run_script
+from conftest import EXAMPLES_ROOT, describe_all_images, gates_report, load_script, run_script
 
 gates = load_script("grade-output/scripts/gates.py", "gates_module_a9")
 
@@ -478,7 +478,7 @@ class TestGatesCliReadsTriageAndToc:
 
     def test_all_three_checks_present_and_passing(self, tmp_project):
         self._seed(tmp_project, "1 Introduction", "Cover.\n\n# 1 Introduction\n")
-        report = json.loads(_run_ok("grade-output/scripts/gates.py", "--doc", "doc", cwd=tmp_project))
+        report = gates_report("doc", cwd=tmp_project)
         checks = {c["name"]: c for c in report["checks"]}
         for name in ("furniture_absent", "toc_headings_match", "figures_complete"):
             assert checks[name]["passed"] is True, checks[name]
@@ -486,7 +486,7 @@ class TestGatesCliReadsTriageAndToc:
 
     def test_a_failing_structure_check_fails_the_report(self, tmp_project):
         self._seed(tmp_project, "1 Intro", "Cover.\n\n# 1 Intro\n\npage 2 (2)\n\npage 2 (2)\n\npage 2 (2)\n")
-        report = json.loads(_run_ok("grade-output/scripts/gates.py", "--doc", "doc", cwd=tmp_project))
+        report = gates_report("doc", cwd=tmp_project)
         checks = {c["name"]: c for c in report["checks"]}
         assert checks["furniture_absent"]["passed"] is False
         assert checks["toc_headings_match"]["passed"] is False
@@ -496,7 +496,7 @@ class TestGatesCliReadsTriageAndToc:
         self._seed(tmp_project, "1 Introduction", "Cover.\n\n# 1 Introduction\n")
         paths.triage_json("doc").unlink()
         paths.toc_json("doc").unlink()
-        report = json.loads(_run_ok("grade-output/scripts/gates.py", "--doc", "doc", cwd=tmp_project))
+        report = gates_report("doc", cwd=tmp_project)
         checks = {c["name"]: c for c in report["checks"]}
         assert checks["furniture_absent"]["passed"] is True
         assert checks["toc_headings_match"]["passed"] is True
@@ -548,7 +548,7 @@ class TestFurnitureSampleEndToEnd:
         md = (paths.output_dir(furniture_doc) / f"{furniture_doc}.md").read_text(encoding="utf-8")
         assert "no_visible_text" not in md
         assert "Synthetic test caption" not in md
-        report = json.loads(_run_ok("grade-output/scripts/gates.py", "--doc", furniture_doc, "--format", "md", cwd=tmp_project))
+        report = gates_report(furniture_doc, "--format", "md", cwd=tmp_project)
         checks = {c["name"]: c for c in report["checks"]}
         for name in ("furniture_absent", "toc_headings_match", "figures_complete"):
             assert checks[name]["passed"] is True, checks[name]
@@ -558,8 +558,7 @@ class TestFurnitureSampleEndToEnd:
         _extract_pdf(furniture_doc, tmp_project)
         _run_ok("assemble-output/scripts/merge.py", "--doc", furniture_doc, cwd=tmp_project)
         _run_ok("assemble-output/scripts/assemble.py", "--doc", furniture_doc, "--format", "md", cwd=tmp_project)
-        result = run_script("grade-output/scripts/gates.py", "--doc", furniture_doc, "--format", "md", cwd=tmp_project)
-        checks = {c["name"]: c for c in json.loads(result.stdout)["checks"]}
+        checks = {c["name"]: c for c in gates_report(furniture_doc, "--format", "md", cwd=tmp_project)["checks"]}
         figures = checks["figures_complete"]
         assert figures["passed"] is False
         golden = json.loads((EXAMPLES_ROOT / "furniture_golden.json").read_text())
@@ -579,7 +578,7 @@ class TestSamplePdfEndToEnd:
         describe_all_images(pdf_doc, tmp_project)
         _run_ok("assemble-output/scripts/merge.py", "--doc", pdf_doc, cwd=tmp_project)
         _run_ok("assemble-output/scripts/assemble.py", "--doc", pdf_doc, "--format", "md", cwd=tmp_project)
-        report = json.loads(run_script("grade-output/scripts/gates.py", "--doc", pdf_doc, "--format", "md", cwd=tmp_project).stdout)
+        report = gates_report(pdf_doc, "--format", "md", cwd=tmp_project)
         checks = {c["name"]: c for c in report["checks"]}
         assert checks["furniture_absent"]["passed"] is True
         assert checks["toc_headings_match"]["passed"] is True

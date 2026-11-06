@@ -18,9 +18,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       # Covers the ocr-page tool's tesseract path. LibreOffice (needed only
-      # for render-pages' pptx->PDF conversion) is intentionally not
-      # installed here -- tests behind that path are marked
-      # `requires_libreoffice` and skip automatically without it.
+      # for render-pages' pptx->PDF conversion) is not installed here: the
+      # `requires_libreoffice` tests skip, and the libreoffice job runs them.
       - name: Install tesseract
         run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
 
@@ -34,4 +33,33 @@ jobs:
         working-directory: plugins/scriptorium
         # Coverage once, on 3.12: its sys.monitoring core keeps subprocess coverage
         # cheap; on 3.11 the fallback tracer makes the suite ~8x slower.
-        run: uv run pytest ${{ matrix.python-version == '3.11' && '--no-cov' || '' }}
+        # The floor sits a little under the local figure: CI skips the LibreOffice tests.
+        run: uv run pytest ${{ matrix.python-version == '3.11' && '--no-cov' || '--cov-fail-under=94' }}
+
+      # The LLM-free extraction eval: fails when a corpus score drops below
+      # its floor in evals/extraction/corpus.json. Deterministic, so once.
+      - name: Extraction eval
+        if: matrix.python-version == '3.12'
+        run: uv run --project plugins/scriptorium python evals/extraction/run.py
+
+  libreoffice:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      # `soffice --version` fails the job if the install is broken; without
+      # soffice the marked tests would skip and pass green.
+      - name: Install LibreOffice
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libreoffice-impress && soffice --version
+
+      - name: Install dependencies
+        working-directory: plugins/scriptorium
+        run: uv sync
+
+      - name: Run LibreOffice tests
+        working-directory: plugins/scriptorium
+        run: uv run pytest -m requires_libreoffice --no-cov

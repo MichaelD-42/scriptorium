@@ -8,7 +8,7 @@
 # Usage: check_env.sh <plugin-root>
 # Exit codes: 0 = ready to proceed (possibly in text-only / no-pptx-render
 # mode if tesseract/soffice could not be installed); 1 = fatal, uv itself
-# could not be obtained.
+# could not be obtained, or `uv sync` failed.
 
 set -eu
 
@@ -35,7 +35,10 @@ log "uv: ok ($(uv --version))"
 
 # uv fetches a matching Python per pyproject.toml's requires-python itself —
 # no separate Python bootstrap step needed.
-uv sync --project "$PLUGIN_ROOT" --quiet
+if ! uv sync --project "$PLUGIN_ROOT" --quiet; then
+    log "FATAL: uv sync failed; the Python environment is not usable."
+    exit 1
+fi
 log "python env: synced"
 
 can_sudo() { sudo -n true >/dev/null 2>&1; }

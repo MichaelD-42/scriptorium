@@ -71,6 +71,35 @@ A page with no text, no image and no drawing is `"tier": "text"` with
 `"reason": "blank page"`: there is nothing to OCR. `extract-text` marks it
 `"skipped": "blank"`.
 
+## Pre-analysis (`pre_analysis.py`)
+
+Before any extraction, triage records what the document holds and which
+known quirks it has, in `triage.json`'s `pre_analysis`:
+
+```json
+"pre_analysis": {
+  "scopes": {"scanned_pages": [5], "bitmap_pages": [3], "data_table_pages": [2],
+             "furniture": true, "toc_entries": 0, "text_languages": ["deu", "eng"]},
+  "quirks": [{"name": "layout_table", "pages": [1, 2], "measure": "..."}]
+}
+```
+
+The stdout summary carries `quirks` (names), `text_languages` and
+`bitmap_pages`. Every quirk has a measure that already runs; the list only
+says which ones this document needed:
+
+| quirk | detected when | measure |
+|---|---|---|
+| `layout_table` | a table under half filled with a cell of 150+ characters: a grid that arranges prose (`lib/figures.py`'s `is_layout_table`) | `extract-text` reads its text as headings and paragraphs, not as a table |
+| `heading_in_block` | a text block whose first line is an accent heading (heavy, coloured) and whose other lines are not | `extract-text` splits the heading off |
+| `side_margin_text` | a rotated line in the left or right margin band | removed as furniture by `extract-text` and `merge` |
+| `garbled_text_layer` | a page's text layer is mostly unmappable glyphs | the page goes to OCR (its tier) |
+| `text_language` | the text layer's stopwords are not only English (`deu`, `fra`, `spa`, `ita`, `nld`) | the orchestrator adds the languages to `ensure_language.py --extra`, for scans and bitmap labels |
+
+A new problem found on a real document (a `findings.py` folder) becomes a
+detector in `pre_analysis.py`, a measure in the script that handles it,
+and a test with a synthetic page that has the quirk.
+
 ## `toc.json`
 
 Also writes `work/<doc-name>/toc.json`:

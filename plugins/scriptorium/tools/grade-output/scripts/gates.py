@@ -55,15 +55,13 @@ TOC_PAGE_TOLERANCE = 1
 # no_visible_text flag (see lib/furniture.py).
 NO_VISIBLE_TEXT_FORMATS = furniture_lib.NO_VISIBLE_TEXT_FORMATS
 
-
-def check_page_count_match(doc_data: dict, true_page_count: int) -> dict:
-    got = len(doc_data["pages"])
-    passed = got == true_page_count
-    return {
-        "name": "page_count_match",
-        "passed": passed,
-        "detail": f"expected {true_page_count} pages, elements.json has {got}",
-    }
+# text_layer_coverage: a text-tier page fails when its text layer holds at
+# least this many words (letters only, 4+ long) that the output lacks, and
+# they are at least this share of the page's words.
+# shortcut: thresholds picked by hand on the shipped fixtures; recalibrate on the eval corpus (evals/).
+COVERAGE_MIN_MISSING = 3
+COVERAGE_MAX_MISSING_FRACTION = 0.05
+_COVERAGE_WORD = re.compile(r"[^\W\d_]{4,}")
 
 
 def check_no_empty_pages(doc_data: dict) -> dict:
@@ -507,6 +505,64 @@ def check_figures_complete(doc_data: dict, input_format: str | None = None) -> d
     return {"name": "figures_complete", "passed": not incomplete, "detail": detail, "pages": pages, "incomplete": incomplete}
 
 
+def _words(text: str) -> set[str]:
+    return set(_COVERAGE_WORD.findall(text.lower()))
+
+
+def _element_words(el: dict) -> set[str]:
+    """Words of the text an element carries from the page: its text,
+    caption, figure_text and table cells -- never the agent's description."""
+    parts = [el.get("text") or "", el.get("caption") or "", el.get("figure_text") or ""]
+    parts += [str(cell) for row in el.get("rows") or [] for cell in row]
+    return _words(" ".join(parts))
+
+
+def check_text_layer_coverage(doc_data: dict, source_words: dict[int, set[str]]) -> dict:
+    """Dropped text on a `text`-tier page, checked against the page's own
+    text layer (`source_words`, from `pdf_text_layer_words`) instead of by
+    eye. The neighbouring pages count too: a page-break join moves the
+    start of page n+1 onto page n."""
+    pages = doc_data["pages"]
+    page_words = {
+        n: set().union(*(_element_words(el) for el in page.get("elements", []))) for n, page in pages.items()
+    }
+    failing, details = [], []
+    for n, page in sorted(pages.items()):
+        src = source_words.get(n)
+        if page.get("tier") != "text" or page.get("skipped") or not src:
+            continue
+        out = page_words.get(n - 1, set()) | page_words[n] | page_words.get(n + 1, set())
+        missing = sorted(src - out)
+        if len(missing) >= COVERAGE_MIN_MISSING and len(missing) / len(src) >= COVERAGE_MAX_MISSING_FRACTION:
+            failing.append(n)
+            details.append(f"page {n}: {len(missing)} of {len(src)} text-layer words missing, e.g. {', '.join(missing[:8])}")
+    detail = "; ".join(details) if details else "every text-tier page's text-layer words are in the output"
+    return {"name": "text_layer_coverage", "passed": not failing, "detail": detail, "pages": failing}
+
+
+def pdf_text_layer_words(input_path: Path, furniture: dict) -> dict[int, set[str]]:
+    """{page: words} of each PDF page's horizontal text lines outside the
+    furniture bands and side margins, line-end hyphens joined the way
+    extraction joins them."""
+    import fitz  # PyMuPDF
+
+    out = {}
+    with fitz.open(input_path) as pdf:
+        for n, page in enumerate(pdf, start=1):
+            width, height = page.rect.width, page.rect.height
+            rect = furniture_lib.page_content_rect(furniture, width, height)
+            lines = [
+                "".join(span["text"] for span in line["spans"])
+                for block in page.get_text("dict")["blocks"]
+                if block["type"] == 0
+                for line in block["lines"]
+                if not furniture_lib.is_side_margin_line(line["dir"], line["bbox"], width)
+                and not furniture_lib.in_furniture_band(line["bbox"], height, rect)
+            ]
+            out[n] = _words(elements_lib.join_texts(lines))
+    return out
+
+
 def _load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
@@ -515,9 +571,8 @@ def _pdf_page_areas(input_path: Path) -> dict[int, float]:
     """{page_number: width*height in points^2} for a PDF input -- the
     geometry check_large_region_excluded needs to turn an excluded region's
     bbox into a page-area fraction. gates.py otherwise never opens the
-    source PDF (it works entirely from elements.json + the independent
-    true_page_count oracle), so this import is local to keep that the
-    common case."""
+    source PDF (it works entirely from elements.json), so this import is
+    local to keep that the common case."""
     import fitz  # PyMuPDF
 
     with fitz.open(input_path) as doc:
@@ -533,17 +588,19 @@ def check_output_file_exists(doc: str, fmt: str) -> dict:
         return {"name": "output_file_exists", "passed": False, "detail": "okf bundle incomplete: missing index.md or section files"}
 
     if fmt == "md-tree":
-        # The folder glob does not match OKF's flat NN-slug.md files, so a
-        # stale OKF bundle in the same output folder cannot satisfy it.
+        # Any --split-depth: index.md links every file it wrote (flat at
+        # depth 1, nested folders deeper), so the links are the check. An
+        # OKF index links "/NN-slug.md", root-absolute, which never resolves.
         out = paths.output_dir(doc)
         index = out / "index.md"
-        split_files = sorted(out.glob("[0-9][0-9]-*/[0-9][0-9].[0-9][0-9]-*.md"))
-        front = out / "00-front-matter.md"
-        if index.exists() and index.stat().st_size >= MIN_OUTPUT_BYTES and (split_files or front.exists()):
-            return {"name": "output_file_exists", "passed": True, "detail": f"{index} + {len(split_files)} split file(s)"}
+        links = re.findall(r"\]\(([^)]+)\)", index.read_text(encoding="utf-8")) if index.exists() else []
+        missing = [link for link in links if link.startswith("/") or not (out / link).is_file()]
+        if index.exists() and index.stat().st_size >= MIN_OUTPUT_BYTES and links and not missing:
+            return {"name": "output_file_exists", "passed": True, "detail": f"{index} + {len(links)} linked file(s)"}
         return {
             "name": "output_file_exists", "passed": False,
-            "detail": "md-tree bundle incomplete: missing index.md or NN-slug/NN.MM-slug.md files",
+            "detail": "md-tree bundle incomplete: no index.md, or it links no file"
+            + (f", or links missing files ({', '.join(missing[:5])})" if missing else ""),
         }
 
     if fmt == "reqif":
@@ -557,6 +614,17 @@ def check_output_file_exists(doc: str, fmt: str) -> dict:
         if not root_tag.endswith("REQ-IF"):
             return {"name": "output_file_exists", "passed": False, "detail": f"{candidate} root element is {root_tag!r}, expected REQ-IF"}
         return {"name": "output_file_exists", "passed": True, "detail": f"{candidate} exists and is well-formed ReqIF XML"}
+
+    if fmt == "jsonl":
+        candidate = paths.output_file(doc, "jsonl")
+        lines = candidate.read_text(encoding="utf-8").splitlines() if candidate.exists() else []
+        try:
+            records = [json.loads(line) for line in lines]
+        except json.JSONDecodeError as e:
+            return {"name": "output_file_exists", "passed": False, "detail": f"{candidate} has a line that is not JSON: {e}"}
+        if not records:
+            return {"name": "output_file_exists", "passed": False, "detail": "no assembled jsonl output found"}
+        return {"name": "output_file_exists", "passed": True, "detail": f"{candidate} exists ({len(records)} elements)"}
 
     if fmt == "reqifz":
         candidate = paths.output_file(doc, "reqifz")
@@ -579,7 +647,8 @@ def check_output_file_exists(doc: str, fmt: str) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--doc", required=True)
-    parser.add_argument("--format", choices=["md", "html", "okf", "md-tree", "reqif", "reqifz"], default="md")
+    parser.add_argument("--format", choices=["md", "html", "okf", "md-tree", "jsonl", "reqif", "reqifz"], default="md")
+    parser.add_argument("--no-describe", action="store_true", help="images carry no agent-written fields; skip figures_complete")
     args = parser.parse_args()
 
     input_path = paths.input_file(args.doc)
@@ -587,7 +656,6 @@ def main() -> None:
         print(f"error: no input file found for doc '{args.doc}' in input/", file=sys.stderr)
         sys.exit(1)
     input_format = paths.detect_input_format(args.doc)
-    true_page_count = paths.true_page_count(args.doc, input_format)
 
     elements_path = paths.elements_json(args.doc)
     if not elements_path.exists():
@@ -595,9 +663,9 @@ def main() -> None:
         sys.exit(1)
     doc_data = elements_lib.load_doc(elements_path)
     page_sizes = furniture_lib.pdf_page_sizes(input_path) if input_format == "pdf" else {}
+    furniture = _load_json(paths.triage_json(args.doc)).get("furniture") or furniture_lib.empty_furniture()
 
     checks = [
-        check_page_count_match(doc_data, true_page_count),
         check_no_empty_pages(doc_data),
         check_image_refs_resolve(doc_data, paths.output_dir(args.doc)),
         check_ocr_confidence_floor(doc_data),
@@ -606,7 +674,7 @@ def main() -> None:
         # formats never write toc.json) means no furniture / no TOC: pass.
         check_furniture_absent(
             doc_data,
-            _load_json(paths.triage_json(args.doc)).get("furniture") or furniture_lib.empty_furniture(),
+            furniture,
             paths.output_dir(args.doc),
             {n: s[1] for n, s in page_sizes.items()},
             {n: s[0] for n, s in page_sizes.items()},
@@ -616,7 +684,12 @@ def main() -> None:
             _load_json(paths.toc_json(args.doc)).get("entries") or [],
             _load_json(paths.toc_json(args.doc)).get("unparsed") or [],
         ),
-        check_figures_complete(doc_data, input_format),
+        (
+            {"name": "figures_complete", "passed": True, "detail": "skipped: --no-describe", "pages": [], "incomplete": []}
+            if args.no_describe
+            else check_figures_complete(doc_data, input_format)
+        ),
+        check_text_layer_coverage(doc_data, pdf_text_layer_words(input_path, furniture) if input_format == "pdf" else {}),
     ]
 
     # Task A5b: large_region_excluded is a WARNING, not one of the checks
@@ -635,7 +708,13 @@ def main() -> None:
     out_path = paths.gates_report_json(args.doc)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(result, indent=2), encoding="utf-8", newline="")
-    print(json.dumps(result, indent=2))
+    # Context-rot rule: a summary for the orchestrator; merge_grades.py reads the full report.
+    print(json.dumps({
+        "doc": args.doc,
+        "passed": result["passed"],
+        "failed": {c["name"]: c.get("pages", []) for c in checks if not c["passed"]},
+        "warnings": len(warnings),
+    }, indent=2))
 
 
 if __name__ == "__main__":

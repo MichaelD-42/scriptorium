@@ -191,7 +191,7 @@ class TestPageTablesExcludesFrame:
         frame_tables = triage["furniture"]["frame_tables"]
         assert frame_tables
 
-        pdf_path = paths.input_pdf(frame_table_doc)
+        pdf_path = paths.input_file(frame_table_doc)
 
         assert figures_lib.page_tables(pdf_path, 1, frame_tables) == []
         assert figures_lib.page_tables(pdf_path, 2, frame_tables) != []

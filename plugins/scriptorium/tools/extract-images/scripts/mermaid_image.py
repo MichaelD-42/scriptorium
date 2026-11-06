@@ -5,7 +5,7 @@ A script can't judge what a diagram shows any more than it can write a
 caption — the calling agent (the `extractor` role) looks at the saved PNG,
 decides the diagram's structure is faithfully reconstructible, and lands its
 mermaid source here, mutating that page's image shard. Mirrors
-caption_image.py, but reads the (possibly multi-line) mermaid source from
+describe_image.py, but reads the (possibly multi-line) mermaid source from
 stdin instead of an argv string, the same way write_vision_page.py reads
 vision-tier elements from stdin.
 

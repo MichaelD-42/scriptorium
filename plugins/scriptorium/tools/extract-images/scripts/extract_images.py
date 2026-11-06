@@ -12,6 +12,7 @@ import elements as elements_lib  # noqa: E402
 import figures as figures_lib  # noqa: E402
 import furniture as furniture_lib  # noqa: E402
 import paths  # noqa: E402
+import tesseract as tesseract_lib  # noqa: E402
 
 import fitz  # PyMuPDF
 from PIL import Image
@@ -39,7 +40,10 @@ def extract_image_document(input_path: Path, assets_dir: Path) -> list[dict]:
     return [{"type": "image", "kind": "bitmap", "asset": f"assets/{out_name}", "bbox": bbox}]
 
 
-def extract_bitmaps(fitz_doc, page, page_number: int, assets_dir: Path, furniture_xrefs: set[int]) -> list[dict]:
+def extract_bitmaps(
+    fitz_doc, page, page_number: int, assets_dir: Path, furniture_xrefs: set[int],
+    ocr_lang: str | None = None, tessdata_dir: str | None = None,
+) -> list[dict]:
     found = []
     idx = 0
     # Follow-up R31: a bitmap on a mosaic panel is part of the panel's figure
@@ -71,6 +75,13 @@ def extract_bitmaps(fitz_doc, page, page_number: int, assets_dir: Path, furnitur
             bbox = [0, 0, 0, 0]  # get_image_bbox couldn't resolve a placement (rare); keep the field present anyway
         element = {"type": "image", "kind": "bitmap", "asset": f"assets/{out_name}", "bbox": bbox}
         _set_caption_if_found(element, page, bbox)
+        if ocr_lang:
+            # A bitmap has no text layer; Tesseract's sure lines spare the
+            # extractor a zoomed transcription. It may still correct them.
+            figure_text = tesseract_lib.ocr_figure_text(out_path, ocr_lang, tessdata_dir)
+            if figure_text:
+                element["figure_text"] = figure_text
+                element["figure_text_source"] = "ocr"
         found.append(element)
     return found
 
@@ -135,6 +146,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--doc", required=True)
     parser.add_argument("--pages", required=True, help="comma-separated 1-indexed page numbers")
+    parser.add_argument("--ocr-lang", help="tesseract language(s) for bitmap figure_text; without it bitmaps get none")
+    parser.add_argument("--tessdata-dir")
     args = parser.parse_args()
 
     page_numbers = [int(p) for p in args.pages.split(",") if p.strip()]
@@ -175,7 +188,9 @@ def main() -> None:
 
         page = fitz_doc[page_number - 1]
         content_rect = furniture_lib.page_content_rect(furniture, page.rect.width, page.rect.height)
-        image_elements = extract_bitmaps(fitz_doc, page, page_number, assets_dir, furniture_xrefs)
+        image_elements = extract_bitmaps(
+            fitz_doc, page, page_number, assets_dir, furniture_xrefs, args.ocr_lang, args.tessdata_dir
+        )
         vector_elements, excluded_regions = extract_vector_regions(
             page, page_number, assets_dir, pdf_path, frame_tables, frame_drawings,
             repeated_drawings=repeated_drawings, content_rect=content_rect,

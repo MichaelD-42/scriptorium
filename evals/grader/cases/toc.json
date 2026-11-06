@@ -1,0 +1,186 @@
+{
+  "doc": "eval-furniture",
+  "entries": [
+    {
+      "number": "1",
+      "title": "Introduction",
+      "page": 4,
+      "level": 1
+    },
+    {
+      "number": "1.1",
+      "title": "Purpose and Scope",
+      "page": 4,
+      "level": 2
+    },
+    {
+      "number": "1.2",
+      "title": "Document Overview",
+      "page": 5,
+      "level": 2
+    },
+    {
+      "number": "2",
+      "title": "System Requirements",
+      "page": 5,
+      "level": 1
+    },
+    {
+      "number": "2.1",
+      "title": "Functional Requirements",
+      "page": 5,
+      "level": 2
+    },
+    {
+      "number": "4",
+      "title": "Appendix A: Glossary",
+      "page": 10,
+      "level": 1
+    },
+    {
+      "number": "4.1",
+      "title": "Terms and Definitions",
+      "page": 10,
+      "level": 2
+    },
+    {
+      "number": "4.2",
+      "title": "Abbreviations",
+      "page": 10,
+      "level": 2
+    },
+    {
+      "number": "5",
+      "title": "Appendix B: References",
+      "page": 10,
+      "level": 1
+    },
+    {
+      "number": "5.1",
+      "title": "Normative References",
+      "page": 10,
+      "level": 2
+    },
+    {
+      "number": "5.2",
+      "title": "Informative References",
+      "page": 10,
+      "level": 2
+    },
+    {
+      "number": "6",
+      "title": "Appendix C: Revision History",
+      "page": 10,
+      "level": 1
+    },
+    {
+      "number": "6.1",
+      "title": "Change Log",
+      "page": 10,
+      "level": 2
+    },
+    {
+      "number": "6.2",
+      "title": "Approval Record",
+      "page": 10,
+      "level": 2
+    },
+    {
+      "number": "7",
+      "title": "Appendix D: Index",
+      "page": 10,
+      "level": 1
+    },
+    {
+      "number": "2.1.1",
+      "title": "Data Processing Pipeline",
+      "page": 6,
+      "level": 3
+    },
+    {
+      "number": "2.1.2",
+      "title": "Edge Case Handling",
+      "page": 7,
+      "level": 3
+    },
+    {
+      "number": "2.2",
+      "title": "Non-Functional Requirements",
+      "page": 7,
+      "level": 2
+    },
+    {
+      "number": "3",
+      "title": "Process Diagrams",
+      "page": 8,
+      "level": 1
+    },
+    {
+      "number": "3.1",
+      "title": "Workflow Overview",
+      "page": 8,
+      "level": 2
+    },
+    {
+      "number": "8",
+      "title": "Appendix E: Contact Information",
+      "page": 11,
+      "level": 1
+    },
+    {
+      "number": "8.1",
+      "title": "Program Office",
+      "page": 11,
+      "level": 2
+    },
+    {
+      "number": "8.2",
+      "title": "Technical Support",
+      "page": 11,
+      "level": 2
+    },
+    {
+      "number": "9",
+      "title": "Appendix F: Safety Notes",
+      "page": 11,
+      "level": 1
+    },
+    {
+      "number": "9.1",
+      "title": "Handling Precautions",
+      "page": 11,
+      "level": 2
+    },
+    {
+      "number": "9.2",
+      "title": "Compliance Statement",
+      "page": 11,
+      "level": 2
+    },
+    {
+      "number": "10",
+      "title": "Appendix G: Standards Referenced",
+      "page": 11,
+      "level": 1
+    },
+    {
+      "number": "10.1",
+      "title": "Industry Standards",
+      "page": 11,
+      "level": 2
+    },
+    {
+      "number": "10.2",
+      "title": "Internal Standards",
+      "page": 11,
+      "level": 2
+    },
+    {
+      "number": "11",
+      "title": "Closing Notes",
+      "page": 11,
+      "level": 1
+    }
+  ],
+  "unparsed": []
+}

@@ -70,7 +70,7 @@ The one place all three extraction tiers converge. Three scripts:
 uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
   "${CLAUDE_PLUGIN_ROOT}/tools/assemble-output/scripts/merge.py" --doc <doc-name>
 uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
-  "${CLAUDE_PLUGIN_ROOT}/tools/assemble-output/scripts/assemble.py" --doc <doc-name> [--format md|html|okf|md-tree|reqif|reqifz] [--split-depth 2]
+  "${CLAUDE_PLUGIN_ROOT}/tools/assemble-output/scripts/assemble.py" --doc <doc-name> [--format md|html|okf|md-tree|jsonl|reqif|reqifz] [--split-depth 1-6]
 ```
 
 Default format is `md`. `html` renders through the Jinja2 template in
@@ -78,8 +78,9 @@ Default format is `md`. `html` renders through the Jinja2 template in
 into a multi-file [OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)
 bundle instead of one file — see the "OKF format" section below. `md-tree`
 splits the document into nested folders and files at a heading depth
-(`--split-depth`, default `2` — **the only value currently supported;
-anything else exits non-zero**) — see the "md-tree format" section below.
+(`--split-depth` 1-6, default `2`) — see the "md-tree format" section
+below. `jsonl` writes one JSON object per element — see the "jsonl format"
+section below.
 `reqif`/`reqifz` write an OMG
 [ReqIF](https://www.omg.org/spec/ReqIF/About-ReqIF/) document instead — see
 the "ReqIF format" section below.
@@ -179,6 +180,22 @@ instead of one large document):
 `H1` section they fall under (a flat split, not nested chapters/sections).
 A document with no `H1` at all produces a single `00-front-matter.md` file.
 
+## jsonl format
+
+`--format jsonl` writes `output/<doc>/<doc>.jsonl`: one JSON object per
+element, in reading order, for chunking (RAG) or importing elsewhere; a
+per-element file is a one-line projection of it. Furniture images are left
+out. Each record has `id` (`p<page>-<n>`, stable for one extraction),
+`type`, `pages` (source pages; two for a paragraph joined across a page
+break), `heading_path` (the headings above it, outermost first; for a
+heading, the headings it sits under) and the element's own fields when set:
+`level`, `marker`, `text`, `rows`, `asset`, `caption`, `description`,
+`figure_text`, `data_table`, `mermaid`, `bbox`.
+
+```json
+{"id": "p5-6", "type": "paragraph", "pages": [5], "heading_path": ["2 System Requirements", "2.1 Functional Requirements"], "text": "...", "bbox": [72.0, 340.1, 540.0, 380.9]}
+```
+
 ## md-tree format
 
 `--format md-tree --split-depth N` splits the document into nested folders
@@ -189,16 +206,16 @@ level at which a NEW FILE starts: levels shallower than `N` become folders,
 level `N` itself starts a file, levels deeper than `N` stay as headings
 inline within that file.
 
-**Only `--split-depth 2` is currently supported** (folder per level-1
-heading, file per level-2 heading) — `assemble.py` rejects any other value
-with a non-zero exit rather than silently producing wrong output.
-Internally, `build_md_tree_sections` collapses every level `< N` onto a
-single flattened "current folder" rather than a truly nested folder stack,
-which is only correct for `N == 2`; for `N > 2` this produces colliding
-folder numbers across unrelated chapters (confirmed, not just theoretical —
-see `build_md_tree_sections`'s docstring). Nested-folder generalization for
-`N > 2` is unimplemented, not merely untested; the CLI check exists so that
-gap can't be hit silently.
+`N` is 1-6 (`assemble.py` exits non-zero otherwise). `1` writes one file
+per chapter, flat next to `index.md` (`NN-<slug>.md`); `2` a folder per
+chapter and a file per section (the layout below, unchanged since it was
+the only depth); `3` adds a folder per section and a file per subsection
+(`NN-<slug>/NN.MM-<slug>/NN.MM.KK-<slug>.md`), and so on. Deeper folders
+follow the same rules as the level-1 folder below: a folder's own content
+before its first child goes to `<code>.00-<slug>.md` inside it, and its
+code is its ancestors' codes plus its own (`02.01`). A heading that skips a
+level (a level-3 heading right under a level-1 one) nests under the
+deepest open folder. The index nests the same way, two spaces per level.
 
 **Layout** (`--split-depth 2`):
 
@@ -212,7 +229,8 @@ gap can't be hit silently.
   heading's own leading number, zero-padded to 2 digits (a 1-based
   sequential index if the heading has no parseable leading number); `<slug>`
   is a URL-safe slug of its title (the OKF format's existing `slugify()`
-  helper).
+  helper). A name already taken in the same folder (two parts that both
+  number "1 General") gets `-2`, `-3`, ... so neither overwrites the other.
 - `output/<doc>/NN-<slug>/NN.00-<slug>.md` — that level-1 heading's own body
   content that isn't yet under any level-2 child. Also used for a chapter
   with NO level-2 children at all (its whole body lands here, rather than
@@ -252,7 +270,9 @@ helper OKF uses.
 - A heading that opens a file (level `<= N`): the anchor line is the first
   body line of that file, followed by a blank line. A level-1 heading with
   no body of its own (no `NN.00` file) puts its anchor at the top of its
-  first `NN.MM` file, before that file's own anchor.
+  first `NN.MM` file, before that file's own anchor. At any depth, a
+  folder without body of its own hands its anchor to the first file
+  written inside it, outermost anchor first.
 - A level-1 heading with neither body content nor level-2 children has no
   file, so it has no anchor. Nothing can point into it, because it holds
   no content.

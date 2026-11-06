@@ -74,3 +74,44 @@ def user_tessdata_dir() -> Path:
     else:
         base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
     return base / "scriptorium" / "tessdata"
+
+
+# A figure crop's OCR is kept line by line, and only lines whose every
+# word Tesseract reads at this confidence or better: screenshots and
+# diagrams give noisy OCR, and a wrong label is worse than none.
+FIGURE_OCR_MIN_CONFIDENCE = 80
+FIGURE_OCR_UPSCALE_BELOW = 1500  # px, the image's longer side
+
+
+def ocr_figure_text(image_path: Path, lang: str, tessdata_dir: str | None = None) -> str:
+    """The high-confidence text lines of a figure image, newline-joined,
+    or "" when tesseract is missing, cannot read the file, or finds none."""
+    import pytesseract
+    from PIL import Image
+
+    cmd = find_tesseract()
+    if not cmd:
+        return ""
+    pytesseract.pytesseract.tesseract_cmd = cmd
+    config = f'--tessdata-dir "{tessdata_dir}"' if tessdata_dir else ""
+    try:
+        with Image.open(image_path) as img:
+            img = img.convert("RGB")
+            if max(img.size) < FIGURE_OCR_UPSCALE_BELOW:
+                # Screenshot text is ~10px high; Tesseract reads it far better at 3x.
+                img = img.resize((img.width * 3, img.height * 3), Image.LANCZOS)
+            data = pytesseract.image_to_data(img, lang=lang, config=config, output_type=pytesseract.Output.DICT)
+    except (OSError, pytesseract.TesseractError):
+        return ""  # an image format PIL cannot open (jbig2, jpx) or a missing language pack
+    lines: dict[tuple[int, int, int], list[tuple[str, float]]] = {}
+    for i, word in enumerate(data["text"]):
+        if word.strip():
+            key = (data["block_num"][i], data["par_num"][i], data["line_num"][i])
+            lines.setdefault(key, []).append((word.strip(), float(data["conf"][i])))
+    kept = [
+        " ".join(w for w, _ in words)
+        for words in lines.values()
+        if all(c >= FIGURE_OCR_MIN_CONFIDENCE for _, c in words)
+        and any(sum(ch.isalpha() for ch in w) >= 2 for w, _ in words)
+    ]
+    return "\n".join(kept)

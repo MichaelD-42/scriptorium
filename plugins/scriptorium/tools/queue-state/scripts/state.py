@@ -32,6 +32,7 @@ NEXT_TIER = {
     "pptx": {"text": "vision"},  # no ocr rung: pptx is digital-native, vision reads the rendered slide
     "image": {"ocr": "vision"},
 }
+TIER_ORDER = ("text", "ocr", "vision")
 # Deterministic extraction, no rendered page: a content defect cannot be retried.
 DIGITAL_NATIVE = ("docx", "xlsx", "html")
 NEEDS_HUMAN_GATES = ("furniture_absent", "toc_headings_match")
@@ -70,6 +71,7 @@ def decide(entry: dict, report: dict, tiers: dict[int, str], max_attempts: int) 
     def escalate(page: int, tier: str, recheck: bool, reason: str) -> None:
         old = escalations.get(page)
         if old:
+            tier = max(tier, old["tier"], key=TIER_ORDER.index)  # never back down to a tier that failed
             reason = f"{old['reason']}; {reason}"
             recheck = recheck or old["recheck_images"]
         escalations[page] = {"tier": tier, "recheck_images": recheck, "reason": reason}
@@ -82,7 +84,7 @@ def decide(entry: dict, report: dict, tiers: dict[int, str], max_attempts: int) 
         elif check["name"] == "figures_complete":
             for page in check.get("pages", []):
                 escalate(page, tiers.get(page, "text"), True, check["detail"])
-        elif check["name"] == "ocr_confidence_floor" and check.get("pages"):
+        elif check["name"] in ("ocr_confidence_floor", "text_layer_coverage") and check.get("pages"):
             for page in check["pages"]:
                 escalate(page, "vision", False, check["detail"])
         else:
@@ -94,7 +96,9 @@ def decide(entry: dict, report: dict, tiers: dict[int, str], max_attempts: int) 
             continue
         page, tier = shard["page_number"], tiers.get(shard["page_number"], "text")
         reason = shard.get("reason") or ", ".join(sorted(issues))
-        if issues & grades.CONTENT_ISSUES:
+        if issues & grades.JOIN_ISSUES:
+            human.append(f"page {page}: {reason} (page-break joins are a script rule; no tier changes them)")
+        elif issues & grades.CONTENT_ISSUES:
             next_tier = NEXT_TIER.get(fmt, {}).get(tier)
             if fmt in DIGITAL_NATIVE:
                 human.append(f"page {page}: {reason} (digital-native extraction is deterministic)")
@@ -258,6 +262,9 @@ def cmd_decide(args) -> None:
     _close_attempt(entry, status=entry["status"], score=report["rubric_verdict"].get("score"), **escalated)
     if entry["status"] == "retrying":  # the orchestrator loops back to extraction without `next`
         _open_attempt(entry)
+        # merge_grades.py must see these pages as ungraded until a grader rewrites them.
+        for page in entry["escalated_pages"]:
+            paths.grade_shard_path(args.doc, int(page)).unlink(missing_ok=True)
     state["docs"][args.doc] = entry
     save_state(state)
     out = {k: entry[k] for k in ("status", "attempt", "reason", "escalated_pages") if k in entry}

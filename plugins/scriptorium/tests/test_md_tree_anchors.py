@@ -134,7 +134,7 @@ class TestJoinedPagesInSourcePages:
             {"page_number": 5, "elements": []},
         ]
         _front, folders = assemble.build_md_tree_sections(pages, split_depth=2)
-        assert folders[0]["files"][0]["source_pages"] == [4, 5]
+        assert folders[0]["children"][0]["source_pages"] == [4, 5]
 
     def test_joined_element_in_front_matter(self):
         pages = [

@@ -116,6 +116,17 @@ class TestExtractStage:
         assert [b["pages"] for b in out["batches"]] == [[2, 3]]
         assert out["batches"][0]["tiers"] == {"2": "text", "3": "ocr"}
 
+    def test_no_describe_leaves_only_ocr_and_vision_bodies(self, tmp_project):
+        doc = _setup(tmp_project, tiers={1: "text", 2: "text", 3: "ocr"})
+        _images(doc, 1, DESCRIBED)
+        _images(doc, 2, BARE, BARE)
+        _images(doc, 3, BARE)
+
+        out = plan.extract_stage(doc, max_pages=None, describe=False)
+
+        assert out["agent_free_pages"] == 2
+        assert [b["pages"] for b in out["batches"]] == [[3]]
+
     def test_retry_batch_carries_tiers_and_reasons(self, tmp_project):
         doc = _setup(
             tmp_project,

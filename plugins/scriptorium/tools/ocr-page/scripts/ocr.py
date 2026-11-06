@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""OCR rendered page PNGs with a pluggable local backend. See README.md."""
+"""OCR rendered page PNGs with Tesseract. See README.md."""
 
 import argparse
 import sys
@@ -7,6 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 import elements as elements_lib  # noqa: E402
+import furniture as furniture_lib  # noqa: E402
 import paths  # noqa: E402
 import tesseract as tesseract_lib  # noqa: E402
 
@@ -18,12 +19,16 @@ if _found:
     pytesseract.pytesseract.tesseract_cmd = _found
 
 
-def ocr_tesseract(image_path: Path, lang: str, tessdata_dir: str | None = None) -> tuple[list[dict], float]:
+def ocr_tesseract(image_path: Path, lang: str, tessdata_dir: str | None = None, scale: float = 1.0) -> tuple[list[dict], float]:
+    """`scale` turns pixels into the page's units (PDF points), for each
+    paragraph's `top`: merge.py sorts it among the page's figures."""
     image = Image.open(image_path)
     config = f'--tessdata-dir "{tessdata_dir}"' if tessdata_dir else ""
     data = pytesseract.image_to_data(image, lang=lang, config=config, output_type=pytesseract.Output.DICT)
 
-    paragraphs: dict[tuple[int, int, int], list[str]] = {}
+    # {(block, par): {line: words}}: Tesseract's paragraph, line by line.
+    paragraphs: dict[tuple[int, int], dict[int, list[str]]] = {}
+    tops: dict[tuple[int, int], int] = {}
     confidences = []
     for i, word in enumerate(data["text"]):
         word = word.strip()
@@ -32,39 +37,45 @@ def ocr_tesseract(image_path: Path, lang: str, tessdata_dir: str | None = None) 
             confidences.append(conf)
         if not word:
             continue
-        key = (data["block_num"][i], data["par_num"][i], data["line_num"][i])
-        paragraphs.setdefault(key, []).append(word)
+        key = (data["block_num"][i], data["par_num"][i])
+        paragraphs.setdefault(key, {}).setdefault(data["line_num"][i], []).append(word)
+        tops[key] = min(tops.get(key, data["top"][i]), data["top"][i])
 
     page_elements = [
-        {"type": "paragraph", "text": " ".join(words)}
-        for words in paragraphs.values()
-        if words
+        {
+            "type": "paragraph",
+            "text": elements_lib.join_texts(" ".join(words) for words in lines.values()),
+            "top": round(tops[key] * scale, 1),
+        }
+        for key, lines in paragraphs.items()
     ]
     avg_conf = (sum(confidences) / len(confidences) / 100.0) if confidences else 0.0
     return page_elements, round(avg_conf, 3)
-
-
-BACKENDS = {"tesseract": ocr_tesseract}
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--doc", required=True)
     parser.add_argument("--pages", required=True, help="comma-separated 1-indexed page numbers")
-    parser.add_argument("--backend", default="tesseract", choices=list(BACKENDS))
     parser.add_argument("--lang", default="eng", help='tesseract language code(s), "+"-joined for multiple (e.g. "eng+deu")')
     parser.add_argument("--tessdata-dir", default=None, help="override tessdata directory (e.g. a user-writable fallback ensure_language.py downloaded packs into)")
     args = parser.parse_args()
 
     page_numbers = [int(p) for p in args.pages.split(",") if p.strip()]
-    backend_fn = BACKENDS[args.backend]
+    # A PDF's figures sit in points; an image document's in its own pixels.
+    page_heights = (
+        {n: s[1] for n, s in furniture_lib.pdf_page_sizes(paths.input_file(args.doc)).items()}
+        if paths.detect_input_format(args.doc) == "pdf" else {}
+    )
 
     for page_number in page_numbers:
         image_path = paths.page_png(args.doc, page_number)
         if not image_path.exists():
             print(f"error: {image_path} not found — run render-pages first", file=sys.stderr)
             sys.exit(1)
-        page_elements, confidence = backend_fn(image_path, args.lang, args.tessdata_dir)
+        with Image.open(image_path) as img:
+            scale = page_heights[page_number] / img.height if page_number in page_heights else 1.0
+        page_elements, confidence = ocr_tesseract(image_path, args.lang, args.tessdata_dir, scale)
         shard_path = paths.shard_path(args.doc, page_number, "ocr")
         elements_lib.write_shard(shard_path, page_number, page_elements, ocr_confidence=confidence)
         print(f"page {page_number}: confidence={confidence} elements={len(page_elements)}")

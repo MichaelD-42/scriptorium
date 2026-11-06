@@ -67,6 +67,13 @@ class TestDecide:
             }
         }
 
+    def test_split_paragraph_is_needs_human_not_vision(self):
+        """The join is a script rule: a vision re-read leaves it unchanged."""
+        out = _decide(_report([_page(4, ["split_paragraph"], "sentence cut at page 4/5")]), {4: "text"})
+        assert out["status"] == "needs-human"
+        assert "sentence cut at page 4/5" in out["reason"]
+        assert out["escalated_pages"] == {}
+
     def test_pdf_ocr_page_goes_to_vision(self):
         out = _decide(_report([_page(1, ["hallucinated_text"])]), {1: "ocr"})
         assert out["escalated_pages"]["1"]["tier"] == "vision"
@@ -161,13 +168,44 @@ class TestDecide:
         """A document-level gate, or low scores with no tags, gives no page
         to re-extract; a retry would rerun nothing and burn an attempt."""
         check = {
-            "name": "page_count_match",
+            "name": "output_file_exists",
             "passed": False,
-            "detail": "expected 5 pages, elements.json has 4",
+            "detail": "no assembled md output found",
         }
         out = _decide(_report([_page(1, [])], checks=[check]), {1: "text"})
         assert out["status"] == "needs-human"
-        assert "page_count_match" in out["reason"]
+        assert "output_file_exists" in out["reason"]
+
+    def test_low_scores_without_tags_are_needs_human(self):
+        out = _decide(_report([_page(1, [])]), {1: "text"})
+        assert out["status"] == "needs-human"
+        assert out["reason"] == "rubric failed without page-level issues to retry"
+
+    def test_gate_and_grader_on_one_page_merge_into_one_escalation(self):
+        check = {
+            "name": "figures_complete",
+            "passed": False,
+            "detail": "image without text",
+            "pages": [2],
+        }
+        out = _decide(
+            _report([_page(2, ["dropped_text"], "caption missing")], checks=[check]),
+            {2: "text"},
+        )
+        assert out["escalated_pages"] == {
+            "2": {
+                "tier": "vision",
+                "recheck_images": True,
+                "reason": "image without text; caption missing",
+            }
+        }
+
+    def test_text_layer_coverage_sends_its_pages_to_vision(self):
+        check = {"name": "text_layer_coverage", "passed": False, "pages": [2],
+                 "detail": "page 2: 9 of 80 text-layer words missing, e.g. firmware"}
+        out = _decide(_report(checks=[check]), {1: "text", 2: "text"})
+        assert out["status"] == "retrying"
+        assert out["escalated_pages"] == {"2": {"tier": "vision", "recheck_images": False, "reason": check["detail"]}}
 
     def test_low_ocr_confidence_goes_to_vision(self):
         check = {
@@ -191,6 +229,15 @@ class TestDecide:
         out = _decide(_report([_page(1, ["missing_image"])], checks=[check]), {1: "text"})
         assert out["status"] == "needs-human"
         assert "image_refs_resolve: missing assets" in out["reason"]
+
+    def test_a_gate_escalation_keeps_its_tier_when_the_grader_tags_an_image(self):
+        """The gate wants vision; an image tag on the same page must not
+        pull the page back to the tier that already failed."""
+        check = {"name": "text_layer_coverage", "passed": False, "pages": [3], "detail": "words missing"}
+        out = _decide(_report([_page(3, ["bad_caption"], "caption wrong")], checks=[check]), {3: "text"})
+        assert out["escalated_pages"] == {
+            "3": {"tier": "vision", "recheck_images": True, "reason": "words missing; caption wrong"}
+        }
 
 
 class TestCli:
@@ -263,6 +310,26 @@ class TestCli:
             == "b"
         )
 
+    def test_set_lang_records_the_ocr_language(self, tmp_project):
+        shutil.copyfile(EXAMPLES_ROOT / "sample.pdf", tmp_project / "input" / "s.pdf")
+        run_script("queue-state/scripts/state.py", "init", cwd=tmp_project)
+
+        result = run_script(
+            "queue-state/scripts/state.py",
+            "set-lang",
+            "--doc",
+            "s",
+            "--lang-flag",
+            "deu+eng",
+            "--tessdata-prefix",
+            "/td",
+            cwd=tmp_project,
+        )
+
+        assert result.returncode == 0, result.stderr
+        entry = self._state()["docs"]["s"]
+        assert (entry["lang_flag"], entry["tessdata_prefix"]) == ("deu+eng", "/td")
+
     def test_decide_reads_report_and_actual_tiers(self, tmp_project):
         shutil.copyfile(EXAMPLES_ROOT / "sample.pdf", tmp_project / "input" / "s.pdf")
         run_script(
@@ -293,3 +360,26 @@ class TestCli:
         assert result.returncode == 0, result.stderr
         assert json.loads(result.stdout)["status"] == "needs-human"
         assert self._state()["docs"]["s"]["status"] == "needs-human"
+
+    def test_a_retry_drops_the_escalated_pages_grade_shards(self, tmp_project):
+        """merge_grades.py fails on a page with no grade shard; an old shard
+        left in place would let the re-extracted page pass ungraded."""
+        shutil.copyfile(EXAMPLES_ROOT / "sample.pdf", tmp_project / "input" / "s.pdf")
+        run_script("queue-state/scripts/state.py", "init", cwd=tmp_project)
+        paths.elements_json("s").parent.mkdir(parents=True)
+        paths.elements_json("s").write_text(json.dumps({"pages": [
+            {"page_number": 1, "tier": "text", "elements": []},
+            {"page_number": 2, "tier": "text", "elements": []},
+        ]}))
+        check = {"name": "text_layer_coverage", "passed": False, "pages": [1], "detail": "words missing"}
+        paths.grade_report_json("s").parent.mkdir(parents=True)
+        paths.grade_report_json("s").write_text(json.dumps(_report([_page(1, []), _page(2, [])], checks=[check])))
+        for n in (1, 2):
+            paths.grade_shard_path("s", n).parent.mkdir(parents=True, exist_ok=True)
+            paths.grade_shard_path("s", n).write_text(json.dumps(_page(n, [])))
+
+        result = run_script("queue-state/scripts/state.py", "decide", "--doc", "s", cwd=tmp_project)
+
+        assert json.loads(result.stdout)["status"] == "retrying", result.stderr
+        assert not paths.grade_shard_path("s", 1).exists()
+        assert paths.grade_shard_path("s", 2).exists()

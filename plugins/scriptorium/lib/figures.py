@@ -279,6 +279,21 @@ CAPTION_CONTINUATION_X_SLACK = 3.0  # pt
 CAPTION_CONTINUATION_GAP_FACTOR = 1.2
 
 
+# A grid that arranges prose (steps side by side, a picture beside its
+# text) rather than data: most of its cells are empty and one holds a
+# paragraph. Its text is read as body text, headings included. Every data
+# table in the fixtures is fully filled with short cells.
+LAYOUT_TABLE_MAX_FILLED_FRACTION = 0.5
+LAYOUT_TABLE_MIN_PROSE_CHARS = 150
+
+
+def is_layout_table(table: dict) -> bool:
+    """`table` is a `page_tables` entry."""
+    return table["filled_fraction"] < LAYOUT_TABLE_MAX_FILLED_FRACTION and any(
+        len(cell) >= LAYOUT_TABLE_MIN_PROSE_CHARS for row in table["rows"] for cell in row
+    )
+
+
 def page_tables(
     pdf_path: Path, page_number: int, frame_tables: list[dict] | None = None,
     content_rect: list[float] | None = None, exclude_regions: list[list[float]] | None = None,
