@@ -357,6 +357,26 @@ class TestWriteMdTreeIndex:
         assert "[1 Chapter One](01-chapter-one/01.00-chapter-one.md)" in index_md
         assert "[1.1 Section](01-chapter-one/01.01-section.md)" in index_md
 
+    def test_a_repeated_section_number_gets_its_own_file(self, tmp_project):
+        """Two bundled parts that both number "1 General / 1.1 Scope" map to
+        one path; the second must not overwrite the first."""
+        part = lambda text: [  # noqa: E731
+            {"type": "heading", "level": 1, "text": "1 General"},
+            {"type": "heading", "level": 2, "text": "1.1 Scope"},
+            {"type": "paragraph", "text": text},
+        ]
+        doc_data = {"doc": "d", "pages": {
+            1: {"page_number": 1, "elements": part("first part")},
+            2: {"page_number": 2, "elements": part("second part")},
+        }}
+        written = assemble.write_md_tree(doc_data, "d", split_depth=2)
+        bodies = [p.read_text() for p in written if p.name != "index.md"]
+        assert sum("first part" in b for b in bodies) == 1
+        assert sum("second part" in b for b in bodies) == 1
+        index_md = next(p for p in written if p.name == "index.md").read_text()
+        links = re.findall(r"\]\(([^)]+)\)", index_md)
+        assert len(set(links)) == 2 and all((paths.output_dir("d") / link).is_file() for link in links)
+
     def test_empty_chapter_gets_a_plain_label_not_a_dead_link(self, tmp_project):
         doc_data = {
             "doc": "d",

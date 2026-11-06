@@ -572,6 +572,16 @@ def write_md_tree(doc_data: dict, doc: str, split_depth: int) -> list[Path]:
         path.write_text(f"{frontmatter}\n{body}", encoding="utf-8", newline="")
         written.append(path)
 
+    used: set[Path] = set()
+
+    def unique_name(parent_dir: Path, base: str, ext: str) -> str:
+        # Two parts that repeat "1.1 Scope" share a name; the second gets -2.
+        name, n = base + ext, 2
+        while parent_dir / name in used:
+            name, n = f"{base}-{n}{ext}", n + 1
+        used.add(parent_dir / name)
+        return name
+
     def write_nodes(nodes: list[dict], parent_dir: Path, rel: str, prefix: str, depth: int) -> None:
         for idx, node in enumerate(nodes, start=1):
             component = _zero_pad_component(node["number"], idx)
@@ -581,7 +591,7 @@ def write_md_tree(doc_data: dict, doc: str, split_depth: int) -> list[Path]:
             indent = "  " * depth
 
             if node["level"] == split_depth:  # a file
-                path = parent_dir / f"{code}-{slug}.md"
+                path = parent_dir / unique_name(parent_dir, f"{code}-{slug}", ".md")
                 write_file(path, node, node["title"], [*pending, node["heading_text"]], "../" * depth)
                 pending.clear()
                 index_lines.append(f"{indent}* [{label}]({rel}{path.name})")
@@ -593,7 +603,7 @@ def write_md_tree(doc_data: dict, doc: str, split_depth: int) -> list[Path]:
                 index_lines.append(f"{indent}* {label}")
                 continue
 
-            dirname = f"{code}-{slug}"
+            dirname = unique_name(parent_dir, f"{code}-{slug}", "")
             folder_dir = parent_dir / dirname
             folder_dir.mkdir(parents=True, exist_ok=True)
             if node["elements"]:

@@ -229,7 +229,8 @@ deepest open folder. The index nests the same way, two spaces per level.
   heading's own leading number, zero-padded to 2 digits (a 1-based
   sequential index if the heading has no parseable leading number); `<slug>`
   is a URL-safe slug of its title (the OKF format's existing `slugify()`
-  helper).
+  helper). A name already taken in the same folder (two parts that both
+  number "1 General") gets `-2`, `-3`, ... so neither overwrites the other.
 - `output/<doc>/NN-<slug>/NN.00-<slug>.md` — that level-1 heading's own body
   content that isn't yet under any level-2 child. Also used for a chapter
   with NO level-2 children at all (its whole body lands here, rather than
