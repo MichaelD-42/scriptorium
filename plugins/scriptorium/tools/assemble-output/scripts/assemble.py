@@ -5,6 +5,7 @@ See README.md."""
 import argparse
 import json
 import re
+import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -274,7 +275,21 @@ def render_frontmatter(fields: dict) -> str:
     return "---\n" + yaml.safe_dump(fields, sort_keys=False, allow_unicode=True) + "---\n"
 
 
+def clear_bundle(doc: str) -> None:
+    """Remove a previous okf/md-tree bundle (index.md and every NN-* file or
+    folder): a retry that fixes a heading renames its section, and the old
+    one must not ship beside it. `<doc>.*` stays."""
+    out_dir = paths.output_dir(doc)
+    for path in out_dir.glob("[0-9][0-9]*"):
+        if path.is_dir():
+            shutil.rmtree(path)
+        elif path.suffix == ".md" and path.stem != doc:
+            path.unlink()
+    (out_dir / "index.md").unlink(missing_ok=True)
+
+
 def write_okf(doc_data: dict, doc: str) -> list[Path]:
+    clear_bundle(doc)
     sections = split_sections_by_h1(sorted_pages(doc_data))
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     resource = doc_data.get("source_file") or ""
@@ -514,6 +529,7 @@ def write_md_tree(doc_data: dict, doc: str, split_depth: int) -> list[Path]:
     N (nested), a file per level-`N` heading, deeper headings inline. See
     README.md's "md-tree format" section for the layout/frontmatter/anchor
     contract; `--split-depth 2` is the original layout, unchanged."""
+    clear_bundle(doc)
     pages = sorted_pages(doc_data)
     front_matter, roots = build_md_tree_sections(pages, split_depth)
 

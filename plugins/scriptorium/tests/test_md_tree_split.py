@@ -654,3 +654,26 @@ class TestFurnitureSampleMdTree:
         assert checks["output_file_exists"]["passed"] is True, checks["output_file_exists"]
         assert checks["furniture_absent"]["passed"] is True, checks["furniture_absent"]
         assert checks["toc_headings_match"]["passed"] is True, checks["toc_headings_match"]
+
+
+@pytest.mark.parametrize("fmt", ["md-tree", "okf"])
+def test_a_reassembly_drops_the_previous_bundle(tmp_project, fmt):
+    """A retry that fixes a heading renames its file; the old file must not
+    ship beside the new one. The single-file <doc>.md stays, even for a
+    document whose name starts with digits like a section file."""
+    doc = "2024-report"
+
+    def doc_data(heading):
+        elements = [{"type": "heading", "level": 1, "text": heading}, {"type": "paragraph", "text": "Body."}]
+        return {"doc": doc, "source_file": "", "pages": {1: {"page_number": 1, "tier": "text", "elements": elements}}}
+
+    write = (lambda d: assemble.write_md_tree(d, doc, split_depth=1)) if fmt == "md-tree" else (lambda d: assemble.write_okf(d, doc))
+    out = paths.output_dir(doc)
+    out.mkdir(parents=True)
+    (out / f"{doc}.md").write_text("single file")
+    write(doc_data("1 Intrduction"))
+    written = write(doc_data("1 Introduction"))
+
+    on_disk = {p for p in out.rglob("*.md")}
+    assert on_disk == set(written) | {out / f"{doc}.md"}
+    assert not any("intrduction" in p.name for p in on_disk)
