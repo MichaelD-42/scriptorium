@@ -197,6 +197,10 @@ retry that only re-extracted 2 pages still produces a complete document.
 
 Then `grade-output/scripts/merge_grades.py --doc <name> --attempt <attempt>`.
 Its stdout is a summary; you never need to read `grade-report.json`.
+**Exit 1** with `no grade shard for pages [...]` means a grader stopped
+before it wrote those pages: spawn one `grader` for them and run
+`merge_grades.py` again. Still failing after that: `state.py reject --doc
+<name> --reason "<the error: line>"`, next document.
 
 ### 5. Decide
 

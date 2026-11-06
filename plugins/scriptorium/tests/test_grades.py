@@ -382,3 +382,20 @@ def test_a_missing_image_or_split_paragraph_fails_whatever_the_average(tmp_proje
     verdict = json.loads(paths.grade_report_json("doc").read_text())
     assert verdict["rubric_verdict"]["blocking_issue_pages"] == [3]
     assert verdict["overall_passed"] is False
+
+
+def test_an_ungraded_page_stops_the_merge(tmp_project, monkeypatch, capsys):
+    """A grader that runs out of turns leaves pages without a shard; an
+    average over the rest would pass pages nobody looked at."""
+    _seed_gates_report(tmp_project, "doc", passed=True)
+    elements_path = paths.elements_json("doc")
+    elements_path.parent.mkdir(parents=True, exist_ok=True)
+    elements_path.write_text(json.dumps({"pages": [{"page_number": n, "tier": "text", "elements": []} for n in (1, 2, 3)]}))
+    _seed_grade_shard(tmp_project, "doc", 1, 1.0, [])
+    _seed_grade_shard(tmp_project, "doc", 2, 1.0, [])
+    monkeypatch.setattr("sys.argv", ["merge_grades.py", "--doc", "doc"])
+    with pytest.raises(SystemExit) as exc_info:
+        merge_grades.main()
+    assert exc_info.value.code == 1
+    assert "[3]" in capsys.readouterr().err
+    assert not paths.grade_report_json("doc").exists()

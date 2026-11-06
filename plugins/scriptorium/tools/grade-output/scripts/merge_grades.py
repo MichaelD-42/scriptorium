@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+import elements as elements_lib  # noqa: E402
 import grades  # noqa: E402
 import paths  # noqa: E402
 
@@ -37,6 +38,12 @@ def main() -> None:
         print(f"error: no grade shards found in {shards_dir} — run the grader first", file=sys.stderr)
         sys.exit(1)
     per_page = [json.loads(p.read_text(encoding="utf-8")) for p in shard_paths]
+    # A grader that ran out of turns leaves pages unwritten; averaging the
+    # rest would pass pages nobody looked at.
+    ungraded = sorted(set(elements_lib.load_doc(paths.elements_json(args.doc))["pages"]) - {p["page_number"] for p in per_page})
+    if ungraded:
+        print(f"error: no grade shard for pages {ungraded} — grade them, then run this again", file=sys.stderr)
+        sys.exit(1)
 
     score = round(sum(p["score"] for p in per_page) / len(per_page), 3)
     failure_taxonomy = sorted({issue for p in per_page for issue in p.get("issues", [])})

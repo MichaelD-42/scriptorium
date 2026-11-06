@@ -50,7 +50,8 @@ uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
 
 `gates.py` writes `work/<doc>/gates-report.json`. `merge_grades.py` writes
 the final `output/<doc>/grade-report.json` — read that one file for the
-pass/fail decision.
+pass/fail decision. It exits 1, writing nothing, when a page in
+`elements.json` has no grade shard.
 
 ## Gate checks
 
