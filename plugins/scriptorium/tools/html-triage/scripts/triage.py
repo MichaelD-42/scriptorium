@@ -18,7 +18,7 @@ def main() -> None:
     args = parser.parse_args()
 
     html_path = paths.input_file(args.doc)
-    if html_path is None or html_path.suffix != ".html":
+    if html_path is None or paths.detect_input_format(args.doc) != "html":
         print(f"error: input/{args.doc}.html not found", file=sys.stderr)
         sys.exit(1)
 

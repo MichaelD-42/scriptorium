@@ -9,9 +9,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 import elements as elements_lib  # noqa: E402
 import paths  # noqa: E402
+import pptx_shapes  # noqa: E402
 
 from pptx import Presentation
-from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 
 def shape_paragraphs(shape) -> list[str]:
@@ -37,10 +37,10 @@ def extract_slide(slide, page_number: int, assets_dir: Path) -> tuple[list[dict]
     image_elements = []
     bitmap_idx = 0
 
-    for shape in slide.shapes:
+    for shape in pptx_shapes.iter_shapes(slide.shapes):
         y = shape.top if shape.top is not None else 0
 
-        if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+        if pptx_shapes.is_picture(shape):
             bitmap_idx += 1
             image = shape.image
             out_name = f"page{page_number}_bitmap{bitmap_idx}.{image.ext}"
@@ -85,7 +85,7 @@ def main() -> None:
 
     page_numbers = [int(p) for p in args.pages.split(",") if p.strip()]
     pptx_path = paths.input_file(args.doc)
-    if pptx_path is None or pptx_path.suffix != ".pptx":
+    if pptx_path is None or paths.detect_input_format(args.doc) != "pptx":
         print(f"error: input/{args.doc}.pptx not found", file=sys.stderr)
         sys.exit(1)
 

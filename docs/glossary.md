@@ -174,7 +174,8 @@ lists the ones a document has; every quirk's measure already runs. See
 
 **`recheck_images`.** An escalation flag that tells the next extractor to
 redo a page's image step (describe, caption, figure text) while the body
-keeps its tier.
+keeps its tier. When the images are the page's only problem, the escalation
+also has `body: false`, and the body is not extracted again.
 
 **ReqIF, ReqIFZ.** The Requirements Interchange Format, an XML format read
 by requirements tools such as DOORS and Polarion. `reqifz` is the same file

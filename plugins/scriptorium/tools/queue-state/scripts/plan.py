@@ -72,6 +72,12 @@ def _recheck(entry: dict) -> list[int]:
     return sorted(int(n) for n, e in entry["escalated_pages"].items() if e.get("recheck_images"))
 
 
+def _redo_body(entry: dict, page: int) -> bool:
+    """False for a retry page whose escalation is about its images only:
+    its body passed and is not extracted again."""
+    return entry["escalated_pages"].get(str(page), {}).get("body", True)
+
+
 def scripts_stage(doc: str) -> dict:
     entry, tiers = _context(doc)
     fmt, first = entry["input_format"], entry["attempt"] == 0
@@ -89,7 +95,7 @@ def extract_stage(doc: str, max_pages: int | None, describe: bool = True) -> dic
     work = []
     for page, tier in sorted(tiers.items()):
         shard = elements_lib.read_shard(paths.shard_path(doc, page, "image")) or {"elements": []}
-        turns = BODY_TURNS.get(tier, 0) + describe * sum(
+        turns = BODY_TURNS.get(tier, 0) * _redo_body(entry, page) + describe * sum(
             IMAGE_TURNS if el.get("caption") or el.get("figure_text") else UNLABELLED_IMAGE_TURNS
             for el in shard["elements"]
             if el.get("type") == "image" and not el.get("description")
@@ -104,7 +110,7 @@ def extract_stage(doc: str, max_pages: int | None, describe: bool = True) -> dic
         "batches": [
             {
                 "pages": b,
-                "tiers": {str(n): tiers[n] for n in b},
+                "tiers": {str(n): tiers[n] for n in b if _redo_body(entry, n)},
                 "recheck_images": [n for n in b if n in recheck],
                 **({"reasons": {str(n): escalated[str(n)]["reason"] for n in b if str(n) in escalated}} if escalated else {}),
             }

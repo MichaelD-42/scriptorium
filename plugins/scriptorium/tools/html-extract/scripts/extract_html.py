@@ -21,7 +21,7 @@ def extract_page(soup, html_dir: Path, assets_dir: Path) -> tuple[list[dict], li
             continue
 
         level = html_pages.heading_level(block)
-        text = block.get_text(strip=True)
+        text = html_pages.block_text(block)
         if not text:
             continue
         if level is not None:
@@ -46,7 +46,7 @@ def main() -> None:
 
     page_numbers = [int(p) for p in args.pages.split(",") if p.strip()]
     html_path = paths.input_file(args.doc)
-    if html_path is None or html_path.suffix != ".html":
+    if html_path is None or paths.detect_input_format(args.doc) != "html":
         print(f"error: input/{args.doc}.html not found", file=sys.stderr)
         sys.exit(1)
     if page_numbers != [1]:

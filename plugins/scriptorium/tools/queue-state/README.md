@@ -32,7 +32,7 @@ entry:
 
 ```json
 {"status": "retrying", "attempt": 1, "input_format": "pdf", "format": "md",
- "escalated_pages": {"3": {"tier": "ocr", "recheck_images": false, "reason": "second paragraph missing"}},
+ "escalated_pages": {"3": {"tier": "vision", "recheck_images": false, "body": true, "reason": "second paragraph missing"}},
  "lang_flag": null, "tessdata_prefix": null, "warnings": [], "reason": null, "grade_report": null,
  "input_sha256": "9f2c..."}
 ```
@@ -50,7 +50,8 @@ own is counted at `vision`.
      Their input is deterministic script output: the same tier gives the
      same result, and a higher tier has no TOC-driven heading levels.
    - Gate `figures_complete` failed → each page in its `pages`: same tier,
-     `recheck_images`, the gate's `detail` as reason.
+     `recheck_images`, `body: false` (the body is not extracted again), the
+     gate's `detail` as reason.
    - Gate `ocr_confidence_floor` or `text_layer_coverage` failed → each page
      in its `pages` goes to `vision`, the gate's `detail` as reason.
    - Any other failed gate is document-level and names no page: needs a
@@ -69,7 +70,8 @@ own is counted at `vision`.
    - A page tagged `split_paragraph` → needs a human: page-break joins are
      a script rule (`lib/elements.py`), so no tier changes the result.
    - A page tagged only `missing_image`/`bad_caption`/`bad_mermaid` → same
-     tier, `recheck_images`. This retries for every format.
+     tier, `recheck_images`, `body: false`. This retries for every format.
+     A page escalated for both its body and its images keeps `body: true`.
    - The reason is the grader's `reason` text from the grade shard, or the
      tags when the grader wrote none.
 4. Status: anything that needs a human (a needs-human gate, a document-level
@@ -139,7 +141,9 @@ on a retry.
 - **extract**: run after the scripts. A page needs an extractor only for an
   `ocr`/`vision` body or an image element without a `description`; the
   rest are `agent_free_pages`. Each extract batch carries `pages`, `tiers`,
-  `recheck_images` and, on a retry, `reasons`.
+  `recheck_images` and, on a retry, `reasons`. A `body: false` page is
+  left out of `tiers` and costs no body turns: the extractor only redoes
+  its images.
 - **grade**: every page of the set for `pdf`/`pptx`/`image`; `text_mode:
   true` with no batches for `docx`/`xlsx`/`html`.
 

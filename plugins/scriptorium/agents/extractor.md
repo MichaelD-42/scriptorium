@@ -23,7 +23,8 @@ needs OCR — a `--lang` value (and, only when set, a `--tessdata-dir` value)
 already resolved by the environment-setup step.
 
 On a retry you may also get **`recheck_images`** pages, each with the
-grader's `reason`. For such a page the body tier stays as it is. The
+grader's `reason`. A `recheck_images` page with no entry in your tiers
+keeps its body: don't extract its body again. The
 orchestrator has already re-run the image step for it, so its image shard
 is fresh and undescribed: redo the `figure_text`, description, mermaid (and
 for `pptx`/`docx`/`xlsx`/`html`, caption) work for that page with the

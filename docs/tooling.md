@@ -49,11 +49,14 @@ step needs its detail.
 conventions every tool script imports: `paths.py` (path conventions and
 input-format dispatch, below), `elements.py` (shard read/write/merge
 helpers), `tesseract.py` (OCR backend wrapper), `docx_pages.py` (docx block
-iteration, Heading-1 pagination, and inline-image extraction, shared by
-`docx-triage` and `docx-extract` so segmentation can't drift between them),
-`html_pages.py` (HTML block iteration, table/heading parsing, and
-`data:`-URI/local-file image resolution, shared by `html-triage`,
-`html-extract`, and `text_mode_grade.py`'s html path), `preflight.py`
+iteration, Heading-1 pagination, and image extraction from paragraphs and
+table cells, shared by `docx-triage` and `docx-extract` so segmentation
+can't drift between them), `html_pages.py` (HTML block iteration, text,
+table/heading parsing, and `data:`-URI/local-file image resolution, shared
+by `html-triage`, `html-extract`, and `text_mode_grade.py`'s html path),
+`pptx_shapes.py` (the slide shape walk, group members included, shared by
+`pptx-triage` and `pptx-extract`), `fonts.py` (the document's body text
+size, shared by `pdf-triage` and `extract-text`), `preflight.py`
 (triage's one-line rejection of an input the extract step cannot read),
 `grades.py` (the failure taxonomy, split into content and image issues),
 `figures.py` (bitmap and vector figure regions, shared by `extract-text` and
@@ -182,7 +185,7 @@ runs/state.json                                     per-document queue state
   `image`; the five image extensions all normalize to `image`, see
   `lib/paths.detect_input_format`), `format`
   (the output format), `escalated_pages` (page → tier, `recheck_images`,
-  reason: the retained feedback), `lang_flag`, `tessdata_prefix`,
+  `body`, reason: the retained feedback), `lang_flag`, `tessdata_prefix`,
   `warnings`, `reason` and `grade_report` (needs-human), and `attempts[]`
   (`started_at`, `finished_at`, `status`, `score`, `cost_usd`, escalations).
   See `tools/queue-state/README.md`.

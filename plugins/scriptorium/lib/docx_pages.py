@@ -67,19 +67,26 @@ def split_pages(document: _Document) -> list[list]:
     return non_empty or [[]]
 
 
-def paragraph_images(paragraph: Paragraph, document: _Document) -> list:
-    """Inline picture parts referenced by this paragraph's runs.
+def block_images(block, document: _Document) -> list:
+    """Picture parts referenced anywhere in a block (a paragraph, or every
+    cell of a table), in document order.
 
-    python-docx has no per-paragraph inline-image API, so this walks each
-    run's <w:drawing>//<a:blip> and resolves the relationship id against
-    the document part to get the actual image part (bytes + extension)."""
+    python-docx has no per-block image API, so this walks the block's
+    <a:blip> elements and resolves each relationship id against the
+    document part to get the actual image part (bytes + extension)."""
     found = []
-    for run in paragraph.runs:
-        for blip in run._element.findall(".//" + qn("a:blip")):
-            rId = blip.get(qn("r:embed"))
-            if not rId:
-                continue
-            image_part = document.part.related_parts.get(rId)
-            if image_part is not None:
-                found.append(image_part)
+    for blip in block._element.iter(qn("a:blip")):
+        rId = blip.get(qn("r:embed"))
+        if not rId:
+            continue
+        image_part = document.part.related_parts.get(rId)
+        if image_part is not None:
+            found.append(image_part)
     return found
+
+
+def block_source_text(block) -> str:
+    """Every paragraph's text in a block, table cells and text boxes
+    included, read from the XML rather than through iter_block_items: the
+    grader's coverage check."""
+    return " ".join(Paragraph(p, block).text for p in block._element.iter(qn("w:p")))

@@ -149,6 +149,23 @@ class TestExtractStage:
         assert batch["reasons"] == {"2": "table rows dropped"}
         assert batch["recheck_images"] == []
 
+    def test_image_only_retry_does_not_redo_the_body(self, tmp_project):
+        """A vision page whose only problem was a caption keeps its body: it
+        is left out of `tiers` and costs no body turns."""
+        doc = _setup(
+            tmp_project,
+            tiers={1: "vision"},
+            attempt=1,
+            escalated={"1": {"tier": "vision", "recheck_images": True, "body": False, "reason": "bad_mermaid"}},
+        )
+        _images(doc, 1, BARE)
+
+        batch = plan.extract_stage(doc, max_pages=None)["batches"][0]
+
+        assert batch["pages"] == [1]
+        assert batch["tiers"] == {}
+        assert batch["recheck_images"] == [1]
+
 
 class TestGradeStage:
     def test_figures_make_a_page_heavier(self, tmp_project):
