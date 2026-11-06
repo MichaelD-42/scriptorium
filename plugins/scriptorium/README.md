@@ -58,6 +58,12 @@ implemented today.
 - **Evals** (`evals/`, not run in CI): a committed grader calibration set
   (one synthetic document, nine injected defects, `/eval-grader`) and an
   LLM-free extraction eval against reference Markdown.
+- **Output formats**: `md-tree` takes any `--split-depth` 1-6 (one file
+  per chapter, section, subsection, ...; folders nest), with depth 2 byte
+  for byte as before. New `jsonl`: one JSON object per element with its
+  heading path and source pages, furniture left out. New plugin option
+  **Default output format** for runs without `--format`. The `md-tree`
+  gate now checks that every file `index.md` links exists.
 - **C4 model**: the evals as a container with a developer actor and a
   `GraderEval` dynamic view; grader, gates, queue, image and merge
   descriptions match 0.7.0.

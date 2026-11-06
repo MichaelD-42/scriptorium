@@ -34,4 +34,5 @@ jobs:
         working-directory: plugins/scriptorium
         # Coverage once, on 3.12: its sys.monitoring core keeps subprocess coverage
         # cheap; on 3.11 the fallback tracer makes the suite ~8x slower.
-        run: uv run pytest ${{ matrix.python-version == '3.11' && '--no-cov' || '' }}
+        # The floor sits a little under the local figure: CI skips the LibreOffice tests.
+        run: uv run pytest ${{ matrix.python-version == '3.11' && '--no-cov' || '--cov-fail-under=94' }}

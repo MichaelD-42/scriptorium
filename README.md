@@ -78,16 +78,16 @@ input/"). The command processes every new file in `input/` and stops when the
 queue is empty.
 
 ```
-/scriptorium:extract [--doc <name>] [--format md|html|okf|md-tree|reqif|reqifz]
-                     [--split-depth 2] [--max-attempts 3] [--batch-size <n>] [--zip]
+/scriptorium:extract [--doc <name>] [--format md|html|okf|md-tree|jsonl|reqif|reqifz]
+                     [--split-depth 1-6] [--max-attempts 3] [--batch-size <n>] [--zip]
                      [--no-describe] [--findings <dir>]
 ```
 
 | Flag | Effect |
 |---|---|
 | `--doc <name>` | process only this file (name without extension) |
-| `--format` | output format, default `md` (see below) |
-| `--split-depth` | `md-tree` only; `2` is the only accepted value |
+| `--format` | output format (see below); default: the plugin's **Default output format** option (`/plugin` → scriptorium → configure), else `md` |
+| `--split-depth` | `md-tree` only: the heading level that starts a new file, 1-6, default 2 |
 | `--max-attempts` | extraction attempts before a document goes to a human, default 3 |
 | `--batch-size` | cap on pages per subagent; by default batches are sized by work |
 | `--zip` | also write `output/<doc>.zip` for each passed document |
@@ -105,7 +105,8 @@ Supported inputs: `.pdf`, `.docx`, `.pptx`, `.xlsx`, `.html`, `.png`, `.jpg`,
 | `md` | `output/<doc>/<doc>.md` | default; reading, diffing, pasting into other tools |
 | `html` | `output/<doc>/<doc>.html` | viewing in a browser; diagrams render inline |
 | `okf` | `output/<doc>/index.md` + one file per section | large documents, search/RAG pipelines |
-| `md-tree` | `output/<doc>/index.md` + one folder per chapter, one file per section, stable heading anchors | the same, split by chapter |
+| `md-tree` | `output/<doc>/index.md` + one file per heading at `--split-depth` (1: per chapter, 2: per section, 3: per subsection), in nested folders, stable heading anchors | the same, split at the level you need |
+| `jsonl` | `output/<doc>/<doc>.jsonl`, one JSON object per element (paragraph, heading, table, figure) with its heading path and source pages; furniture left out | chunking for search/RAG, per-element processing |
 | `reqif`, `reqifz` | `output/<doc>/<doc>.reqif(z)` | requirements tools (DOORS, Polarion) |
 
 ## Results

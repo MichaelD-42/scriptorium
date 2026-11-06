@@ -26,9 +26,12 @@ yourself about to `Read` a page image or `elements.json` directly: stop,
 that's a subagent's job, not yours.
 
 Arguments (`$ARGUMENTS`, all optional): `--doc <name>` to process a single
-named document instead of the whole queue; `--format md|html|okf|md-tree|reqif|reqifz`
-(default `md`); `--split-depth <n>` (`md-tree` only, default `2`; only `2` is
-accepted); `--max-attempts <n>` (default `3`); `--batch-size <n>` (optional cap
+named document instead of the whole queue; `--format md|html|okf|md-tree|jsonl|reqif|reqifz`
+(default: the plugin's **Default output format** option,
+`${user_config.default_format}`; when that is empty or still reads
+`${user_config.default_format}` literally, `md`); `--split-depth <n>`
+(`md-tree` only, 1-6, default `2`: the heading level that starts a new
+file — `1` one file per chapter, `2` per section, `3` per subsection); `--max-attempts <n>` (default `3`); `--batch-size <n>` (optional cap
 on pages per subagent, passed to `plan.py` as `--max-pages`; without it,
 batches are sized by work, see step 2); `--zip` to also package each
 document's `output/<doc>/` into `output/<doc>.zip` once it passes (off by
@@ -162,12 +165,13 @@ uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/tools/gra
 
 Under `--no-describe`, pass `--no-describe` to every `gates.py` call too.
 
-For `--format md-tree`, run `assemble.py` twice: first `--format md`, then
-`--format md-tree --split-depth <n>`. Then run `gates.py --format md-tree`.
-The grader in step 4 reads the single-file `output/<doc>/<doc>.md`: md-tree
-renders the heading that opens a file only as frontmatter, so a grader that
-reads the split files would flag every level-1/level-2 heading as missing.
-Both formats use the same element renderers.
+For `--format md-tree` or `jsonl`, run `assemble.py` twice: first `--format
+md`, then the format itself (with `--split-depth <n>` for md-tree). Then run
+`gates.py --format <format>`. The grader in step 4 reads the single-file
+`output/<doc>/<doc>.md`: md-tree renders the heading that opens a file only
+as frontmatter, so a grader that reads the split files would flag those
+headings as missing, and jsonl is not meant for reading by eye. All
+formats use the same elements.
 
 ```bash
 uv run --project "${CLAUDE_PLUGIN_ROOT}" python "${CLAUDE_PLUGIN_ROOT}/tools/assemble-output/scripts/assemble.py" --doc <name> --format md
@@ -184,7 +188,7 @@ retry that only re-extracted 2 pages still produces a complete document.
 - **`pdf`/`pptx`/`image`**: `plan.py --doc <name> --stage grade
   [--max-pages <n>]` prints `batches`, weighted by each page's figure count.
   **Spawn one `grader` per batch in parallel**, each with its `pages` and
-  the assembled output's location (for `md-tree`, `output/<doc>/<doc>.md`,
+  the assembled output's location (for `md-tree` and `jsonl`, `output/<doc>/<doc>.md`,
   see step 3). Wait for all of them. On a retry only the escalated pages are
   regraded; the others' grade shards are still valid.
 - **`docx`/`xlsx`/`html`** (`plan.py` prints `text_mode: true`; no rendered

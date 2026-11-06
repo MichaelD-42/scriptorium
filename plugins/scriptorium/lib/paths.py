@@ -10,7 +10,7 @@ i.e. ${CLAUDE_PROJECT_DIR}).
     work/<doc>/triage.json
     work/<doc>/toc.json
     work/<doc>/gates-report.json
-    output/<doc>/<doc>.{md,html,reqif,reqifz}          single-file formats (reqifz is also a zip archive)
+    output/<doc>/<doc>.{md,html,jsonl,reqif,reqifz}    single-file formats (reqifz is also a zip archive)
     output/<doc>/{index.md,NN-slug.md}                 okf format (multi-file bundle)
     output/<doc>/{index.md,00-front-matter.md,NN-slug/NN.MM-slug.md}  md-tree format (split multi-file bundle, configurable depth)
     output/<doc>/assets/*.png
@@ -143,7 +143,7 @@ def output_zip(doc: str, root: Path = Path(".")) -> Path:
 
 
 def output_file(doc: str, fmt: str, root: Path = Path(".")) -> Path:
-    ext = {"html": "html", "reqif": "reqif", "reqifz": "reqifz"}.get(fmt, "md")
+    ext = {"html": "html", "jsonl": "jsonl", "reqif": "reqif", "reqifz": "reqifz"}.get(fmt, "md")
     return output_dir(doc, root) / f"{doc}.{ext}"
 
 

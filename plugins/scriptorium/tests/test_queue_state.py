@@ -176,6 +176,30 @@ class TestDecide:
         assert out["status"] == "needs-human"
         assert "page_count_match" in out["reason"]
 
+    def test_low_scores_without_tags_are_needs_human(self):
+        out = _decide(_report([_page(1, [])]), {1: "text"})
+        assert out["status"] == "needs-human"
+        assert out["reason"] == "rubric failed without page-level issues to retry"
+
+    def test_gate_and_grader_on_one_page_merge_into_one_escalation(self):
+        check = {
+            "name": "figures_complete",
+            "passed": False,
+            "detail": "image without text",
+            "pages": [2],
+        }
+        out = _decide(
+            _report([_page(2, ["dropped_text"], "caption missing")], checks=[check]),
+            {2: "text"},
+        )
+        assert out["escalated_pages"] == {
+            "2": {
+                "tier": "vision",
+                "recheck_images": True,
+                "reason": "image without text; caption missing",
+            }
+        }
+
     def test_text_layer_coverage_sends_its_pages_to_vision(self):
         check = {"name": "text_layer_coverage", "passed": False, "pages": [2],
                  "detail": "page 2: 9 of 80 text-layer words missing, e.g. firmware"}
@@ -276,6 +300,26 @@ class TestCli:
             ).stdout.strip()
             == "b"
         )
+
+    def test_set_lang_records_the_ocr_language(self, tmp_project):
+        shutil.copyfile(EXAMPLES_ROOT / "sample.pdf", tmp_project / "input" / "s.pdf")
+        run_script("queue-state/scripts/state.py", "init", cwd=tmp_project)
+
+        result = run_script(
+            "queue-state/scripts/state.py",
+            "set-lang",
+            "--doc",
+            "s",
+            "--lang-flag",
+            "deu+eng",
+            "--tessdata-prefix",
+            "/td",
+            cwd=tmp_project,
+        )
+
+        assert result.returncode == 0, result.stderr
+        entry = self._state()["docs"]["s"]
+        assert (entry["lang_flag"], entry["tessdata_prefix"]) == ("deu+eng", "/td")
 
     def test_decide_reads_report_and_actual_tiers(self, tmp_project):
         shutil.copyfile(EXAMPLES_ROOT / "sample.pdf", tmp_project / "input" / "s.pdf")

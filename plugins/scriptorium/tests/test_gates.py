@@ -3,6 +3,8 @@ checks."""
 
 import zipfile
 
+import pytest
+
 from conftest import load_script
 
 gates = load_script("grade-output/scripts/gates.py", "gates_module")
@@ -83,26 +85,41 @@ class TestCheckOutputFileExists:
         (out_dir / "00-intro.md").write_text("content")
         assert gates.check_output_file_exists("sample", "okf")["passed"] is True
 
-    def test_md_tree_requires_index_and_nested_split_files(self, tmp_path, monkeypatch):
+    def test_md_tree_requires_an_index_whose_links_all_resolve(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         out_dir = tmp_path / "output" / "sample"
         out_dir.mkdir(parents=True)
         assert gates.check_output_file_exists("sample", "md-tree")["passed"] is False
-        (out_dir / "index.md").write_text("x" * 30)
-        # A flat OKF-style section file is not an md-tree split file.
-        (out_dir / "01-intro.md").write_text("content")
+        (out_dir / "index.md").write_text("# sample\n\n* [1 Intro](01-intro/01.00-intro.md)\n  * [1.1 Scope](01-intro/01.01-scope.md)\n")
+        (out_dir / "01-intro").mkdir()
+        (out_dir / "01-intro" / "01.00-intro.md").write_text("content")
         result = gates.check_output_file_exists("sample", "md-tree")
         assert result["passed"] is False
-        assert "md-tree" in result["detail"]
-        (out_dir / "01-intro").mkdir()
+        assert "01-intro/01.01-scope.md" in result["detail"]
         (out_dir / "01-intro" / "01.01-scope.md").write_text("content")
         assert gates.check_output_file_exists("sample", "md-tree")["passed"] is True
+
+    def test_md_tree_depth_1_flat_files_pass(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        out_dir = tmp_path / "output" / "sample"
+        out_dir.mkdir(parents=True)
+        (out_dir / "index.md").write_text("# sample\n\n* [1 Intro](01-intro.md)\n")
+        (out_dir / "01-intro.md").write_text("content")
+        assert gates.check_output_file_exists("sample", "md-tree")["passed"] is True
+
+    def test_a_stale_okf_index_is_not_an_md_tree(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        out_dir = tmp_path / "output" / "sample"
+        out_dir.mkdir(parents=True)
+        (out_dir / "index.md").write_text("---\nokf_version: \"0.1\"\n---\n* [Intro](/01-intro.md) - x\n")
+        (out_dir / "01-intro.md").write_text("content")
+        assert gates.check_output_file_exists("sample", "md-tree")["passed"] is False
 
     def test_md_tree_accepts_front_matter_only_bundle(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         out_dir = tmp_path / "output" / "sample"
         out_dir.mkdir(parents=True)
-        (out_dir / "index.md").write_text("x" * 30)
+        (out_dir / "index.md").write_text("# sample\n\n* [Front Matter](00-front-matter.md)\n")
         (out_dir / "00-front-matter.md").write_text("content")
         assert gates.check_output_file_exists("sample", "md-tree")["passed"] is True
 
@@ -110,7 +127,7 @@ class TestCheckOutputFileExists:
         monkeypatch.chdir(tmp_path)
         out_dir = tmp_path / "output" / "sample"
         (out_dir / "01-intro").mkdir(parents=True)
-        (out_dir / "index.md").write_text("x")
+        (out_dir / "index.md").write_text("[](a)")
         (out_dir / "01-intro" / "01.01-scope.md").write_text("content")
         assert gates.check_output_file_exists("sample", "md-tree")["passed"] is False
 
@@ -143,3 +160,12 @@ class TestCheckOutputFileExists:
         with zipfile.ZipFile(zip_path, "w") as zf:
             zf.writestr("sample.reqif", "<REQ-IF/>" + " " * 20)
         assert gates.check_output_file_exists("sample", "reqifz")["passed"] is True
+
+    @pytest.mark.parametrize("fmt", ["reqif", "jsonl", "reqifz"])
+    def test_missing_or_empty_output_fails(self, tmp_path, monkeypatch, fmt):
+        monkeypatch.chdir(tmp_path)
+        assert gates.check_output_file_exists("sample", fmt)["passed"] is False
+        out = tmp_path / "output" / "sample" / f"sample.{fmt}"
+        out.parent.mkdir(parents=True)
+        out.write_text("")
+        assert gates.check_output_file_exists("sample", fmt)["passed"] is False

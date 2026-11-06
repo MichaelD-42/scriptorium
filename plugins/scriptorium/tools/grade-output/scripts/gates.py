@@ -599,17 +599,19 @@ def check_output_file_exists(doc: str, fmt: str) -> dict:
         return {"name": "output_file_exists", "passed": False, "detail": "okf bundle incomplete: missing index.md or section files"}
 
     if fmt == "md-tree":
-        # The folder glob does not match OKF's flat NN-slug.md files, so a
-        # stale OKF bundle in the same output folder cannot satisfy it.
+        # Any --split-depth: index.md links every file it wrote (flat at
+        # depth 1, nested folders deeper), so the links are the check. An
+        # OKF index links "/NN-slug.md", root-absolute, which never resolves.
         out = paths.output_dir(doc)
         index = out / "index.md"
-        split_files = sorted(out.glob("[0-9][0-9]-*/[0-9][0-9].[0-9][0-9]-*.md"))
-        front = out / "00-front-matter.md"
-        if index.exists() and index.stat().st_size >= MIN_OUTPUT_BYTES and (split_files or front.exists()):
-            return {"name": "output_file_exists", "passed": True, "detail": f"{index} + {len(split_files)} split file(s)"}
+        links = re.findall(r"\]\(([^)]+)\)", index.read_text(encoding="utf-8")) if index.exists() else []
+        missing = [link for link in links if link.startswith("/") or not (out / link).is_file()]
+        if index.exists() and index.stat().st_size >= MIN_OUTPUT_BYTES and links and not missing:
+            return {"name": "output_file_exists", "passed": True, "detail": f"{index} + {len(links)} linked file(s)"}
         return {
             "name": "output_file_exists", "passed": False,
-            "detail": "md-tree bundle incomplete: missing index.md or NN-slug/NN.MM-slug.md files",
+            "detail": "md-tree bundle incomplete: no index.md, or it links no file"
+            + (f", or links missing files ({', '.join(missing[:5])})" if missing else ""),
         }
 
     if fmt == "reqif":
@@ -623,6 +625,17 @@ def check_output_file_exists(doc: str, fmt: str) -> dict:
         if not root_tag.endswith("REQ-IF"):
             return {"name": "output_file_exists", "passed": False, "detail": f"{candidate} root element is {root_tag!r}, expected REQ-IF"}
         return {"name": "output_file_exists", "passed": True, "detail": f"{candidate} exists and is well-formed ReqIF XML"}
+
+    if fmt == "jsonl":
+        candidate = paths.output_file(doc, "jsonl")
+        lines = candidate.read_text(encoding="utf-8").splitlines() if candidate.exists() else []
+        try:
+            records = [json.loads(line) for line in lines]
+        except json.JSONDecodeError as e:
+            return {"name": "output_file_exists", "passed": False, "detail": f"{candidate} has a line that is not JSON: {e}"}
+        if not records:
+            return {"name": "output_file_exists", "passed": False, "detail": "no assembled jsonl output found"}
+        return {"name": "output_file_exists", "passed": True, "detail": f"{candidate} exists ({len(records)} elements)"}
 
     if fmt == "reqifz":
         candidate = paths.output_file(doc, "reqifz")
@@ -645,7 +658,7 @@ def check_output_file_exists(doc: str, fmt: str) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--doc", required=True)
-    parser.add_argument("--format", choices=["md", "html", "okf", "md-tree", "reqif", "reqifz"], default="md")
+    parser.add_argument("--format", choices=["md", "html", "okf", "md-tree", "jsonl", "reqif", "reqifz"], default="md")
     parser.add_argument("--no-describe", action="store_true", help="images carry no agent-written fields; skip figures_complete")
     args = parser.parse_args()
 

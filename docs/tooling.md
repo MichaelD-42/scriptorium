@@ -89,10 +89,10 @@ iteration, Heading-1 pagination, and inline-image extraction, shared by
 - `extract-images/scripts/mermaid_image.py --doc <name> --page <n> --asset <path>`
   (mermaid source on stdin)
 - `assemble-output/scripts/merge.py --doc <name>`
-- `assemble-output/scripts/assemble.py --doc <name> [--format md|html|okf|md-tree|reqif|reqifz] [--split-depth 2]`
-  (`--split-depth` only applies to `md-tree`; only `2` is currently supported)
+- `assemble-output/scripts/assemble.py --doc <name> [--format md|html|okf|md-tree|jsonl|reqif|reqifz] [--split-depth 1-6]`
+  (`--split-depth` only applies to `md-tree`: the heading level, 1-6, that starts a new file)
 - `assemble-output/scripts/zip_output.py --doc <name>` (optional; packages `output/<doc>/` into `output/<doc>.zip`)
-- `grade-output/scripts/gates.py --doc <name> [--format md|html|okf|md-tree|reqif|reqifz] [--no-describe]` (`--no-describe` skips `figures_complete`)
+- `grade-output/scripts/gates.py --doc <name> [--format md|html|okf|md-tree|jsonl|reqif|reqifz] [--no-describe]` (`--no-describe` skips `figures_complete`)
   (for `md-tree`, `output_file_exists` checks `index.md` plus the
   `NN-slug/NN.MM-slug.md` files or `00-front-matter.md`)
 - `grade-output/scripts/write_grade_shard.py --doc <name> --page <n> [--issues <csv>] [--reason <text>]`
@@ -123,7 +123,7 @@ work/<doc>/triage.json                              pdf only: also carries `furn
 work/<doc>/toc.json                                 pdf only: detected TOC entries (outline or printed)
 work/<doc>/gates-report.json
 
-output/<doc>/<doc>.{md,html,reqif,reqifz}           single-file formats (reqifz is also a zip archive)
+output/<doc>/<doc>.{md,html,jsonl,reqif,reqifz}     single-file formats (reqifz is also a zip archive)
 output/<doc>/{index.md,NN-slug.md}                  okf format (multi-file bundle)
 output/<doc>/{index.md,00-front-matter.md,NN-slug/NN.MM-slug.md}
                                                      md-tree format (nested-folder bundle,

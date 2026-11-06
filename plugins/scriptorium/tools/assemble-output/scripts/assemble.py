@@ -3,6 +3,7 @@
 See README.md."""
 
 import argparse
+import json
 import re
 import sys
 from datetime import datetime, timezone
@@ -181,6 +182,33 @@ def sorted_pages(doc_data: dict) -> list[dict]:
 def to_markdown(doc_data: dict) -> str:
     all_elements = [el for page in sorted_pages(doc_data) for el in page["elements"]]
     return elements_to_markdown(all_elements)
+
+
+# The element fields a jsonl record carries when set (bbox: provenance on the page).
+JSONL_FIELDS = ("level", "marker", "text", "rows", "asset", "caption", "description",
+                "figure_text", "data_table", "mermaid", "bbox")
+
+
+def to_jsonl(doc_data: dict) -> str:
+    """One JSON object per element in reading order: `id` (`p<page>-<n>`),
+    `type`, source `pages`, `heading_path` (the headings above it,
+    outermost first) and the element's own fields. Furniture images are
+    decoration and left out."""
+    lines: list[str] = []
+    open_headings: list[tuple[int, str]] = []
+    for page in sorted_pages(doc_data):
+        n = page["page_number"]
+        body = [el for el in page["elements"] if el.get("kind") != "furniture"]
+        for i, el in enumerate(body, start=1):
+            if el["type"] == "heading":
+                open_headings = [h for h in open_headings if h[0] < el["level"]]
+            record = {"id": f"p{n}-{i}", "type": el["type"], "pages": el.get("pages", [n]),
+                      "heading_path": [text for _, text in open_headings]}
+            record.update({k: el[k] for k in JSONL_FIELDS if el.get(k) not in (None, "")})
+            lines.append(json.dumps(record, ensure_ascii=False))
+            if el["type"] == "heading":
+                open_headings.append((el["level"], el["text"]))
+    return "\n".join(lines) + "\n"
 
 
 def to_html(doc_data: dict) -> str:
@@ -366,35 +394,32 @@ def _zero_pad_component(number: str | None, fallback_index: int) -> str:
 
 
 def build_md_tree_sections(pages: list[dict], split_depth: int) -> tuple[dict, list[dict]]:
-    """Walk every page's elements in document order and bucket them for
-    md-tree splitting:
+    """Walk every page's elements in document order and build md-tree's
+    section tree:
 
     - `front_matter`: `{"elements": [...], "source_pages": [...]}` -- content
-      before the first heading at level < split_depth.
-    - `folders`: an ordered list of
-      `{"number", "title", "level", "pre": {"elements", "source_pages"},
-        "files": [{"number", "title", "level", "elements", "source_pages"}]}`.
-      A heading at level < split_depth opens a new folder. A heading at
-      level == split_depth opens a new file inside the current folder. A
-      heading at level > split_depth (or any non-heading element) is simply
-      appended to whichever bucket is currently innermost-open (the active
-      file, else the active folder's "pre" bucket, else front matter) --
-      that's what keeps deeper headings "inline" rather than splitting
-      further, and what makes deeper folder nesting for split_depth > 2 a
-      documented gap: every level < split_depth heading collapses onto ONE
-      "current folder" here rather than a real nested stack, which is only
-      correct for split_depth == 2 (the only depth this repo's tests
-      exercise -- see the brief's own "ALL your tests target N=2").
+      before the first heading at a level <= split_depth.
+    - the root nodes, each `{"number", "title", "heading_text", "level",
+      "elements", "source_pages", "children"}`. A heading at level <
+      split_depth opens a folder node, nested under the open folder of a
+      shallower level (a stack, so any depth nests correctly); a heading at
+      level == split_depth opens a file node (no children). A deeper
+      heading, or any other element, goes into the innermost open node: a
+      folder node's `elements` are its own content before its first child.
 
-    The heading element that OPENS a folder/file is never itself appended as
-    body content -- it becomes that section's frontmatter `title`/`section`
-    instead (same convention `split_sections_by_h1`/OKF already uses). Its
-    original text is kept as `heading_text`, so `write_md_tree` can write
-    its anchor as the file's first body line."""
+    The heading element that OPENS a node is never itself body content --
+    it becomes that node's frontmatter `title`/`section` (same convention
+    `split_sections_by_h1`/OKF uses); `heading_text` keeps it for the
+    anchor `write_md_tree` writes at the top of a file."""
     front_matter = {"elements": [], "source_pages": []}
-    folders: list[dict] = []
-    active_folder = None
+    roots: list[dict] = []
+    stack: list[dict] = []  # open folder nodes, shallowest first
     active_file = None
+
+    def new_node(text, level: int, source_pages: list[int]) -> dict:
+        number, title = split_section_number(text) if text is not None else (None, None)
+        return {"number": number, "title": title, "heading_text": text, "level": level,
+                "elements": [], "source_pages": source_pages, "children": []}
 
     def track_page(bucket: dict, page_number: int) -> None:
         if page_number not in bucket["source_pages"]:
@@ -412,61 +437,28 @@ def build_md_tree_sections(pages: list[dict], split_depth: int) -> tuple[dict, l
         page_number = page["page_number"]
         for el in page["elements"]:
             level = el.get("level") if el["type"] == "heading" else None
-
-            if level is not None and level < split_depth:
-                number, title = split_section_number(el["text"])
-                active_folder = {
-                    "number": number,
-                    "title": title,
-                    "heading_text": el["text"],
-                    "level": level,
-                    "pre": {"elements": [], "source_pages": [page_number]},
-                    "files": [],
-                }
-                folders.append(active_folder)
+            if level is not None and level <= split_depth:
+                node = new_node(el["text"], level, [page_number])
                 active_file = None
+                while stack and stack[-1]["level"] >= level:
+                    stack.pop()
+                if level == split_depth and split_depth > 1 and not stack:
+                    # A file heading before any folder heading: an unlabeled
+                    # folder holds it, so the file still lands somewhere.
+                    placeholder = new_node(None, 1, [])
+                    roots.append(placeholder)
+                    stack.append(placeholder)
+                (stack[-1]["children"] if stack else roots).append(node)
+                if level == split_depth:
+                    active_file = node
+                else:
+                    stack.append(node)
                 continue
-
-            if level is not None and level == split_depth:
-                number, title = split_section_number(el["text"])
-                new_file = {
-                    "number": number,
-                    "title": title,
-                    "heading_text": el["text"],
-                    "level": level,
-                    "elements": [],
-                    "source_pages": [page_number],
-                }
-                if active_folder is None:
-                    # A level==split_depth heading with no enclosing
-                    # shallower heading yet -- not exercised by
-                    # furniture_sample.pdf (every level-2 heading there
-                    # follows a level-1 heading first). Synthesize an
-                    # unlabeled folder so the file still lands somewhere
-                    # instead of crashing; documented, untested edge case.
-                    active_folder = {
-                        "number": None,
-                        "title": None,
-                        "heading_text": None,
-                        "level": split_depth - 1,
-                        "pre": {"elements": [], "source_pages": []},
-                        "files": [],
-                    }
-                    folders.append(active_folder)
-                active_folder["files"].append(new_file)
-                active_file = new_file
-                continue
-
-            if active_file is not None:
-                target = active_file
-            elif active_folder is not None:
-                target = active_folder["pre"]
-            else:
-                target = front_matter
+            target = active_file or (stack[-1] if stack else front_matter)
             target["elements"].append(el)
             track_element_pages(target, el, page_number)
 
-    return front_matter, folders
+    return front_matter, roots
 
 
 def elements_to_markdown_with_anchors(elements: list[dict], asset_prefix: str = "") -> str:
@@ -518,18 +510,21 @@ def _with_opener_anchors(heading_texts: list[str | None], body: str, has_element
 
 
 def write_md_tree(doc_data: dict, doc: str, split_depth: int) -> list[Path]:
-    """`--format md-tree --split-depth N`: folder-per-level-`<N` heading,
-    file-per-level-`N` heading, deeper headings stay inline. See README.md's
-    "md-tree format" section for the full layout/frontmatter/anchor
-    contract."""
+    """`--format md-tree --split-depth N`: a folder per heading of level <
+    N (nested), a file per level-`N` heading, deeper headings inline. See
+    README.md's "md-tree format" section for the layout/frontmatter/anchor
+    contract; `--split-depth 2` is the original layout, unchanged."""
     pages = sorted_pages(doc_data)
-    front_matter, folders = build_md_tree_sections(pages, split_depth)
+    front_matter, roots = build_md_tree_sections(pages, split_depth)
 
     out_dir = paths.output_dir(doc)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     written: list[Path] = []
     index_lines = [f"# {doc}", ""]
+    # Headings of folders with no content of their own: their anchors go at
+    # the top of the next file written inside them.
+    pending: list[str] = []
 
     if front_matter["elements"]:
         fm_path = out_dir / "00-front-matter.md"
@@ -545,75 +540,62 @@ def write_md_tree(doc_data: dict, doc: str, split_depth: int) -> list[Path]:
         written.append(fm_path)
         index_lines.append(f"* [Front Matter]({fm_path.name})")
 
-    for folder_idx, folder in enumerate(folders, start=1):
-        nn = _zero_pad_component(folder["number"], folder_idx)
-        folder_slug = slugify(folder["title"] or "section")
-        folder_dirname = f"{nn}-{folder_slug}"
-        folder_dir = out_dir / folder_dirname
-        folder_label = f"{folder['number']} {folder['title']}".strip() if folder["number"] else (folder["title"] or nn)
+    def write_file(path: Path, node: dict, title: str | None, openers: list[str], asset_prefix: str) -> None:
+        frontmatter = render_frontmatter({
+            "doc": doc,
+            "section": node["number"],
+            "title": title,
+            "level": node["level"],
+            "source_pages": node["source_pages"],
+        })
+        body = _with_opener_anchors(
+            openers,
+            elements_to_markdown_with_anchors(node["elements"], asset_prefix=asset_prefix),
+            has_elements=bool(node["elements"]),
+        )
+        path.write_text(f"{frontmatter}\n{body}", encoding="utf-8", newline="")
+        written.append(path)
 
-        pre = folder["pre"]
-        has_pre = bool(pre["elements"])
-        has_files = bool(folder["files"])
-        if not has_pre and not has_files:
-            # A heading with neither body content of its own nor any
-            # level-2 children -- still surfaced in the index (so the
-            # section isn't silently missing) but no folder/file is written
-            # for it at all, consistent with "don't write an empty file".
-            index_lines.append(f"* {folder_label}")
-            continue
+    def write_nodes(nodes: list[dict], parent_dir: Path, rel: str, prefix: str, depth: int) -> None:
+        for idx, node in enumerate(nodes, start=1):
+            component = _zero_pad_component(node["number"], idx)
+            code = f"{prefix}.{component}" if prefix else component
+            slug = slugify(node["title"] or "section")
+            label = f"{node['number']} {node['title']}".strip() if node["number"] else (node["title"] or component)
+            indent = "  " * depth
 
-        folder_dir.mkdir(parents=True, exist_ok=True)
+            if node["level"] == split_depth:  # a file
+                path = parent_dir / f"{code}-{slug}.md"
+                write_file(path, node, node["title"], [*pending, node["heading_text"]], "../" * depth)
+                pending.clear()
+                index_lines.append(f"{indent}* [{label}]({rel}{path.name})")
+                continue
 
-        if has_pre:
-            # Also covers "a chapter with NO level-2 subsections": all of
-            # its content (there being no children to separate it from)
-            # lands here too, in the same NN.00-<slug>.md file, rather than
-            # inventing a third naming scheme for that case.
-            pre_path = folder_dir / f"{nn}.00-{folder_slug}.md"
-            frontmatter = render_frontmatter({
-                "doc": doc,
-                "section": folder["number"],
-                "title": folder["title"],
-                "level": folder["level"],
-                "source_pages": pre["source_pages"],
-            })
-            body = _with_opener_anchors(
-                [folder["heading_text"]],
-                elements_to_markdown_with_anchors(pre["elements"], asset_prefix="../"),
-                has_elements=True,
-            )
-            pre_path.write_text(f"{frontmatter}\n{body}", encoding="utf-8", newline="")
-            written.append(pre_path)
-            index_lines.append(f"* [{folder_label}]({folder_dirname}/{pre_path.name})")
-        else:
-            index_lines.append(f"* {folder_label}")
+            if not node["elements"] and not node["children"]:
+                # Neither content nor sub-sections: listed in the index so
+                # the section isn't silently missing, but no file is written.
+                index_lines.append(f"{indent}* {label}")
+                continue
 
-        for file_idx, file in enumerate(folder["files"], start=1):
-            mm = _zero_pad_component(file["number"], file_idx)
-            file_slug = slugify(file["title"] or "section")
-            file_path = folder_dir / f"{nn}.{mm}-{file_slug}.md"
-            frontmatter = render_frontmatter({
-                "doc": doc,
-                "section": file["number"],
-                "title": file["title"],
-                "level": file["level"],
-                "source_pages": file["source_pages"],
-            })
-            # A chapter with no body of its own has no NN.00 file, so its
-            # anchor goes at the top of its first NN.MM file instead.
-            openers = [file["heading_text"]]
-            if file_idx == 1 and not has_pre:
-                openers.insert(0, folder["heading_text"])
-            body = _with_opener_anchors(
-                openers,
-                elements_to_markdown_with_anchors(file["elements"], asset_prefix="../"),
-                has_elements=bool(file["elements"]),
-            )
-            file_path.write_text(f"{frontmatter}\n{body}", encoding="utf-8", newline="")
-            written.append(file_path)
-            file_label = f"{file['number']} {file['title']}".strip() if file["number"] else (file["title"] or mm)
-            index_lines.append(f"  * [{file_label}]({folder_dirname}/{file_path.name})")
+            dirname = f"{code}-{slug}"
+            folder_dir = parent_dir / dirname
+            folder_dir.mkdir(parents=True, exist_ok=True)
+            if node["elements"]:
+                # Also covers a folder with no sub-sections: all its content
+                # lands in its own NN.00 file.
+                path = folder_dir / f"{code}.00-{slug}.md"
+                write_file(path, node, node["title"], [*pending, node["heading_text"]], "../" * (depth + 1))
+                pending.clear()
+                index_lines.append(f"{indent}* [{label}]({rel}{dirname}/{path.name})")
+            else:
+                index_lines.append(f"{indent}* {label}")
+                if node["heading_text"]:
+                    pending.append(node["heading_text"])
+            write_nodes(node["children"], folder_dir, f"{rel}{dirname}/", code, depth + 1)
+            if node["heading_text"] in pending:  # no file inside took it
+                pending.remove(node["heading_text"])
+
+    write_nodes(roots, out_dir, "", "", 0)
 
     index_path = out_dir / "index.md"
     index_path.write_text("\n".join(index_lines) + "\n", encoding="utf-8", newline="")
@@ -624,10 +606,10 @@ def write_md_tree(doc_data: dict, doc: str, split_depth: int) -> list[Path]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--doc", required=True)
-    parser.add_argument("--format", choices=["md", "html", "okf", "md-tree", "reqif", "reqifz"], default="md")
+    parser.add_argument("--format", choices=["md", "html", "okf", "md-tree", "jsonl", "reqif", "reqifz"], default="md")
     parser.add_argument(
         "--split-depth", type=int, default=2,
-        help="md-tree only: heading level at which a new FILE starts (levels shallower become folders, deeper stay inline).",
+        help="md-tree only, 1-6: heading level at which a new FILE starts (shallower levels become nested folders, deeper stay inline).",
     )
     args = parser.parse_args()
 
@@ -645,21 +627,8 @@ def main() -> None:
         return
 
     if args.format == "md-tree":
-        if args.split_depth != 2:
-            # build_md_tree_sections only implements true folder splitting
-            # for split_depth == 2 (folder-per-level-1/file-per-level-2) --
-            # any level < split_depth collapses onto ONE flattened "current
-            # folder" instead of a real nested stack, which silently
-            # produces wrong output (colliding folder numbers across
-            # unrelated chapters) for split_depth != 2. Rejected at the CLI
-            # rather than left to produce wrong-but-exit-0 output, until
-            # nested-folder generalization is implemented -- see
-            # build_md_tree_sections' docstring and README.md.
-            print(
-                f"error: --split-depth {args.split_depth} is not supported yet -- "
-                "only --split-depth 2 (folder-per-level-1/file-per-level-2) is implemented",
-                file=sys.stderr,
-            )
+        if not 1 <= args.split_depth <= 6:
+            print(f"error: --split-depth {args.split_depth} must be a heading level, 1-6", file=sys.stderr)
             sys.exit(1)
         for path in write_md_tree(doc_data, args.doc, args.split_depth):
             print(path)
@@ -675,7 +644,7 @@ def main() -> None:
             print(str(reqif_builder.write_reqifz(args.doc, doc_data, reqif_xml)))
         return
 
-    content = to_markdown(doc_data) if args.format == "md" else to_html(doc_data)
+    content = {"md": to_markdown, "html": to_html, "jsonl": to_jsonl}[args.format](doc_data)
     out_path = paths.output_file(args.doc, args.format)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(content, encoding="utf-8", newline="")

@@ -12,6 +12,8 @@ in extract.md changes, these tests are meant to fail.
 import json
 import shutil
 
+import pytest
+
 from conftest import EXAMPLES_ROOT, describe_all_images, run_script
 
 import paths
@@ -36,8 +38,9 @@ def clean_grader(orch, doc, batch, attempt):
 
 
 class Orchestrator:
-    def __init__(self, cwd, grader=clean_grader, max_attempts=3):
+    def __init__(self, cwd, grader=clean_grader, max_attempts=3, fmt="md"):
         self.cwd, self.grader, self.max_attempts = cwd, grader, max_attempts
+        self.fmt = fmt
         self.extractor_batches: list[dict] = []
         self.grader_batches: list[dict] = []
         self.body_size: dict[str, float] = {}
@@ -51,7 +54,7 @@ class Orchestrator:
         return json.loads((self.cwd / "runs" / "state.json").read_text())["docs"]
 
     def run(self) -> dict:
-        self.sh("queue-state/scripts/state.py", "init", "--format", "md")
+        self.sh("queue-state/scripts/state.py", "init", "--format", self.fmt)
         for _ in range(20):  # guard: a loop bug must fail the test, not hang it
             doc = self.sh("queue-state/scripts/state.py", "next").strip()
             if not doc:
@@ -118,7 +121,10 @@ class Orchestrator:
 
         self.sh("assemble-output/scripts/merge.py", "--doc", doc)  # 3
         self.sh("assemble-output/scripts/assemble.py", "--doc", doc, "--format", "md")
-        self.sh("grade-output/scripts/gates.py", "--doc", doc, "--format", "md")
+        if self.fmt != "md":  # md-tree and jsonl need the md for the grader; the rest replace it
+            extra = ["--split-depth", "2"] if self.fmt == "md-tree" else []
+            self.sh("assemble-output/scripts/assemble.py", "--doc", doc, "--format", self.fmt, *extra)
+        self.sh("grade-output/scripts/gates.py", "--doc", doc, "--format", self.fmt)
 
         grade_plan = json.loads(
             self.sh("queue-state/scripts/plan.py", "--doc", doc, "--stage", "grade")
@@ -242,6 +248,29 @@ class TestEveryFormatPasses:
         ]
         extracted = set(_pages(orch.extractor_batches, "furniture_sample"))
         assert extracted and extracted < set(range(1, 12))
+
+
+OUTPUT_FORMATS = {
+    "html": "s/s.html",
+    "okf": "s/index.md",
+    "md-tree": "s/index.md",
+    "jsonl": "s/s.jsonl",
+    "reqif": "s/s.reqif",
+    "reqifz": "s/s.reqifz",
+}
+
+
+class TestEveryOutputFormatPasses:
+    @pytest.mark.parametrize("fmt", OUTPUT_FORMATS)
+    def test_pdf_passes_the_loop_in_each_output_format(self, tmp_project, fmt):
+        _add(tmp_project, "s.pdf", "sample.pdf")
+
+        summary = Orchestrator(tmp_project, fmt=fmt).run()
+
+        assert summary["counts"] == {"passed": 1}, summary
+        assert (tmp_project / "output" / OUTPUT_FORMATS[fmt]).is_file()
+        gates = json.loads(paths.gates_report_json("s").read_text())
+        assert gates["passed"] is True, gates
 
 
 class TestRetryCarriesTheGradersReason:

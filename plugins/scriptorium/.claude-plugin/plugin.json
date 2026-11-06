@@ -9,6 +9,12 @@
   "license": "MIT",
   "keywords": ["pdf", "ocr", "extraction", "elastic-loop", "agents", "okf"],
   "userConfig": {
+    "default_format": {
+      "type": "string",
+      "title": "Default output format",
+      "description": "Output format when /scriptorium:extract gets no --format: md, html, okf, md-tree, jsonl, reqif or reqifz. Empty means md.",
+      "required": false
+    },
     "ocr_languages": {
       "type": "string",
       "title": "Extra OCR languages",
