@@ -13,6 +13,7 @@ handles namespaces and XML-escaping correctly, and this tool has no other
 reason to take on a templating dependency for XML.
 """
 
+import re
 import sys
 import uuid
 import zipfile
@@ -37,6 +38,9 @@ TEXT_ATTR_ID = "scriptorium-attr-text"
 STRING_DATATYPE_ID = "scriptorium-datatype-string"
 XHTML_DATATYPE_ID = "scriptorium-datatype-xhtml"
 SPECIFICATION_TYPE_ID = "scriptorium-specification-type"
+# Characters XML 1.0 cannot carry, escaped or not; ElementTree writes them
+# through (python-pptx reads a line break in a table cell as \v).
+XML_INVALID_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
 
 def _q(tag: str) -> str:
@@ -267,7 +271,7 @@ def build_reqif_xml(doc: str, doc_data: dict) -> str:
     _build_spec_types(content, now)
     _build_spec_objects_and_hierarchy(content, doc, doc_data, now)
 
-    return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding="unicode")
+    return '<?xml version="1.0" encoding="UTF-8"?>\n' + XML_INVALID_CHARS.sub(" ", ET.tostring(root, encoding="unicode"))
 
 
 def write_reqifz(doc: str, doc_data: dict, reqif_xml: str) -> Path:

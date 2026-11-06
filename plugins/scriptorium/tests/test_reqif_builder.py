@@ -15,6 +15,16 @@ def _doc_data(*elements: dict) -> dict:
 
 
 class TestBuildReqifXml:
+    def test_control_characters_do_not_break_the_xml(self):
+        """python-pptx reads a line break in a table cell as \\v; XML 1.0 has no
+        way to write it, escaped or not."""
+        elements = [
+            {"type": "heading", "level": 1, "text": "a\x0cb"},
+            {"type": "table", "rows": [["line one\vline two"]]},
+        ]
+        root = ET.fromstring(reqif_builder.build_reqif_xml("sample", _doc_data(*elements)))
+        assert root.find(".//x:td", NS).text == "line one line two"
+
     def test_well_formed_with_req_if_root(self):
         xml_text = reqif_builder.build_reqif_xml("sample", _doc_data({"type": "paragraph", "text": "hi"}))
         root = ET.fromstring(xml_text)
