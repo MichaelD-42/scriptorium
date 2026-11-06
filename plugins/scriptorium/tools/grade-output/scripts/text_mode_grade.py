@@ -11,7 +11,6 @@ regardless of whether shards came from a script or a subagent.
 """
 
 import argparse
-import json
 import re
 import sys
 from collections import Counter
@@ -42,11 +41,9 @@ def output_page_text(page: dict) -> str:
     return normalize(" ".join(parts))
 
 
-def write_grade_shard(doc: str, page_number: int, score: float, issues: list[str]) -> None:
-    shard_path = paths.grade_shard_path(doc, page_number)
-    shard_path.parent.mkdir(parents=True, exist_ok=True)
-    shard_path.write_text(json.dumps({"page_number": page_number, "score": score, "issues": issues}, indent=2), encoding="utf-8", newline="")
-    print(f"page {page_number}: score={score} issues={issues}")
+def write_grade_shard(doc: str, page_number: int, issues: list[str]) -> None:
+    shard = grades.write_shard(doc, page_number, issues)
+    print(f"page {page_number}: score={shard['score']} issues={issues}")
 
 
 # --- docx -------------------------------------------------------------------
@@ -147,8 +144,8 @@ def grade_docx(doc: str, docx_path: Path, doc_data: dict) -> None:
 
     for page_number, blocks in enumerate(source_pages, start=1):
         page = doc_data["pages"].get(page_number, {"elements": []})
-        score, issues = grade_docx_page(blocks, page, document)
-        write_grade_shard(doc, page_number, score, issues)
+        _, issues = grade_docx_page(blocks, page, document)
+        write_grade_shard(doc, page_number, issues)
 
 
 # --- xlsx -------------------------------------------------------------------
@@ -216,8 +213,8 @@ def grade_xlsx(doc: str, xlsx_path: Path, doc_data: dict) -> None:
     for page_number, sheet_name in enumerate(workbook.sheetnames, start=1):
         ws = workbook[sheet_name]
         page = doc_data["pages"].get(page_number, {"elements": []})
-        score, issues = grade_xlsx_sheet(ws, page)
-        write_grade_shard(doc, page_number, score, issues)
+        _, issues = grade_xlsx_sheet(ws, page)
+        write_grade_shard(doc, page_number, issues)
 
 
 # --- html -------------------------------------------------------------------
@@ -295,8 +292,8 @@ def grade_html(doc: str, html_path: Path, doc_data: dict) -> None:
     soup = html_pages.parse(html_path)
     blocks = list(html_pages.iter_block_items(soup))
     page = doc_data["pages"].get(1, {"elements": []})
-    score, issues = grade_html_page(blocks, page, soup, html_path.parent)
-    write_grade_shard(doc, 1, score, issues)
+    _, issues = grade_html_page(blocks, page, soup, html_path.parent)
+    write_grade_shard(doc, 1, issues)
 
 
 # --- entry point --------------------------------------------------------

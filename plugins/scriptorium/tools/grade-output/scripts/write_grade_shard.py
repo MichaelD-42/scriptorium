@@ -7,13 +7,11 @@ grader never picks a number.
 """
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 import grades  # noqa: E402
-import paths  # noqa: E402
 
 
 def main() -> None:
@@ -29,14 +27,8 @@ def main() -> None:
     if unknown:
         print(f"error: unknown issue tag(s) {unknown}; see rubric.md's failure taxonomy", file=sys.stderr)
         sys.exit(1)
-    score = grades.score_from_issues(issues)
-    shard = {"page_number": args.page, "score": score, "issues": issues}
-    if args.reason:
-        shard["reason"] = args.reason
-    shard_path = paths.grade_shard_path(args.doc, args.page)
-    shard_path.parent.mkdir(parents=True, exist_ok=True)
-    shard_path.write_text(json.dumps(shard, indent=2), encoding="utf-8", newline="")
-    print(f"page {args.page}: score={score} issues={issues}")
+    shard = grades.write_shard(args.doc, args.page, issues, args.reason)
+    print(f"page {args.page}: score={shard['score']} issues={issues}")
 
 
 if __name__ == "__main__":
