@@ -49,7 +49,7 @@ def _seconds(attempt: dict) -> float:
 
 
 def _page_status(issues: list[str]) -> str:
-    if grades.CONTENT_ISSUES & set(issues):
+    if grades.BLOCKING_ISSUES & set(issues):
         return "critical"
     return "warning" if issues else "good"
 

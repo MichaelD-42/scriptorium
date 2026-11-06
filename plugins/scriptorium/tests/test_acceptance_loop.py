@@ -32,8 +32,6 @@ def clean_grader(orch, doc, batch, attempt):
             doc,
             "--page",
             str(page),
-            "--score",
-            "1.0",
         )
 
 
@@ -269,8 +267,6 @@ class TestRetryCarriesTheGradersReason:
                     doc,
                     "--page",
                     str(page),
-                    "--score",
-                    "0.4" if bad else "1.0",
                     *args,
                 )
 
@@ -318,8 +314,6 @@ class TestNeedsHuman:
                     doc,
                     "--page",
                     str(page),
-                    "--score",
-                    "0.3" if issues else "1.0",
                     *issues,
                 )
 
@@ -344,8 +338,6 @@ class TestNeedsHuman:
                     doc,
                     "--page",
                     str(page),
-                    "--score",
-                    "0.2" if issues else "1.0",
                     *issues,
                 )
 

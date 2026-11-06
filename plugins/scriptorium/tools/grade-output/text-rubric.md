@@ -55,7 +55,7 @@ to show it.
 
 ## Scoring
 
-Same pass rule as the visual rubric (0.85, and no page with a content tag), for one merged
+Same pass rule as the visual rubric (0.85, and no page with a blocking tag, see `lib/grades.py`), for one merged
 `grade-report.json` shape the orchestrator can read the same way
 regardless of format: `score = 1.0` with no issues, else
 `max(0.0, 1.0 - 0.3 * distinct_issue_types_present)` — a single real defect

@@ -20,12 +20,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 import docx_pages  # noqa: E402
 import elements as elements_lib  # noqa: E402
+import grades  # noqa: E402
 import html_pages  # noqa: E402
 import paths  # noqa: E402
 
 MIN_UNIT_LEN = 15  # shorter fragments are too generic to reliably match/mismatch
 GENERIC_CAPTIONS = {"image", "figure", "picture", ""}
-SCORE_PENALTY_PER_ISSUE_TYPE = 0.3
 
 
 def normalize(text: str) -> str:
@@ -40,10 +40,6 @@ def output_page_text(page: dict) -> str:
         elif el["type"] == "table":
             parts.extend(cell for row in el["rows"] for cell in row)
     return normalize(" ".join(parts))
-
-
-def score_from_issues(issues: list[str]) -> float:
-    return round(max(0.0, 1.0 - SCORE_PENALTY_PER_ISSUE_TYPE * len(issues)), 3) if issues else 1.0
 
 
 def write_grade_shard(doc: str, page_number: int, score: float, issues: list[str]) -> None:
@@ -140,7 +136,7 @@ def grade_docx_page(blocks: list, page: dict, document) -> tuple[float, list[str
     if docx_check_wrong_heading_level(blocks, output_elements):
         issues.append("wrong_heading_level")
 
-    return score_from_issues(issues), issues
+    return grades.score_from_issues(issues), issues
 
 
 def grade_docx(doc: str, docx_path: Path, doc_data: dict) -> None:
@@ -210,7 +206,7 @@ def grade_xlsx_sheet(ws, page: dict) -> tuple[float, list[str]]:
     # No wrong_heading_level check for xlsx: a sheet has exactly one
     # heading (its own name) and no sub-heading structure to get wrong.
 
-    return score_from_issues(issues), issues
+    return grades.score_from_issues(issues), issues
 
 
 def grade_xlsx(doc: str, xlsx_path: Path, doc_data: dict) -> None:
@@ -292,7 +288,7 @@ def grade_html_page(blocks: list, page: dict, soup, html_dir: Path) -> tuple[flo
     if html_check_wrong_heading_level(blocks, output_elements):
         issues.append("wrong_heading_level")
 
-    return score_from_issues(issues), issues
+    return grades.score_from_issues(issues), issues
 
 
 def grade_html(doc: str, html_path: Path, doc_data: dict) -> None:

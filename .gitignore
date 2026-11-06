@@ -35,3 +35,6 @@ Thumbs.db
 
 # local worktrees for feature branches
 .worktrees/
+
+# grader eval runs (staged from evals/grader/cases)
+evals/run/

@@ -1,0 +1,101 @@
+[
+  {
+    "doc": "eval-furniture-clean",
+    "pages": [
+      4,
+      7,
+      8
+    ],
+    "expected": {}
+  },
+  {
+    "doc": "eval-furniture-dropped-text",
+    "pages": [
+      1,
+      3
+    ],
+    "expected": {
+      "1": "dropped_text"
+    }
+  },
+  {
+    "doc": "eval-furniture-duplicated-text",
+    "pages": [
+      1,
+      3
+    ],
+    "expected": {
+      "1": "duplicated_text"
+    }
+  },
+  {
+    "doc": "eval-furniture-wrong-reading-order",
+    "pages": [
+      1,
+      3
+    ],
+    "expected": {
+      "1": "wrong_reading_order"
+    }
+  },
+  {
+    "doc": "eval-furniture-hallucinated-text",
+    "pages": [
+      1,
+      3
+    ],
+    "expected": {
+      "1": "hallucinated_text"
+    }
+  },
+  {
+    "doc": "eval-furniture-wrong-heading-level",
+    "pages": [
+      4,
+      6
+    ],
+    "expected": {
+      "4": "wrong_heading_level"
+    }
+  },
+  {
+    "doc": "eval-furniture-table-corruption",
+    "pages": [
+      8,
+      10
+    ],
+    "expected": {
+      "8": "table_corruption"
+    }
+  },
+  {
+    "doc": "eval-furniture-missing-image",
+    "pages": [
+      7,
+      9
+    ],
+    "expected": {
+      "7": "missing_image"
+    }
+  },
+  {
+    "doc": "eval-furniture-bad-caption",
+    "pages": [
+      7,
+      9
+    ],
+    "expected": {
+      "7": "bad_caption"
+    }
+  },
+  {
+    "doc": "eval-furniture-split-paragraph",
+    "pages": [
+      4,
+      6
+    ],
+    "expected": {
+      "4": "split_paragraph"
+    }
+  }
+]

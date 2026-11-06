@@ -21,6 +21,19 @@ beautifulsoup4) plus the `pytest`/`pytest-cov` dev group. Requires
 [`uv`](https://docs.astral.sh/uv/) and Python 3.11+. Also runs automatically
 via a `SessionStart` hook when the plugin loads in a Claude Code session.
 
+## Running the plugin from this checkout
+
+An installed plugin is a copy in `~/.claude/plugins/cache/`, so edits here
+don't reach it. To try a change, start Claude Code with this checkout's
+plugin for the session:
+
+```bash
+claude --plugin-dir plugins/scriptorium
+```
+
+To update the installed copies after a release, see the README's
+[Install](README.md#install) section (every scope that has an install).
+
 ## Tests
 
 ```bash
@@ -33,6 +46,18 @@ Config lives in `plugins/scriptorium/pyproject.toml`
 `requires_tesseract` and `requires_libreoffice` (the latter skipped in
 default CI — `.github/workflows/ci.yml` installs tesseract but not
 LibreOffice). CI runs on Python 3.11 and 3.12.
+
+## Evals
+
+Not in CI. [`evals/README.md`](evals/README.md) covers the committed
+grader calibration set (`/eval-grader`, real graders on injected
+defects), the LLM-free extraction eval, and `evals/tests` (run with
+`uv run --project plugins/scriptorium pytest evals/tests`). Run the eval
+tests after changing the rubric's tags, `merge_grades.py`, `decide` or the
+gates. Run `/eval-grader` before and after a change to `rubric.md` or
+`agents/grader.md`, and compare the scores. A finding in `evals/findings/`
+(a page the scripts got wrong) is fixed as a pre-analysis quirk plus its
+measure; see `tools/pdf-triage/README.md`.
 
 ## Invariants — easy to break, hard to notice
 
@@ -62,6 +87,11 @@ that only show up under concurrency or on large documents.
   shared places (`lib/paths.py`, `queue-state/scripts/state.py`,
   `assemble-output/scripts/merge.py`, `grade-output`, `commands/extract.md`,
   `agents/extractor.md`); grep for an existing format such as `xlsx`.
+- **Graders tag, scripts score.** A grade shard's score is
+  `lib/grades.py`'s `score_from_issues`, never a number an agent picks; a
+  new tag goes into `lib/grades.py`'s sets (what a retry does with it,
+  whether it blocks a pass), `rubric.md`'s taxonomy and
+  `evals/grader/prepare.py`'s mutations.
 - **No Claude Code skills.** `tools/` folders have a `README.md`, never a
   `SKILL.md`: a skill would be listed in every session with the plugin
   enabled. The command and the agent prompts name each script by its

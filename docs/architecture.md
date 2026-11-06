@@ -4,9 +4,12 @@ This document covers the elastic loop itself: why the agent tree has the
 shape it does, how the orchestrator drives a document through it, and how
 failures turn into targeted retries. For the tools/scripts/schemas that
 implement each step, see [`tooling.md`](tooling.md). The C4 model
-(context, containers, scripts, one attempt) is
+(context, containers, scripts, one attempt, one grader eval run) is
 [`c4/workspace.dsl`](c4/workspace.dsl): open it in Structurizr Lite with
 `docker run -it --rm -p 8080:8080 -v "$PWD/docs/c4:/usr/local/structurizr" structurizr/lite`.
+Check it after an edit with
+`docker run --rm -v "$PWD/docs/c4:/w" structurizr/structurizr validate -workspace /w/workspace.dsl`
+(silent with exit 0 when valid).
 
 ## Elastic Loop mapping
 
@@ -16,13 +19,13 @@ implement each step, see [`tooling.md`](tooling.md). The C4 model
 | Elastic Loop concept | This plugin |
 |---|---|
 | Intent opens the loop | `/scriptorium:extract` sets doc (or the whole `input/` queue), format, `--max-attempts`, optional `--batch-size` cap |
-| Context grounds it | the input document, per-page rendered PNGs, per-page shards |
-| Backpressure (structural/hard) | `grade-output`'s `gates.py` — page count, empty pages, dangling asset refs, OCR confidence floor, figures complete, plus checks that only find something on PDFs (only PDF triage detects furniture and a TOC): furniture removed, TOC headings matched |
-| Backpressure (product/soft) | `grade-output/rubric.md` — reading order, dropped/hallucinated/duplicated text, table integrity, headings, captions. Pass threshold (0.85) is hardcoded in `merge_grades.py`, not a CLI flag; any content tag (wrong body text) fails the document whatever the average |
+| Context grounds it | the input document, per-page rendered PNGs, per-page shards; for a PDF, triage's pre-analysis first (detection scopes and known quirks, each with the measure the scripts apply) |
+| Backpressure (structural/hard) | `grade-output`'s `gates.py` — page count, empty pages, dangling asset refs, OCR confidence floor, figures complete, plus checks that only find something on PDFs: every text-layer word in the output (dropped text on a text-tier page, caught without a grader), furniture removed and TOC headings matched (only PDF triage detects furniture and a TOC) |
+| Backpressure (product/soft) | `grade-output/rubric.md` — reading order, dropped/hallucinated/duplicated text, data-table integrity, headings, captions, paragraphs kept together across page breaks; visual layout is not graded. The grader only tags; the score is computed from the tags (`lib/grades.py`). Pass threshold (0.85) is hardcoded in `merge_grades.py`, not a CLI flag; a blocking tag (wrong body text, a missing image, a split paragraph) fails the document whatever the average |
 | Verification closes it | the `grader` role — independent of `extractor`, never grades its own work |
 | Loop sizing | each format's triage script classifies the document `loose` (all text tier, no visuals) or `tight` (expect escalation) |
 | Elastic escalation | text (PyMuPDF, native) or OCR (Tesseract, scans) → vision (Claude); a text page skips OCR |
-| Retained feedback | a failed grade's per-page failure taxonomy drives exactly which pages escalate to which tier on retry — not a blind re-run |
+| Retained feedback | a failed grade's per-page failure taxonomy drives exactly which pages escalate to which tier on retry — not a blind re-run. Across documents (`--findings`): a page that failed at a script tier and passed at vision is saved as a suggested correction, scored by the extraction eval until the scripts get it right, and turned into a pre-analysis quirk with a measure |
 | Harness engineering | environment bootstrap, page sharding, and the context-rot rule below — the loop only works if the scaffold around the model is sound |
 
 ## The two-level agent tree (why there are only two agent *roles*)
@@ -133,6 +136,7 @@ re-run — decides what happens next:
 |---|---|
 | `dropped_text`, `hallucinated_text`, `wrong_reading_order`, `duplicated_text`, `wrong_heading_level`, `table_corruption` | move that page's body tier up to `vision` (`text → vision`, `ocr → vision`). A text-layer page skips OCR: Tesseract writes only paragraphs, so its tables and headings would be lost |
 | a page already at `vision` still failing | don't retry again — `status: needs-human` for the whole document immediately |
+| `split_paragraph` | `needs-human`: page-break joins are a script rule (`lib/elements.py`), so no tier changes the result |
 | `missing_image`, `bad_caption` | body tier unchanged; set `recheck_images: true` so the next `extractor` batch redoes just the image step |
 
 Each escalation records the grader's actual `reason` text alongside it in

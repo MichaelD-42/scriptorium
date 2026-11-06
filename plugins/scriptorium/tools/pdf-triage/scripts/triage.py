@@ -16,6 +16,9 @@ import furniture as furniture_lib  # noqa: E402
 import paths  # noqa: E402
 import toc as toc_lib  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import pre_analysis  # noqa: E402
+
 import fitz  # PyMuPDF
 import pdfplumber
 
@@ -540,11 +543,11 @@ def main() -> None:
     toc_entries, toc_pages, toc_unparsed = toc_lib.detect_toc_with_unparsed(document)
     body_pages = {p["page_number"] for p in pages} - set(toc_pages)
     furniture, furniture_text = detect_furniture(document, pdf_path, body_pages)
-    document.close()
-
     for page in pages:
         if page["page_number"] in toc_pages:
             page["role"] = "toc"
+    analysis = pre_analysis.analyze(document, pdf_path, pages, furniture, toc_entries, body_size)
+    document.close()
 
     loop_size = "tight" if any(p["tier"] != "text" for p in pages) else "loose"
     result = {
@@ -555,6 +558,7 @@ def main() -> None:
         "body_size": round(body_size, 1),
         "furniture": furniture,
         "furniture_text": furniture_text,
+        "pre_analysis": analysis,
     }
 
     out_path = paths.triage_json(args.doc)
@@ -568,6 +572,9 @@ def main() -> None:
         "loop_size": loop_size,
         "body_size": result["body_size"],
         "non_text_pages": {str(p["page_number"]): p["tier"] for p in pages if p["tier"] != "text"},
+        "quirks": [q["name"] for q in analysis["quirks"]],
+        "text_languages": analysis["scopes"]["text_languages"],
+        "bitmap_pages": analysis["scopes"]["bitmap_pages"],
         "triage_json": str(out_path),
     }
     print(json.dumps(summary, indent=2))

@@ -51,8 +51,8 @@ own is counted at `vision`.
      same result, and a higher tier has no TOC-driven heading levels.
    - Gate `figures_complete` failed → each page in its `pages`: same tier,
      `recheck_images`, the gate's `detail` as reason.
-   - Gate `ocr_confidence_floor` failed → each page in its `pages` goes to
-     `vision`.
+   - Gate `ocr_confidence_floor` or `text_layer_coverage` failed → each page
+     in its `pages` goes to `vision`, the gate's `detail` as reason.
    - Any other failed gate is document-level and names no page: needs a
      human, even when other pages could be retried, since a retry cannot
      fix it.
@@ -66,6 +66,8 @@ own is counted at `vision`.
      `docx`/`xlsx`/`html` → needs a human at once: extraction is
      deterministic and there is no rendered page, so a retry gives
      byte-identical output.
+   - A page tagged `split_paragraph` → needs a human: page-break joins are
+     a script rule (`lib/elements.py`), so no tier changes the result.
    - A page tagged only `missing_image`/`bad_caption`/`bad_mermaid` → same
      tier, `recheck_images`. This retries for every format.
    - The reason is the grader's `reason` text from the grade shard, or the
@@ -76,6 +78,23 @@ own is counted at `vision`.
    (a document-level gate, or a low score without tags) → `needs-human`,
    since a retry would re-run nothing. Else `retrying` with
    `escalated_pages`.
+
+## `findings.py` — suggested corrections from passed documents
+
+```bash
+findings.py --doc <name> --dest <dir>   # {"doc": ..., "findings": ["<dir>/<doc>-p<N>", ...]}
+```
+
+Run by the orchestrator for a `passed` PDF when `/scriptorium:extract` has
+`--findings <dir>`. A page that failed its grade at `text` or `ocr` and
+passed at `vision` is a script defect with an answer the grader accepted.
+Each lands in `<dir>/<doc>-p<N>/`: `page.pdf` (the source page),
+`reference.md` (the passing page), `script.md` (the scripts' output) and
+`finding.json` (source, page, tiers, every escalation reason,
+`"status": "suggested"`). The reference is a vision transcription: review
+it before committing. `evals/extraction/run.py` scores every finding folder
+in `evals/findings/`. Exits 1 for a document that is not `passed`; a
+non-PDF document gives no findings.
 
 ## `report.py` — the end-of-run report
 
@@ -104,7 +123,7 @@ its row and details; "–" when any finished attempt has none. All document text
 
 ```bash
 plan.py --doc <name> --stage scripts                  # {"extract_text": [...], "extract_images": [...]} or {"format_extract": [...]}
-plan.py --doc <name> --stage extract [--max-pages n]  # {"agent_free_pages": n, "batches": [...], "over_budget_pages": [...]}
+plan.py --doc <name> --stage extract [--max-pages n] [--no-describe]  # {"agent_free_pages": n, "batches": [...], "over_budget_pages": [...]}
 plan.py --doc <name> --stage grade   [--max-pages n]  # {"text_mode": false, "batches": [{"pages": [...]}], "over_budget_pages": [...]}
 ```
 

@@ -119,7 +119,8 @@ forced by the orchestrator after a previous grade failure), skip straight
 to the vision step. There is no `text` rung for this format, same reason a
 scanned PDF page has none.
 
-**Images**, independent of body tier: every page's image shard is already
+**Images**, independent of body tier — skip this whole section when the
+orchestrator says "no image work" (`--no-describe`): every page's image shard is already
 on disk (`extract-images` for `pdf`/`image`, which also finds vector
 diagrams with no embedded bitmap; the format's own extract script for
 `pptx`/`docx`/`xlsx`/`html`). Your work is the image elements in it that
@@ -203,6 +204,12 @@ is not new behavior — it was already the case before this contract existed
 — just restated here now that `caption`'s move to script-authoritative might
 otherwise read as "everything textual on a figure is now the script's
 job," which isn't true for `figure_text` without a text layer.
+
+A bitmap's `figure_text` with `"figure_text_source": "ocr"` is Tesseract's
+reading of the lines it was sure of, not a text layer. Check it against the
+crop: when a label is misread or missing, pass the corrected full
+transcription with `--figure-text`; `describe_image.py` lets you replace an
+OCR reading, never a text-layer one.
 
 ## What you return
 

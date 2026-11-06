@@ -51,3 +51,27 @@ def test_medium_weight_font_name_is_heavy():
     assert extract_text.is_heavy_span({"font": "Arial-BoldMT", "flags": 0})
     assert not extract_text.is_heavy_span({"font": "HelveticaNeueLTW1G-Lt", "flags": 4})
     assert not extract_text.is_heavy_span({"font": "Times-Roman", "flags": 0})
+
+
+def test_an_accent_heading_sharing_a_block_with_its_body_is_split(tmp_project):
+    """KSEM guide: "Schritt 2 - Login" and the step's body lines are one
+    PyMuPDF block, so the one-line accent rule never saw the heading."""
+    d = fitz.open()
+    page = d.new_page()
+    page.insert_text((63, 200), "Schritt 2 - Login", fontsize=9, fontname="hebo", color=BLUE)
+    page.insert_text((63, 211), "IP-Adresse des Smart Energy Meter in einen Browser eingeben,", fontsize=9)
+    page.insert_text((63, 222), "dann mit dem Passwort am Webserver anmelden.", fontsize=9)
+    d.save(tmp_project / "input" / "step.pdf")
+    blocks, _ = extract_text.extract_page_text_blocks(fitz.open(tmp_project / "input" / "step.pdf")[0], 9.0)
+    assert len(blocks) == 1 and len(blocks[0]["lines"]) == 3  # the quirk: one block
+    for script, args in (
+        ("pdf-triage/scripts/triage.py", ()),
+        ("extract-text/scripts/extract_text.py", ("--pages", "1", "--body-size", "9")),
+    ):
+        result = run_script(script, "--doc", "step", *args, cwd=tmp_project)
+        assert result.returncode == 0, result.stderr
+    elements = json.loads(paths.shard_path("step", 1, "text").read_text())["elements"]
+    assert [(e["type"], e["text"]) for e in elements] == [
+        ("heading", "Schritt 2 - Login"),
+        ("paragraph", "IP-Adresse des Smart Energy Meter in einen Browser eingeben, dann mit dem Passwort am Webserver anmelden."),
+    ]

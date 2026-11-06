@@ -19,6 +19,49 @@ PDF, PowerPoint (`.pptx`), Word (`.docx`), Excel (`.xlsx`), HTML (`.html`),
 and standalone images (`.png`/`.jpg`/`.jpeg`/`.webp`/`.tiff`) are
 implemented today.
 
+## 0.7.0
+
+- **Graders tag, scripts score**: `write_grade_shard.py` no longer takes
+  `--score`; a page's score is 1.0 minus 0.3 per distinct tag
+  (`lib/grades.py`), the rule `text_mode_grade.py` already used. A grader
+  can no longer soften a defect with a high number.
+- **Blocking tags**: `missing_image` and the new `split_paragraph` now fail
+  the document whatever the average, like the content tags.
+  `grade-report.json`'s `content_issue_pages` is now `blocking_issue_pages`.
+- **Paragraphs across pages**: an `ocr`/`vision` page has no bbox, so its
+  paragraphs never joined across a page break. They now join when the next
+  page continues in lowercase. The rubric grades a paragraph left split
+  (`split_paragraph`, goes to a human: the join is a script rule) and no
+  longer grades visual layout; a layout table is fine as long as its text
+  is complete and in order.
+- **`text_layer_coverage` gate** (pdf): every word of a `text`-tier page's
+  text layer must be in the output. Dropped text on such a page is now
+  found by a script, not by the grader; the page goes to `vision` with the
+  missing words as reason.
+- **Bitmap `figure_text` from Tesseract**: `extract_images.py --ocr-lang`
+  keeps the lines Tesseract reads with confidence 80+ on every word
+  (`figure_text_source: "ocr"`); the extractor may correct them.
+- **`--no-describe`**: images get no description, mermaid or data table,
+  so a text-layer document needs no extractor agent at all.
+- **Pre-analysis** (pdf): before extraction, triage records the detection
+  scopes (scans, bitmaps, data tables, furniture, TOC, text languages) and
+  quirks, each with its measure: `layout_table` (now read as headings and
+  paragraphs, not a table), `heading_in_block` (an accent heading sharing a
+  block with its body is split off), `side_margin_text`,
+  `garbled_text_layer`, `text_language` (passed to OCR, so a German scan or
+  screenshot is no longer read as English). The KSEM guide's pages now come
+  out of the scripts with tables 1.0 and headings 0.83 in the extraction
+  eval, up from 0.0 and 0.17.
+- **Findings** (`--findings <dir>`): a passed PDF's pages that failed at a
+  script tier and passed at vision are saved as suggested corrections
+  (`findings.py`), and the extraction eval scores every one of them.
+- **Evals** (`evals/`, not run in CI): a committed grader calibration set
+  (one synthetic document, nine injected defects, `/eval-grader`) and an
+  LLM-free extraction eval against reference Markdown.
+- **C4 model**: the evals as a container with a developer actor and a
+  `GraderEval` dynamic view; grader, gates, queue, image and merge
+  descriptions match 0.7.0.
+
 ## 0.6.2
 
 - **Cost per document**: each attempt records what the session spent,

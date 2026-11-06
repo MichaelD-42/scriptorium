@@ -82,7 +82,7 @@ def decide(entry: dict, report: dict, tiers: dict[int, str], max_attempts: int) 
         elif check["name"] == "figures_complete":
             for page in check.get("pages", []):
                 escalate(page, tiers.get(page, "text"), True, check["detail"])
-        elif check["name"] == "ocr_confidence_floor" and check.get("pages"):
+        elif check["name"] in ("ocr_confidence_floor", "text_layer_coverage") and check.get("pages"):
             for page in check["pages"]:
                 escalate(page, "vision", False, check["detail"])
         else:
@@ -94,7 +94,9 @@ def decide(entry: dict, report: dict, tiers: dict[int, str], max_attempts: int) 
             continue
         page, tier = shard["page_number"], tiers.get(shard["page_number"], "text")
         reason = shard.get("reason") or ", ".join(sorted(issues))
-        if issues & grades.CONTENT_ISSUES:
+        if issues & grades.JOIN_ISSUES:
+            human.append(f"page {page}: {reason} (page-break joins are a script rule; no tier changes them)")
+        elif issues & grades.CONTENT_ISSUES:
             next_tier = NEXT_TIER.get(fmt, {}).get(tier)
             if fmt in DIGITAL_NATIVE:
                 human.append(f"page {page}: {reason} (digital-native extraction is deterministic)")

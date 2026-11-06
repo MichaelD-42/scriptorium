@@ -1066,6 +1066,15 @@ def merge_list_and_paragraph_blocks(
                 i += 1
                 continue
 
+        # Triage's `heading_in_block` quirk: an accent heading line that
+        # PyMuPDF grouped with the body below it is a heading of its own.
+        if len(kept_lines) > 1 and kept_lines[0].get("accent") and not any(ln.get("accent") for ln in kept_lines[1:]):
+            heading = build_block_element(block, kept_lines[:1], body_size, toc_lookup, heading_size_ranks, list_level_lookup)
+            if heading is not None and heading["type"] == "heading":
+                elements.append(heading)
+                kept_lines = kept_lines[1:]
+                prev_paragraph_line = None  # the body never joins a paragraph above its heading
+
         element = build_block_element(block, kept_lines, body_size, toc_lookup, heading_size_ranks, list_level_lookup)
 
         # Follow-up R27: a paragraph block made of label/value rows and a
@@ -1383,11 +1392,14 @@ def main() -> None:
         # the shared query -- before the overlap-drop below, or a frame
         # "table" would swallow real text blocks that merely sit under it.
         # Follow-up R31: a bitmap panel's text is its figure's, not a cell's.
+        # A layout table (triage's `layout_table` quirk) is no table: its
+        # lines stay body text, so its headings and paragraphs are found.
         tables = [
             {"bbox": t["bbox"], "rows": t["rows"]}
             for t in figures_lib.page_tables(
                 pdf_path, page_number, frame_tables, content_rect, exclude_regions=figures_lib.bitmap_panels(page)
             )
+            if not figures_lib.is_layout_table(t)
         ]
         # Task A5: figure regions detected the same way extract_images.py
         # detects them (same shared helper, so the two scripts can never

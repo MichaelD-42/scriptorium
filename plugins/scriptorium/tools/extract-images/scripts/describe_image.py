@@ -178,7 +178,7 @@ def main() -> None:
     found = False
     for el in shard["elements"]:
         if el["type"] == "image" and el["asset"] == args.asset:
-            if args.figure_text is not None and el.get("figure_text"):
+            if args.figure_text is not None and el.get("figure_text") and el.get("figure_text_source") != "ocr":
                 # A5's contract: the agent may only fill figure_text via
                 # vision when the script-side value came back null/absent
                 # -- never overwrite real, deterministically-extracted text.
@@ -215,6 +215,7 @@ def main() -> None:
                 el["caption"] = args.caption
             if args.figure_text is not None:
                 el["figure_text"] = args.figure_text
+                el.pop("figure_text_source", None)  # the extractor's reading replaces Tesseract's
             found = True
     if not found:
         print(f"error: no image element with asset {args.asset} on page {args.page}", file=sys.stderr)

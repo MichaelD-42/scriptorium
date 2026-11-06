@@ -55,6 +55,14 @@ TOC_PAGE_TOLERANCE = 1
 # no_visible_text flag (see lib/furniture.py).
 NO_VISIBLE_TEXT_FORMATS = furniture_lib.NO_VISIBLE_TEXT_FORMATS
 
+# text_layer_coverage: a text-tier page fails when its text layer holds at
+# least this many words (letters only, 4+ long) that the output lacks, and
+# they are at least this share of the page's words.
+# shortcut: thresholds picked by hand on the shipped fixtures; recalibrate on the eval corpus (evals/).
+COVERAGE_MIN_MISSING = 3
+COVERAGE_MAX_MISSING_FRACTION = 0.05
+_COVERAGE_WORD = re.compile(r"[^\W\d_]{4,}")
+
 
 def check_page_count_match(doc_data: dict, true_page_count: int) -> dict:
     got = len(doc_data["pages"])
@@ -507,6 +515,64 @@ def check_figures_complete(doc_data: dict, input_format: str | None = None) -> d
     return {"name": "figures_complete", "passed": not incomplete, "detail": detail, "pages": pages, "incomplete": incomplete}
 
 
+def _words(text: str) -> set[str]:
+    return set(_COVERAGE_WORD.findall(text.lower()))
+
+
+def _element_words(el: dict) -> set[str]:
+    """Words of the text an element carries from the page: its text,
+    caption, figure_text and table cells -- never the agent's description."""
+    parts = [el.get("text") or "", el.get("caption") or "", el.get("figure_text") or ""]
+    parts += [str(cell) for row in el.get("rows") or [] for cell in row]
+    return _words(" ".join(parts))
+
+
+def check_text_layer_coverage(doc_data: dict, source_words: dict[int, set[str]]) -> dict:
+    """Dropped text on a `text`-tier page, checked against the page's own
+    text layer (`source_words`, from `pdf_text_layer_words`) instead of by
+    eye. The neighbouring pages count too: a page-break join moves the
+    start of page n+1 onto page n."""
+    pages = doc_data["pages"]
+    page_words = {
+        n: set().union(*(_element_words(el) for el in page.get("elements", []))) for n, page in pages.items()
+    }
+    failing, details = [], []
+    for n, page in sorted(pages.items()):
+        src = source_words.get(n)
+        if page.get("tier") != "text" or page.get("skipped") or not src:
+            continue
+        out = page_words.get(n - 1, set()) | page_words[n] | page_words.get(n + 1, set())
+        missing = sorted(src - out)
+        if len(missing) >= COVERAGE_MIN_MISSING and len(missing) / len(src) >= COVERAGE_MAX_MISSING_FRACTION:
+            failing.append(n)
+            details.append(f"page {n}: {len(missing)} of {len(src)} text-layer words missing, e.g. {', '.join(missing[:8])}")
+    detail = "; ".join(details) if details else "every text-tier page's text-layer words are in the output"
+    return {"name": "text_layer_coverage", "passed": not failing, "detail": detail, "pages": failing}
+
+
+def pdf_text_layer_words(input_path: Path, furniture: dict) -> dict[int, set[str]]:
+    """{page: words} of each PDF page's horizontal text lines outside the
+    furniture bands and side margins, line-end hyphens joined the way
+    extraction joins them."""
+    import fitz  # PyMuPDF
+
+    out = {}
+    with fitz.open(input_path) as pdf:
+        for n, page in enumerate(pdf, start=1):
+            width, height = page.rect.width, page.rect.height
+            rect = furniture_lib.page_content_rect(furniture, width, height)
+            lines = [
+                "".join(span["text"] for span in line["spans"])
+                for block in page.get_text("dict")["blocks"]
+                if block["type"] == 0
+                for line in block["lines"]
+                if not furniture_lib.is_side_margin_line(line["dir"], line["bbox"], width)
+                and not furniture_lib.in_furniture_band(line["bbox"], height, rect)
+            ]
+            out[n] = _words(elements_lib.join_texts(lines))
+    return out
+
+
 def _load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
@@ -580,6 +646,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--doc", required=True)
     parser.add_argument("--format", choices=["md", "html", "okf", "md-tree", "reqif", "reqifz"], default="md")
+    parser.add_argument("--no-describe", action="store_true", help="images carry no agent-written fields; skip figures_complete")
     args = parser.parse_args()
 
     input_path = paths.input_file(args.doc)
@@ -595,6 +662,7 @@ def main() -> None:
         sys.exit(1)
     doc_data = elements_lib.load_doc(elements_path)
     page_sizes = furniture_lib.pdf_page_sizes(input_path) if input_format == "pdf" else {}
+    furniture = _load_json(paths.triage_json(args.doc)).get("furniture") or furniture_lib.empty_furniture()
 
     checks = [
         check_page_count_match(doc_data, true_page_count),
@@ -606,7 +674,7 @@ def main() -> None:
         # formats never write toc.json) means no furniture / no TOC: pass.
         check_furniture_absent(
             doc_data,
-            _load_json(paths.triage_json(args.doc)).get("furniture") or furniture_lib.empty_furniture(),
+            furniture,
             paths.output_dir(args.doc),
             {n: s[1] for n, s in page_sizes.items()},
             {n: s[0] for n, s in page_sizes.items()},
@@ -616,7 +684,12 @@ def main() -> None:
             _load_json(paths.toc_json(args.doc)).get("entries") or [],
             _load_json(paths.toc_json(args.doc)).get("unparsed") or [],
         ),
-        check_figures_complete(doc_data, input_format),
+        (
+            {"name": "figures_complete", "passed": True, "detail": "skipped: --no-describe", "pages": [], "incomplete": []}
+            if args.no_describe
+            else check_figures_complete(doc_data, input_format)
+        ),
+        check_text_layer_coverage(doc_data, pdf_text_layer_words(input_path, furniture) if input_format == "pdf" else {}),
     ]
 
     # Task A5b: large_region_excluded is a WARNING, not one of the checks

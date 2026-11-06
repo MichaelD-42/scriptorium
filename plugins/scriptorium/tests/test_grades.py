@@ -13,6 +13,7 @@ from docx import Document
 from openpyxl import Workbook, load_workbook
 
 import docx_pages
+import grades
 import html_pages
 import paths
 from conftest import load_script
@@ -239,18 +240,19 @@ class TestMergeGrades:
 def test_write_grade_shard_lands_score_and_issues(tmp_project, monkeypatch):
     monkeypatch.setattr(
         "sys.argv",
-        ["write_grade_shard.py", "--doc", "doc", "--page", "3", "--score", "0.7", "--issues", "dropped_text,bad_caption"],
+        ["write_grade_shard.py", "--doc", "doc", "--page", "3", "--issues", "dropped_text,bad_caption"],
     )
     write_grade_shard.main()
     shard = json.loads(paths.grade_shard_path("doc", 3).read_text())
-    assert shard == {"page_number": 3, "score": 0.7, "issues": ["dropped_text", "bad_caption"]}
+    assert shard == {"page_number": 3, "score": 0.4, "issues": ["dropped_text", "bad_caption"]}
 
 
 def test_write_grade_shard_empty_issues_string_yields_empty_list(tmp_project, monkeypatch):
-    monkeypatch.setattr("sys.argv", ["write_grade_shard.py", "--doc", "doc", "--page", "1", "--score", "1.0"])
+    monkeypatch.setattr("sys.argv", ["write_grade_shard.py", "--doc", "doc", "--page", "1"])
     write_grade_shard.main()
     shard = json.loads(paths.grade_shard_path("doc", 1).read_text())
     assert shard["issues"] == []
+    assert shard["score"] == 1.0
 
 
 def test_write_vision_page_lands_elements_from_stdin(tmp_project, monkeypatch):
@@ -267,7 +269,7 @@ def test_write_vision_page_lands_elements_from_stdin(tmp_project, monkeypatch):
 def test_write_grade_shard_keeps_the_graders_reason(tmp_project, monkeypatch):
     monkeypatch.setattr(
         "sys.argv",
-        ["write_grade_shard.py", "--doc", "doc", "--page", "2", "--score", "0.6", "--issues", "dropped_text",
+        ["write_grade_shard.py", "--doc", "doc", "--page", "2", "--issues", "dropped_text",
          "--reason", "second paragraph missing"],
     )
     write_grade_shard.main()
@@ -276,7 +278,7 @@ def test_write_grade_shard_keeps_the_graders_reason(tmp_project, monkeypatch):
 
 def test_write_grade_shard_refuses_an_unknown_tag(tmp_project, monkeypatch):
     """queue-state decides retries by tag; a typo would be a silent no-op."""
-    monkeypatch.setattr("sys.argv", ["write_grade_shard.py", "--doc", "doc", "--page", "1", "--score", "0.5",
+    monkeypatch.setattr("sys.argv", ["write_grade_shard.py", "--doc", "doc", "--page", "1",
                                      "--issues", "droped_text"])
     with pytest.raises(SystemExit) as exc_info:
         write_grade_shard.main()
@@ -284,14 +286,19 @@ def test_write_grade_shard_refuses_an_unknown_tag(tmp_project, monkeypatch):
     assert not paths.grade_shard_path("doc", 1).exists()
 
 
-@pytest.mark.parametrize("score", ["90", "-0.1"])
-def test_write_grade_shard_refuses_a_score_outside_0_1(tmp_project, monkeypatch, score):
-    """A percentage (90) averaged with 0-1 scores would pass any document."""
-    monkeypatch.setattr("sys.argv", ["write_grade_shard.py", "--doc", "doc", "--page", "1", "--score", score])
+def test_write_grade_shard_has_no_score_flag(tmp_project, monkeypatch):
+    """The score is computed from the tags; a grader-picked number is refused."""
+    monkeypatch.setattr("sys.argv", ["write_grade_shard.py", "--doc", "doc", "--page", "1", "--score", "0.9"])
     with pytest.raises(SystemExit) as exc_info:
         write_grade_shard.main()
-    assert exc_info.value.code == 1
+    assert exc_info.value.code == 2
     assert not paths.grade_shard_path("doc", 1).exists()
+
+
+def test_score_counts_distinct_tags():
+    assert grades.score_from_issues([]) == 1.0
+    assert grades.score_from_issues(["bad_caption", "bad_caption"]) == 0.7
+    assert grades.score_from_issues(["a", "b", "c", "d"]) == 0.0
 
 
 def test_write_vision_page_lands_headings_lists_and_tables(tmp_project, monkeypatch):
@@ -347,7 +354,7 @@ def test_a_content_issue_fails_the_rubric_whatever_the_average(tmp_project, monk
 
     verdict = json.loads(paths.grade_report_json("doc").read_text())
     assert verdict["rubric_verdict"]["score"] == 0.88
-    assert verdict["rubric_verdict"]["content_issue_pages"] == [3]
+    assert verdict["rubric_verdict"]["blocking_issue_pages"] == [3]
     assert verdict["rubric_verdict"]["passed"] is False
     assert verdict["overall_passed"] is False
 
@@ -360,5 +367,18 @@ def test_an_image_issue_alone_still_passes_on_the_average(tmp_project, monkeypat
     merge_grades.main()
 
     verdict = json.loads(paths.grade_report_json("doc").read_text())
-    assert verdict["rubric_verdict"]["content_issue_pages"] == []
+    assert verdict["rubric_verdict"]["blocking_issue_pages"] == []
     assert verdict["overall_passed"] is True
+
+
+@pytest.mark.parametrize("tag", ["missing_image", "split_paragraph"])
+def test_a_missing_image_or_split_paragraph_fails_whatever_the_average(tmp_project, monkeypatch, tag):
+    _seed_gates_report(tmp_project, "doc", passed=True)
+    for n in range(1, 6):
+        _seed_grade_shard(tmp_project, "doc", n, 0.7 if n == 3 else 1.0, [tag] if n == 3 else [])
+    monkeypatch.setattr("sys.argv", ["merge_grades.py", "--doc", "doc"])
+    merge_grades.main()
+
+    verdict = json.loads(paths.grade_report_json("doc").read_text())
+    assert verdict["rubric_verdict"]["blocking_issue_pages"] == [3]
+    assert verdict["overall_passed"] is False

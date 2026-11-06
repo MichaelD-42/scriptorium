@@ -67,6 +67,13 @@ class TestDecide:
             }
         }
 
+    def test_split_paragraph_is_needs_human_not_vision(self):
+        """The join is a script rule: a vision re-read leaves it unchanged."""
+        out = _decide(_report([_page(4, ["split_paragraph"], "sentence cut at page 4/5")]), {4: "text"})
+        assert out["status"] == "needs-human"
+        assert "sentence cut at page 4/5" in out["reason"]
+        assert out["escalated_pages"] == {}
+
     def test_pdf_ocr_page_goes_to_vision(self):
         out = _decide(_report([_page(1, ["hallucinated_text"])]), {1: "ocr"})
         assert out["escalated_pages"]["1"]["tier"] == "vision"
@@ -168,6 +175,13 @@ class TestDecide:
         out = _decide(_report([_page(1, [])], checks=[check]), {1: "text"})
         assert out["status"] == "needs-human"
         assert "page_count_match" in out["reason"]
+
+    def test_text_layer_coverage_sends_its_pages_to_vision(self):
+        check = {"name": "text_layer_coverage", "passed": False, "pages": [2],
+                 "detail": "page 2: 9 of 80 text-layer words missing, e.g. firmware"}
+        out = _decide(_report(checks=[check]), {1: "text", 2: "text"})
+        assert out["status"] == "retrying"
+        assert out["escalated_pages"] == {"2": {"tier": "vision", "recheck_images": False, "reason": check["detail"]}}
 
     def test_low_ocr_confidence_goes_to_vision(self):
         check = {

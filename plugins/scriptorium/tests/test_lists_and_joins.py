@@ -776,6 +776,37 @@ def _write_page_shard(shards_dir: Path, page_number: int, elements: list[dict]) 
 
 
 class TestPageBreakJoinUnit:
+    def test_ocr_and_vision_pages_join_when_the_next_page_continues_lowercase(self, tmp_path):
+        """OCR and vision elements carry no bbox, so the x check cannot run;
+        a lowercase start is the continuation signal instead."""
+        shards_dir = tmp_path / "shards"
+        elements_lib.write_shard(shards_dir / "page1.ocr.json", 1, [
+            {"type": "paragraph", "text": "Der Zähler wird über die"},
+        ])
+        elements_lib.write_shard(shards_dir / "page2.vision.json", 2, [
+            {"type": "paragraph", "text": "weboberfläche aktualisiert."},
+            {"type": "paragraph", "text": "Ein neuer Absatz."},
+        ])
+        elements_lib.write_shard(shards_dir / "page3.text.json", 3, [
+            {"type": "paragraph", "text": "A text-layer line cut at", "bbox": [72.0, 700.0, 500.0, 715.0]},
+        ])
+        elements_lib.write_shard(shards_dir / "page4.vision.json", 4, [
+            {"type": "paragraph", "text": "the page break."},
+        ])
+        pages = elements_lib.merge_shards(shards_dir, page_count=4)
+        assert pages[1]["elements"][0]["text"] == "Der Zähler wird über die weboberfläche aktualisiert."
+        assert pages[1]["elements"][0]["pages"] == [1, 2]
+        assert [e["text"] for e in pages[2]["elements"]] == ["Ein neuer Absatz."]
+        assert pages[3]["elements"][0]["text"] == "A text-layer line cut at the page break."
+        assert pages[3]["elements"][0]["bbox"] == [72.0, 700.0, 500.0, 715.0]
+
+    def test_a_bboxless_page_does_not_join_a_capitalised_start(self, tmp_path):
+        shards_dir = tmp_path / "shards"
+        elements_lib.write_shard(shards_dir / "page1.ocr.json", 1, [{"type": "paragraph", "text": "Schritt 3"}])
+        elements_lib.write_shard(shards_dir / "page2.ocr.json", 2, [{"type": "paragraph", "text": "Laden Sie die Datei."}])
+        pages = elements_lib.merge_shards(shards_dir, page_count=2)
+        assert [e["text"] for e in pages[2]["elements"]] == ["Laden Sie die Datei."]
+
     def test_paragraph_without_terminal_punctuation_joins_next_pages_paragraph(self, tmp_path):
         shards_dir = tmp_path / "shards"
         _write_page_shard(shards_dir, 1, [

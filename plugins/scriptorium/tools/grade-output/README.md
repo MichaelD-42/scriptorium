@@ -35,7 +35,7 @@ uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
 # inside each grader subagent, per page it graded — see rubric.md
 uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
   "${CLAUDE_PLUGIN_ROOT}/tools/grade-output/scripts/write_grade_shard.py" \
-  --doc <doc-name> --page <n> --score 0.93 --issues dropped_text --reason "<what is wrong, specifically>"
+  --doc <doc-name> --page <n> --issues dropped_text --reason "<what is wrong, specifically>"
 
 # OR, for a no-rendered-page format (docx/xlsx/html) — note this does NOT
 # apply to image, which is a rendered-page format like pdf/pptx: one script call
@@ -63,7 +63,8 @@ pass/fail decision.
 | `output_file_exists` | the assembled output is missing or near-empty (format-aware: single file for `md`/`html`, `index.md` + section files for `okf`, `index.md` + `NN-slug/NN.MM-slug.md` files or `00-front-matter.md` for `md-tree`) |
 | `furniture_absent` | a heading/paragraph/list_item, table cell, image `figure_text` or `caption`, or a whole line of the `.md`/`.html` files under `output/<doc>/`, has a furniture key (`lib/furniture.py`'s `furniture_key`: whitespace removed, digit runs as `#`) equal to a `triage.json` furniture `line_patterns` entry; or a `table` element's bbox matches a `frame_tables` entry (3pt). An element with a bbox matches any pattern only when its bbox is in the furniture band (`lib/furniture.py`'s `band_limits`: the top/bottom 12% of the page, or exactly the area outside `furniture.content_rect` when triage found one) of its PDF page; an element without a bbox (OCR, vision) matches a letter-bearing pattern anywhere (follow-up R14). An output line is flagged only when its pattern is a whole line at least max(3, 10% of the body pages) times in one output (a single-file md/html, or one split bundle). A digit-only pattern (no letters, e.g. `#` for a bare page-number footer) is not checked in the output files. Passes trivially with no furniture. Furniture images are not checked: no element records its source xref |
 | `toc_headings_match` | a `toc.json` entry has no `heading` with the same normalized text (`lib/toc.py`'s `normalize_toc_text`) within ±1 page, or the heading's level differs from the entry's `level`; or a heading matches no entry; or `toc.json`'s `unparsed` list (TOC dot-leader lines and numbered lines that gave no entry) is not empty. Passes trivially when `toc.json` has no entries and no unparsed lines |
-| `figures_complete` | an `image` element has no non-empty `caption`, no non-empty `figure_text` and no `no_visible_text: true` flag (`describe_image.py --no-visible-text`; counts for pdf and image documents only), or no non-empty `description` |
+| `text_layer_coverage` | (pdf) a `text`-tier page's text layer has at least 3 words (letters only, 4+ characters; furniture bands and side-margin lines left out) that are not in the output of that page or its neighbours (a page-break join), and they are at least 5% of the page's words. Its `pages` go to `vision` on retry, the missing words in the `detail` as reason |
+| `figures_complete` | (skipped with `--no-describe`) an `image` element has no non-empty `caption`, no non-empty `figure_text` and no `no_visible_text: true` flag (`describe_image.py --no-visible-text`; counts for pdf and image documents only), or no non-empty `description` |
 
 The three Task A9 checks also carry a `pages` list (the pages to act on)
 and structured details: `offenders` (`furniture_absent`); `missing`,
