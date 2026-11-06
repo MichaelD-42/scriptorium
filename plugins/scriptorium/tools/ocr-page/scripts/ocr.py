@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""OCR rendered page PNGs with a pluggable local backend. See README.md."""
+"""OCR rendered page PNGs with Tesseract. See README.md."""
 
 import argparse
 import sys
@@ -53,20 +53,15 @@ def ocr_tesseract(image_path: Path, lang: str, tessdata_dir: str | None = None, 
     return page_elements, round(avg_conf, 3)
 
 
-BACKENDS = {"tesseract": ocr_tesseract}
-
-
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--doc", required=True)
     parser.add_argument("--pages", required=True, help="comma-separated 1-indexed page numbers")
-    parser.add_argument("--backend", default="tesseract", choices=list(BACKENDS))
     parser.add_argument("--lang", default="eng", help='tesseract language code(s), "+"-joined for multiple (e.g. "eng+deu")')
     parser.add_argument("--tessdata-dir", default=None, help="override tessdata directory (e.g. a user-writable fallback ensure_language.py downloaded packs into)")
     args = parser.parse_args()
 
     page_numbers = [int(p) for p in args.pages.split(",") if p.strip()]
-    backend_fn = BACKENDS[args.backend]
     # A PDF's figures sit in points; an image document's in its own pixels.
     page_heights = (
         {n: s[1] for n, s in furniture_lib.pdf_page_sizes(paths.input_file(args.doc)).items()}
@@ -80,7 +75,7 @@ def main() -> None:
             sys.exit(1)
         with Image.open(image_path) as img:
             scale = page_heights[page_number] / img.height if page_number in page_heights else 1.0
-        page_elements, confidence = backend_fn(image_path, args.lang, args.tessdata_dir, scale)
+        page_elements, confidence = ocr_tesseract(image_path, args.lang, args.tessdata_dir, scale)
         shard_path = paths.shard_path(args.doc, page_number, "ocr")
         elements_lib.write_shard(shard_path, page_number, page_elements, ocr_confidence=confidence)
         print(f"page {page_number}: confidence={confidence} elements={len(page_elements)}")

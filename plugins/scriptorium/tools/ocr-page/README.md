@@ -11,7 +11,7 @@ the PNGs, it does not touch the PDF directly.
 
 ```bash
 uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
-  "${CLAUDE_PLUGIN_ROOT}/tools/ocr-page/scripts/ocr.py" --doc <doc-name> --pages 5 [--backend tesseract] [--lang eng] [--tessdata-dir <path>]
+  "${CLAUDE_PLUGIN_ROOT}/tools/ocr-page/scripts/ocr.py" --doc <doc-name> --pages 5 [--lang eng] [--tessdata-dir <path>]
 ```
 
 `--lang` is a tesseract language code, or several joined with `+` (e.g.
@@ -22,13 +22,13 @@ language pack had to be downloaded straight into a user-writable fallback
 dir instead of the system tessdata dir (typically Windows without admin
 rights); omit it otherwise.
 
-## Backends
+## Tesseract and vision
 
-- `tesseract` (default, local, no API): runs `pytesseract.image_to_data`,
-  groups words into paragraph blocks, and computes a 0-1 page confidence
-  from Tesseract's own per-word confidence scores.
+The script runs `pytesseract.image_to_data` (local, no API), groups words
+into paragraph blocks, and computes a 0-1 page confidence from Tesseract's
+own per-word confidence scores.
 
-Only `tesseract` is implemented as an OCR backend. Tier 3 (Claude vision) is
+Tier 3 (Claude vision) is
 **not** a script — it is the calling agent itself reading the rendered PNG
 (with the Read tool, which supports images) and transcribing it, because
 that step needs genuine visual judgment a deterministic script can't
