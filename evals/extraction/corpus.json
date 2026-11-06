@@ -1,3 +1,4 @@
 [
-  {"input": "plugins/scriptorium/examples/sample.pdf", "reference": "examples/golden.md", "lang": "eng"}
+  {"input": "plugins/scriptorium/examples/sample.pdf", "reference": "examples/golden.md", "lang": "eng",
+   "floor": {"text": 0.97, "headings": 0.83, "tables": 1.0}}
 ]

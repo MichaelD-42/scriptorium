@@ -6,8 +6,9 @@ runs on the same code give the same numbers.
 
     uv run --project plugins/scriptorium python evals/extraction/run.py [--corpus evals/extraction/corpus.json]
 
-corpus.json: [{"input": "<pdf>", "reference": "<md>", "lang": "eng"}, ...],
-paths relative to the repo. Scores per document:
+corpus.json: [{"input": "<pdf>", "reference": "<md>", "lang": "eng",
+"floor": {"text": 0.97}}, ...], paths relative to the repo. A score below
+its entry's floor exits 1 (CI runs this). Scores per document:
 - text: similarity of the body word sequence (headings, paragraphs, list
   items, table cells; images and their alt text left out), 0-1
 - headings: share of reference (level, text) headings found, in order
@@ -165,11 +166,15 @@ def main() -> None:
     parser.add_argument("--corpus", type=Path, default=REPO / "evals" / "extraction" / "corpus.json")
     parser.add_argument("--findings", type=Path, default=REPO / "evals" / "findings")
     args = parser.parse_args()
+    below = []
     for entry in entries(args.corpus, args.findings.resolve()):
         with tempfile.TemporaryDirectory() as tmp:
             output_md = extract(entry["input"], entry.get("lang", "eng"), Path(tmp))
         result = {"input": str(entry["input"].relative_to(REPO)), **score(output_md, entry["reference"].read_text(encoding="utf-8"))}
         print(json.dumps(result))
+        below += [f"{result['input']} {k} {result[k]} < {v}" for k, v in entry.get("floor", {}).items() if result[k] < v]
+    if below:
+        sys.exit("error: below floor: " + "; ".join(below))
 
 
 if __name__ == "__main__":

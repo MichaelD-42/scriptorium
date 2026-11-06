@@ -16,7 +16,9 @@ any) were newly installed.
 """
 
 import argparse
+import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -55,7 +57,16 @@ PACKAGE_NAME = {
 # Windows always falls through to the direct traineddata download below.
 WINDOWS_MANAGERS = ("scoop", "winget", "choco")
 
-TESSDATA_URL = "https://github.com/tesseract-ocr/tessdata_fast/raw/main/{lang}.traineddata"
+# Pinned to one tessdata_fast commit; each download is checked against the
+# git blob hash that commit's tree publishes (git's own SHA-1, the only hash
+# upstream offers without downloading every pack).
+TESSDATA_FAST = json.loads((Path(__file__).parent / "tessdata_fast.json").read_text(encoding="utf-8"))
+TESSDATA_URL = f"https://github.com/tesseract-ocr/tessdata_fast/raw/{TESSDATA_FAST['commit']}/{{lang}}.traineddata"
+
+
+def git_blob_sha1(path: Path) -> str:
+    data = path.read_bytes()
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
 
 
 def _tesseract_cmd() -> str:
@@ -138,15 +149,28 @@ def download_language(lang: str) -> bool:
     user-writable tessdata dir. Used on Windows (no per-language package
     manager support) and anywhere else install_language() couldn't write to
     the system tessdata dir."""
+    expected = TESSDATA_FAST["blobs"].get(lang)
+    if expected is None:
+        print(f"[ensure_language] {lang} is not a tessdata_fast language; not downloaded", file=sys.stderr)
+        return False
     target_dir = tesseract_lib.user_tessdata_dir()
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / f"{lang}.traineddata"
+    # A partial or wrong file in tessdata would count as installed; only a
+    # verified download is moved into place.
+    partial = target_dir / f"{lang}.traineddata.part"
     try:
-        urllib.request.urlretrieve(TESSDATA_URL.format(lang=lang), target)
-        return target.is_file() and target.stat().st_size > 0
+        urllib.request.urlretrieve(TESSDATA_URL.format(lang=lang), partial)
+        if git_blob_sha1(partial) != expected:
+            print(f"[ensure_language] download of {lang} does not match tessdata_fast; discarded", file=sys.stderr)
+            return False
+        os.replace(partial, target)
+        return True
     except OSError as exc:
         print(f"[ensure_language] download failed for {lang}: {exc}", file=sys.stderr)
         return False
+    finally:
+        partial.unlink(missing_ok=True)
 
 
 def resolve_tessdata_override(languages: list[str]) -> str | None:

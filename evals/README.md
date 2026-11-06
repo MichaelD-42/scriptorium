@@ -1,7 +1,7 @@
 # Evals
 
-Two measurements the test suite can't make. Run them from the repo; none
-of this runs in CI. Everything below runs from the repo root.
+Two measurements the test suite can't make. Run them from the repo; only
+the extraction eval runs in CI. Everything below runs from the repo root.
 
 ## Grader calibration — does the grader find real defects?
 
@@ -51,6 +51,9 @@ with figures undescribed, on every entry of `extraction/corpus.json`, and
 scores the Markdown against its reference: `text` (word-sequence
 similarity), `headings` (share of reference headings found, in order) and
 `tables` (cell F1). No agent, so two runs of the same code score the same.
+An entry's optional `floor` (`{"text": 0.97, ...}`) makes the run exit 1
+when a score drops below it; CI runs it on every push. Floors sit a little
+under the local score, since CI's Ubuntu tesseract differs from yours.
 
 The corpus starts with `sample.pdf` against `examples/golden.md`. Add a
 real document with a hand-checked reference to make the numbers mean

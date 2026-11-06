@@ -44,12 +44,16 @@ uv run pytest
 Config lives in `plugins/scriptorium/pyproject.toml`
 (`[tool.pytest.ini_options]`). Two markers gate environment-dependent tests:
 `requires_tesseract` and `requires_libreoffice` (the latter skipped in
-default CI — `.github/workflows/ci.yml` installs tesseract but not
-LibreOffice). CI runs on Python 3.11 and 3.12.
+the main CI job and run by its own `libreoffice` job in
+`.github/workflows/ci.yml`). CI runs on Python 3.11 and 3.12, with a
+coverage floor on 3.12. `tests/test_prompt_contract.py` checks every
+script, subcommand and `--flag` that `commands/` and `agents/` name
+against the scripts' argparse.
 
 ## Evals
 
-Not in CI. [`evals/README.md`](evals/README.md) covers the committed
+Only the LLM-free extraction eval runs in CI (it fails below the floors
+in `evals/extraction/corpus.json`). [`evals/README.md`](evals/README.md) covers the committed
 grader calibration set (`/eval-grader`, real graders on injected
 defects), the LLM-free extraction eval, and `evals/tests` (run with
 `uv run --project plugins/scriptorium pytest evals/tests`). Run the eval

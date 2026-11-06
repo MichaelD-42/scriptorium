@@ -74,7 +74,10 @@ missing-language-pack failure mode, not solving language identification.
 **Windows note:** `scoop`/`winget`/`choco` don't ship per-language tesseract
 packages, so a missing language on Windows (or on any OS with no supported
 package manager at all) falls back to downloading `<lang>.traineddata`
-directly into a user-writable tessdata dir — no admin rights needed. When
+directly into a user-writable tessdata dir — no admin rights needed. The
+download is pinned to one `tessdata_fast` commit and checked against the
+git blob hash in `scripts/tessdata_fast.json`; a file that doesn't match
+is discarded, and a language not in that table isn't downloaded. When
 a wanted language exists only in that fallback dir (on any OS, e.g. a pack
 an earlier run downloaded), the JSON also reports `tessdata_prefix` (its path); pass that through to `ocr-page` as
 `--tessdata-dir` alongside `--lang`. `tessdata_prefix: null` means the
