@@ -64,7 +64,7 @@ On Windows:
 powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}\tools\setup-environment\scripts\check_env.ps1" "${CLAUDE_PLUGIN_ROOT}"
 ```
 
-Exit code 1 is fatal (uv couldn't be obtained) — stop and report it. Any
+Exit code 1 is fatal (uv couldn't be obtained, or `uv sync` failed) — stop and report it. Any
 other outcome, proceed; a missing `tesseract` only matters for documents
 that actually have scanned pages, and that's handled per-document below.
 

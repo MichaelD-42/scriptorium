@@ -6,7 +6,7 @@
 # Usage: check_env.ps1 <plugin-root>
 # Exit codes: 0 = ready to proceed (possibly in text-only / no-pptx-render
 # mode if tesseract/soffice could not be installed); 1 = fatal, uv itself
-# could not be obtained.
+# could not be obtained, or `uv sync` failed.
 
 param(
     [Parameter(Mandatory = $true)]
@@ -47,6 +47,11 @@ Log "uv: ok ($(uv --version))"
 # uv fetches a matching Python per pyproject.toml's requires-python itself —
 # no separate Python bootstrap step needed.
 uv sync --project "$PluginRoot" --quiet
+# A failing native command does not throw, even with ErrorActionPreference Stop.
+if ($LASTEXITCODE -ne 0) {
+    Log "FATAL: uv sync failed; the Python environment is not usable."
+    exit 1
+}
 Log "python env: synced"
 
 # --- tesseract --------------------------------------------------------------

@@ -30,7 +30,7 @@ Same contract on both platforms, in order:
    the official installer, re-checks. Still missing → **exits 1** (fatal —
    nothing downstream can run without it).
 2. `uv sync` — this also fetches a matching Python per `pyproject.toml`, so
-   there's no separate Python bootstrap step.
+   there's no separate Python bootstrap step. Fails → **exits 1**.
 3. `tesseract` binary missing → detects the package manager (`apt-get`,
    `pacman`, `dnf`, `zypper`, `brew` on POSIX; `scoop`, `winget`, `choco` on
    Windows, each checked in that order — `scoop` first since it needs no
