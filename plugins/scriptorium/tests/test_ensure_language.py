@@ -141,15 +141,16 @@ def test_git_blob_sha1_matches_git(tmp_path):
     assert ensure_language.git_blob_sha1(tmp_path / "f") == "ce013625030ba8dba906f756967f9e9ca394464a"
 
 
-def _main(monkeypatch, capsys, manager, installed_after, install_ok=True):
+def _main(monkeypatch, capsys, manager, installed_after, install_ok=True, download_ok=True):
     """Run main() wanting eng+deu with only eng installed at first."""
-    first = iter([{"eng"}])  # before any install; every later call sees installed_after
+    # Before any install, and after a failed one; every later call sees installed_after.
+    first = iter([{"eng"}] if install_ok else [{"eng"}, {"eng"}])
     downloads = []
     monkeypatch.setattr(ensure_language, "detect_script", lambda image: "Latin")
     monkeypatch.setattr(ensure_language, "detect_package_manager", lambda: manager)
     monkeypatch.setattr(ensure_language, "installed_languages", lambda: next(first, installed_after))
     monkeypatch.setattr(ensure_language, "install_language", lambda lang, m: install_ok)
-    monkeypatch.setattr(ensure_language, "download_language", lambda lang: downloads.append(lang) or True)
+    monkeypatch.setattr(ensure_language, "download_language", lambda lang: downloads.append(lang) or download_ok)
     monkeypatch.setattr(ensure_language, "resolve_tessdata_override", lambda langs: None)
     monkeypatch.setattr(ensure_language.sys, "platform", "linux")
     monkeypatch.setattr(ensure_language.sys, "argv", ["ensure_language.py", "p.png", "--extra", "deu"])
@@ -162,9 +163,15 @@ def test_a_package_manager_install_makes_the_language_usable(monkeypatch, capsys
     assert (result["newly_installed"], result["lang_flag"], downloads) == (["deu"], "deu+eng", [])
 
 
-def test_a_failed_install_drops_the_language_instead_of_breaking_ocr(monkeypatch, capsys):
-    result, downloads = _main(monkeypatch, capsys, "pacman", {"eng"}, install_ok=False)
-    assert (result["still_missing"], result["lang_flag"], downloads) == (["deu"], "eng", [])
+def test_a_failed_install_falls_back_to_download(monkeypatch, capsys):
+    """No passwordless sudo on Linux: the verified download needs no admin."""
+    result, downloads = _main(monkeypatch, capsys, "apt-get", {"eng", "deu"}, install_ok=False)
+    assert (downloads, result["newly_installed"], result["lang_flag"]) == (["deu"], ["deu"], "deu+eng")
+
+
+def test_a_language_nothing_could_fetch_is_dropped_instead_of_breaking_ocr(monkeypatch, capsys):
+    result, downloads = _main(monkeypatch, capsys, "pacman", {"eng"}, install_ok=False, download_ok=False)
+    assert (result["still_missing"], result["lang_flag"], downloads) == (["deu"], "eng", ["deu"])
 
 
 def test_no_package_manager_falls_back_to_download(monkeypatch, capsys):

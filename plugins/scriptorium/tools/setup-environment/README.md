@@ -71,10 +71,11 @@ reach package-manager commands and a download URL.
 **This is coarse, not exact language ID.** The goal is closing the
 missing-language-pack failure mode, not solving language identification.
 
-**Windows note:** `scoop`/`winget`/`choco` don't ship per-language tesseract
-packages, so a missing language on Windows (or on any OS with no supported
-package manager at all) falls back to downloading `<lang>.traineddata`
-directly into a user-writable tessdata dir — no admin rights needed. The
+**Download fallback:** a language the package manager could not install
+(no passwordless sudo, no supported manager, or Windows, whose
+`scoop`/`winget`/`choco` don't ship per-language tesseract packages) is
+downloaded as `<lang>.traineddata` directly into a user-writable tessdata
+dir — no admin rights needed. The
 download is pinned to one `tessdata_fast` commit and checked against the
 git blob hash in `scripts/tessdata_fast.json`; a file that doesn't match
 is discarded, and a language not in that table isn't downloaded. When

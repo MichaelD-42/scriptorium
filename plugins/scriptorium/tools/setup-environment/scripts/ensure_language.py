@@ -228,18 +228,16 @@ def main() -> None:
     newly_installed = []
 
     manager = detect_package_manager()
-    # Windows managers don't split language packs (see WINDOWS_MANAGERS) and
-    # a missing manager means nothing else can install it either — both
-    # cases fall through to the direct traineddata download below.
-    use_download_fallback = sys.platform == "win32" or manager is None
-
     if missing and manager and manager not in WINDOWS_MANAGERS:
         for lang in missing:
             if install_language(lang, manager):
                 newly_installed.append(lang)
         missing = sorted(wanted - installed_languages())
 
-    if missing and use_download_fallback:
+    # Whatever the package manager could not install (no sudo, no manager,
+    # Windows, which has no per-language packages) comes from the pinned,
+    # verified download, which needs no admin rights.
+    if missing:
         for lang in missing:
             if download_language(lang):
                 newly_installed.append(lang)
