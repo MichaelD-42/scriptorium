@@ -68,7 +68,32 @@ implemented today.
   `GraderEval` dynamic view; grader, gates, queue, image and merge
   descriptions match 0.7.0.
 
+### Fixes
+
+- **Retries**: a page a grader never reached no longer passes.
+  `merge_grades.py` exits 1 naming pages with no grade shard, and `decide`
+  deletes an escalated page's old shard, so a retry's new body cannot ride
+  on the previous grade. When a gate and the grader both escalate one page,
+  it keeps the higher tier instead of re-running the tier that failed.
+- **Input**: `Scan.PDF`, `Photo.JPG` and other upper-case extensions are
+  queued on Linux (they were skipped with a warning).
+- **OCR**: one element per paragraph, not per printed line; figures keep
+  their place among a scan's paragraphs. A language the package manager
+  cannot install (no passwordless sudo) comes from the pinned, verified
+  tessdata download instead of being dropped.
+- **Output**: md-tree no longer overwrites a section that repeats another's
+  number and title (it gets `-2`); okf and md-tree remove the previous
+  attempt's files before writing; ReqIF stays valid XML when the text holds
+  control characters; pptx line breaks no longer glue words together.
+- **Orchestrator**: `gates.py` prints a summary (failed checks and their
+  pages), not its full report; a failed `uv sync` in `check_env` is fatal
+  (exit 1). Page PNGs are written atomically, so a parallel agent never
+  reads a half-written one.
+- **Removed**: the `page_count_match` gate (it compared a number with
+  itself) and `ocr.py --backend` (Tesseract is the only backend).
+
 ## 0.6.2
+
 
 - **Cost per document**: each attempt records what the session spent,
   measured with `ccusage` (optional, on `PATH`); the run report shows each
