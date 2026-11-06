@@ -23,7 +23,8 @@ def ocr_tesseract(image_path: Path, lang: str, tessdata_dir: str | None = None) 
     config = f'--tessdata-dir "{tessdata_dir}"' if tessdata_dir else ""
     data = pytesseract.image_to_data(image, lang=lang, config=config, output_type=pytesseract.Output.DICT)
 
-    paragraphs: dict[tuple[int, int, int], list[str]] = {}
+    # {(block, par): {line: words}}: Tesseract's paragraph, line by line.
+    paragraphs: dict[tuple[int, int], dict[int, list[str]]] = {}
     confidences = []
     for i, word in enumerate(data["text"]):
         word = word.strip()
@@ -32,13 +33,12 @@ def ocr_tesseract(image_path: Path, lang: str, tessdata_dir: str | None = None) 
             confidences.append(conf)
         if not word:
             continue
-        key = (data["block_num"][i], data["par_num"][i], data["line_num"][i])
-        paragraphs.setdefault(key, []).append(word)
+        key = (data["block_num"][i], data["par_num"][i])
+        paragraphs.setdefault(key, {}).setdefault(data["line_num"][i], []).append(word)
 
     page_elements = [
-        {"type": "paragraph", "text": " ".join(words)}
-        for words in paragraphs.values()
-        if words
+        {"type": "paragraph", "text": elements_lib.join_texts(" ".join(words) for words in lines.values())}
+        for lines in paragraphs.values()
     ]
     avg_conf = (sum(confidences) / len(confidences) / 100.0) if confidences else 0.0
     return page_elements, round(avg_conf, 3)
