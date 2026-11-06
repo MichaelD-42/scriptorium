@@ -56,15 +56,8 @@ def test_text_layer_coverage_catches_the_dropped_paragraph_on_a_text_page(eval_r
         for page in data["pages"].values():
             page["tier"] = "text"
         elements_lib.save_doc(path, data)
-        report = json.loads(
-            prepare.sh(
-                eval_root,
-                "grade-output/scripts/gates.py",
-                "--doc",
-                doc,
-                "--no-describe",
-            )
-        )
+        prepare.sh(eval_root, "grade-output/scripts/gates.py", "--doc", doc, "--no-describe")
+        report = json.loads((eval_root / "work" / doc / "gates-report.json").read_text(encoding="utf-8"))
         check = next(c for c in report["checks"] if c["name"] == "text_layer_coverage")
         assert check["passed"] is not should_fail, check["detail"]
         if should_fail:

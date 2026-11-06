@@ -33,7 +33,7 @@ import pytest
 
 import figures as figures_lib
 import paths
-from conftest import load_script, run_script
+from conftest import gates_report, load_script, run_script
 
 gates = load_script("grade-output/scripts/gates.py", "gates_module_a5b")
 
@@ -502,8 +502,7 @@ class TestGatesEndToEndWritesWarnings:
         assert "table_overlap" in reasons, f"sanity: expected a table_overlap exclusion, got {shard['excluded_regions']}"
 
         _run_ok("assemble-output/scripts/assemble.py", "--doc", "large_table_overlap", "--format", "md", cwd=tmp_project)
-        gates_out = _run_ok("grade-output/scripts/gates.py", "--doc", "large_table_overlap", "--format", "md", cwd=tmp_project)
-        report = json.loads(gates_out)
+        report = gates_report("large_table_overlap", "--format", "md", cwd=tmp_project)
 
         assert report["passed"] is True, "a large excluded region must be a warning, not a gate failure"
         large_warnings = [w for w in report["warnings"] if w["name"] == "large_region_excluded"]
