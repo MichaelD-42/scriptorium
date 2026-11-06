@@ -55,4 +55,6 @@ not render it.
 Writes one shard per given page to `work/<doc>/shards/page{N}.ocr.json`
 (includes an `ocr_confidence` field 0-1) — never touches another page's or
 another tier's shard, so parallel `extractor` subagents over different page
-batches never race.
+batches never race. Each paragraph carries `top`, its first line's top edge
+in the page's units (PDF points, an image document's pixels), so `merge.py`
+places the page's figures between the paragraphs.

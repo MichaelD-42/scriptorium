@@ -155,7 +155,9 @@ def merge_shards(
                     furniture_lib.page_content_rect(furniture, page_widths.get(n), page_heights.get(n)),
                 )
             combined = body_elements + image_elements
-            combined.sort(key=lambda e: e.get("bbox", [0, 0, 0, 0])[1])
+            # An ocr paragraph has no bbox, only its `top` (ocr.py).
+            # shortcut: a vision body has neither, so its figures trail its text; upgrade if graders tag wrong_reading_order on vision pages.
+            combined.sort(key=lambda e: e["bbox"][1] if "bbox" in e else e.get("top", 0))
             pages[n] = {
                 "page_number": n,
                 "tier": body_tier,
