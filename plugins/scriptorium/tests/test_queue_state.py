@@ -230,6 +230,15 @@ class TestDecide:
         assert out["status"] == "needs-human"
         assert "image_refs_resolve: missing assets" in out["reason"]
 
+    def test_a_gate_escalation_keeps_its_tier_when_the_grader_tags_an_image(self):
+        """The gate wants vision; an image tag on the same page must not
+        pull the page back to the tier that already failed."""
+        check = {"name": "text_layer_coverage", "passed": False, "pages": [3], "detail": "words missing"}
+        out = _decide(_report([_page(3, ["bad_caption"], "caption wrong")], checks=[check]), {3: "text"})
+        assert out["escalated_pages"] == {
+            "3": {"tier": "vision", "recheck_images": True, "reason": "words missing; caption wrong"}
+        }
+
 
 class TestCli:
     def _state(self):

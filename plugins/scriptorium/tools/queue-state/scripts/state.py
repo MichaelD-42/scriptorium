@@ -32,6 +32,7 @@ NEXT_TIER = {
     "pptx": {"text": "vision"},  # no ocr rung: pptx is digital-native, vision reads the rendered slide
     "image": {"ocr": "vision"},
 }
+TIER_ORDER = ("text", "ocr", "vision")
 # Deterministic extraction, no rendered page: a content defect cannot be retried.
 DIGITAL_NATIVE = ("docx", "xlsx", "html")
 NEEDS_HUMAN_GATES = ("furniture_absent", "toc_headings_match")
@@ -70,6 +71,7 @@ def decide(entry: dict, report: dict, tiers: dict[int, str], max_attempts: int) 
     def escalate(page: int, tier: str, recheck: bool, reason: str) -> None:
         old = escalations.get(page)
         if old:
+            tier = max(tier, old["tier"], key=TIER_ORDER.index)  # never back down to a tier that failed
             reason = f"{old['reason']}; {reason}"
             recheck = recheck or old["recheck_images"]
         escalations[page] = {"tier": tier, "recheck_images": recheck, "reason": reason}
