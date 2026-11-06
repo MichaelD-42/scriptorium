@@ -109,6 +109,8 @@ that only show up under concurrency or on large documents.
   agent tree, the escalation ladder, why shards exist.
 - [`docs/tooling.md`](docs/tooling.md) — every tool, script, CLI argument,
   and on-disk file/shard schema.
+- [`docs/glossary.md`](docs/glossary.md) — the terms this repo uses in a
+  specific sense (tier, shard, gate, furniture, escalation, ...).
 - `plugins/scriptorium/commands/extract.md` — the orchestrator's exact,
   executable step-by-step spec.
 - Per-tool `plugins/scriptorium/tools/*/README.md` — one per extraction

@@ -151,6 +151,8 @@ exhaust its context.
 - [`docs/architecture.md`](docs/architecture.md) — the loop, agent tree,
   escalation ladder, why per-page shards
 - [`docs/tooling.md`](docs/tooling.md) — every script, argument and file schema
+- [`docs/glossary.md`](docs/glossary.md) — the terms (tier, shard, gate,
+  furniture, escalation...) in the sense this repo uses them
 - [`plugins/scriptorium/README.md`](plugins/scriptorium/README.md) — changelog
 - [`evals/README.md`](evals/README.md) — grader calibration on injected
   defects, and the LLM-free extraction eval
