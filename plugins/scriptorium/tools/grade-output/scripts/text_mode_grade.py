@@ -116,7 +116,7 @@ def docx_check_wrong_heading_level(blocks: list, output_elements: list) -> bool:
     return headings_missing(expected, output_elements)
 
 
-def grade_docx_page(blocks: list, page: dict, document) -> tuple[float, list[str]]:
+def grade_docx_page(blocks: list, page: dict, document) -> list[str]:
     output_elements = page["elements"]
     output_text = output_page_text(page)
 
@@ -133,7 +133,7 @@ def grade_docx_page(blocks: list, page: dict, document) -> tuple[float, list[str
     if docx_check_wrong_heading_level(blocks, output_elements):
         issues.append("wrong_heading_level")
 
-    return grades.score_from_issues(issues), issues
+    return issues
 
 
 def grade_docx(doc: str, docx_path: Path, doc_data: dict) -> None:
@@ -144,7 +144,7 @@ def grade_docx(doc: str, docx_path: Path, doc_data: dict) -> None:
 
     for page_number, blocks in enumerate(source_pages, start=1):
         page = doc_data["pages"].get(page_number, {"elements": []})
-        _, issues = grade_docx_page(blocks, page, document)
+        issues = grade_docx_page(blocks, page, document)
         write_grade_shard(doc, page_number, issues)
 
 
@@ -186,7 +186,7 @@ def xlsx_check_images(ws, output_elements: list) -> tuple[bool, bool]:
     return missing_image, bad_caption
 
 
-def grade_xlsx_sheet(ws, page: dict) -> tuple[float, list[str]]:
+def grade_xlsx_sheet(ws, page: dict) -> list[str]:
     output_elements = page["elements"]
     output_text = output_page_text(page)
 
@@ -203,7 +203,7 @@ def grade_xlsx_sheet(ws, page: dict) -> tuple[float, list[str]]:
     # No wrong_heading_level check for xlsx: a sheet has exactly one
     # heading (its own name) and no sub-heading structure to get wrong.
 
-    return grades.score_from_issues(issues), issues
+    return issues
 
 
 def grade_xlsx(doc: str, xlsx_path: Path, doc_data: dict) -> None:
@@ -213,7 +213,7 @@ def grade_xlsx(doc: str, xlsx_path: Path, doc_data: dict) -> None:
     for page_number, sheet_name in enumerate(workbook.sheetnames, start=1):
         ws = workbook[sheet_name]
         page = doc_data["pages"].get(page_number, {"elements": []})
-        _, issues = grade_xlsx_sheet(ws, page)
+        issues = grade_xlsx_sheet(ws, page)
         write_grade_shard(doc, page_number, issues)
 
 
@@ -268,7 +268,7 @@ def html_check_wrong_heading_level(blocks: list, output_elements: list) -> bool:
     return headings_missing(expected, output_elements)
 
 
-def grade_html_page(blocks: list, page: dict, soup, html_dir: Path) -> tuple[float, list[str]]:
+def grade_html_page(blocks: list, page: dict, soup, html_dir: Path) -> list[str]:
     output_elements = page["elements"]
     output_text = output_page_text(page)
 
@@ -285,14 +285,14 @@ def grade_html_page(blocks: list, page: dict, soup, html_dir: Path) -> tuple[flo
     if html_check_wrong_heading_level(blocks, output_elements):
         issues.append("wrong_heading_level")
 
-    return grades.score_from_issues(issues), issues
+    return issues
 
 
 def grade_html(doc: str, html_path: Path, doc_data: dict) -> None:
     soup = html_pages.parse(html_path)
     blocks = list(html_pages.iter_block_items(soup))
     page = doc_data["pages"].get(1, {"elements": []})
-    _, issues = grade_html_page(blocks, page, soup, html_path.parent)
+    issues = grade_html_page(blocks, page, soup, html_path.parent)
     write_grade_shard(doc, 1, issues)
 
 

@@ -43,9 +43,8 @@ class TestGradeDocxPage:
                 {"type": "image", "asset": "assets/page2_bitmap1.png", "caption": "a blue circle icon"},
             ]
         }
-        score, issues = text_mode_grade.grade_docx_page(blocks, page, document)
+        issues = text_mode_grade.grade_docx_page(blocks, page, document)
         assert issues == []
-        assert score == 1.0
 
     def test_dropped_truncated_and_missing_image_all_flagged(self, docx_page2_blocks):
         blocks, document = docx_page2_blocks
@@ -56,9 +55,8 @@ class TestGradeDocxPage:
                 # paragraph and image both dropped entirely
             ]
         }
-        score, issues = text_mode_grade.grade_docx_page(blocks, page, document)
+        issues = text_mode_grade.grade_docx_page(blocks, page, document)
         assert set(issues) == {"dropped_text", "table_corruption", "missing_image", "wrong_heading_level"}
-        assert score == 0.0
 
 
 # --- text_mode_grade.py: xlsx ---------------------------------------------
@@ -71,9 +69,8 @@ class TestGradeXlsxSheet:
             {"type": "heading", "level": 1, "text": "Data"},
             {"type": "table", "rows": [["Quarter", "Revenue"], ["Q1", "120"], ["Q2", "150"]]},
         ]}
-        score, issues = text_mode_grade.grade_xlsx_sheet(ws, page)
+        issues = text_mode_grade.grade_xlsx_sheet(ws, page)
         assert issues == []
-        assert score == 1.0
 
     def test_truncated_table_flagged_as_corruption(self, xlsx_doc):
         workbook = load_workbook(paths.input_file(xlsx_doc), data_only=True)
@@ -82,7 +79,7 @@ class TestGradeXlsxSheet:
             {"type": "heading", "level": 1, "text": "Data"},
             {"type": "table", "rows": [["Quarter", "Revenue"]]},  # missing 2 data rows
         ]}
-        score, issues = text_mode_grade.grade_xlsx_sheet(ws, page)
+        issues = text_mode_grade.grade_xlsx_sheet(ws, page)
         assert "table_corruption" in issues
 
 
@@ -129,9 +126,8 @@ class TestGradeHtmlPage:
             {"type": "paragraph", "text": "Status indicator image below."},
             {"type": "image", "asset": "assets/page1_bitmap1.png", "caption": "a blue circle status indicator icon"},
         ]}
-        score, issues = text_mode_grade.grade_html_page(blocks, page, soup, html_dir)
+        issues = text_mode_grade.grade_html_page(blocks, page, soup, html_dir)
         assert issues == []
-        assert score == 1.0
 
     def test_dropped_text_truncated_table_and_missing_image_all_flagged(self, html_fixture_parts):
         blocks, soup, html_dir = html_fixture_parts
@@ -144,9 +140,8 @@ class TestGradeHtmlPage:
             {"type": "heading", "level": 2, "text": "Figure: Status Indicator"},
             # image dropped entirely
         ]}
-        score, issues = text_mode_grade.grade_html_page(blocks, page, soup, html_dir)
+        issues = text_mode_grade.grade_html_page(blocks, page, soup, html_dir)
         assert set(issues) == {"dropped_text", "table_corruption", "missing_image", "wrong_heading_level"}
-        assert score == 0.0
 
 
 # --- merge_grades.py --------------------------------------------------------
