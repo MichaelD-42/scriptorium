@@ -16,8 +16,9 @@ uv sync
 ```
 
 Installs the Python dependencies (PyMuPDF, pdfplumber, pytesseract, Pillow,
-Jinja2, ReportLab, PyYAML, python-pptx, python-docx, openpyxl,
-beautifulsoup4) plus the `pytest`/`pytest-cov` dev group. Requires
+Jinja2, PyYAML, python-pptx, python-docx, openpyxl, beautifulsoup4) plus
+the dev group: `pytest`/`pytest-cov`, and ReportLab for the fixture
+generators in `examples/`. Requires
 [`uv`](https://docs.astral.sh/uv/) and Python 3.11+. Also runs automatically
 via a `SessionStart` hook when the plugin loads in a Claude Code session.
 
