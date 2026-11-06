@@ -77,7 +77,8 @@ own is counted at `vision`.
    Else `attempt >= max_attempts` → `needs-human`. Else no page to retry
    (a document-level gate, or a low score without tags) → `needs-human`,
    since a retry would re-run nothing. Else `retrying` with
-   `escalated_pages`.
+   `escalated_pages`, whose grade shards are deleted: `merge_grades.py`
+   then refuses to pass a page the retry did not regrade.
 
 ## `findings.py` — suggested corrections from passed documents
 

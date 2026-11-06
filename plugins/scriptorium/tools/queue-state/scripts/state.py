@@ -262,6 +262,9 @@ def cmd_decide(args) -> None:
     _close_attempt(entry, status=entry["status"], score=report["rubric_verdict"].get("score"), **escalated)
     if entry["status"] == "retrying":  # the orchestrator loops back to extraction without `next`
         _open_attempt(entry)
+        # merge_grades.py must see these pages as ungraded until a grader rewrites them.
+        for page in entry["escalated_pages"]:
+            paths.grade_shard_path(args.doc, int(page)).unlink(missing_ok=True)
     state["docs"][args.doc] = entry
     save_state(state)
     out = {k: entry[k] for k in ("status", "attempt", "reason", "escalated_pages") if k in entry}

@@ -190,7 +190,7 @@ retry that only re-extracted 2 pages still produces a complete document.
   **Spawn one `grader` per batch in parallel**, each with its `pages` and
   the assembled output's location (for `md-tree` and `jsonl`, `output/<doc>/<doc>.md`,
   see step 3). Wait for all of them. On a retry only the escalated pages are
-  regraded; the others' grade shards are still valid.
+  regraded (`decide` deleted their old grade shards); the others' are still valid.
 - **`docx`/`xlsx`/`html`** (`plan.py` prints `text_mode: true`; no rendered
   page, see `grade-output/text-rubric.md`): no agents. Run
   `grade-output/scripts/text_mode_grade.py --doc <name>` once.

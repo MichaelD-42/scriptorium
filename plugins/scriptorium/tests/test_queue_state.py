@@ -360,3 +360,26 @@ class TestCli:
         assert result.returncode == 0, result.stderr
         assert json.loads(result.stdout)["status"] == "needs-human"
         assert self._state()["docs"]["s"]["status"] == "needs-human"
+
+    def test_a_retry_drops_the_escalated_pages_grade_shards(self, tmp_project):
+        """merge_grades.py fails on a page with no grade shard; an old shard
+        left in place would let the re-extracted page pass ungraded."""
+        shutil.copyfile(EXAMPLES_ROOT / "sample.pdf", tmp_project / "input" / "s.pdf")
+        run_script("queue-state/scripts/state.py", "init", cwd=tmp_project)
+        paths.elements_json("s").parent.mkdir(parents=True)
+        paths.elements_json("s").write_text(json.dumps({"pages": [
+            {"page_number": 1, "tier": "text", "elements": []},
+            {"page_number": 2, "tier": "text", "elements": []},
+        ]}))
+        check = {"name": "text_layer_coverage", "passed": False, "pages": [1], "detail": "words missing"}
+        paths.grade_report_json("s").parent.mkdir(parents=True)
+        paths.grade_report_json("s").write_text(json.dumps(_report([_page(1, []), _page(2, [])], checks=[check])))
+        for n in (1, 2):
+            paths.grade_shard_path("s", n).parent.mkdir(parents=True, exist_ok=True)
+            paths.grade_shard_path("s", n).write_text(json.dumps(_page(n, [])))
+
+        result = run_script("queue-state/scripts/state.py", "decide", "--doc", "s", cwd=tmp_project)
+
+        assert json.loads(result.stdout)["status"] == "retrying", result.stderr
+        assert not paths.grade_shard_path("s", 1).exists()
+        assert paths.grade_shard_path("s", 2).exists()
