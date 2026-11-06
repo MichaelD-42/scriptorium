@@ -507,9 +507,9 @@ def main() -> None:
     parser.add_argument("--doc", required=True, help="document name (without .pdf)")
     args = parser.parse_args()
 
-    pdf_path = paths.input_pdf(args.doc)
-    if not pdf_path.exists():
-        print(f"error: {pdf_path} not found", file=sys.stderr)
+    pdf_path = paths.input_file(args.doc)
+    if pdf_path is None:
+        print(f"error: no input file found for doc '{args.doc}' in input/", file=sys.stderr)
         sys.exit(1)
 
     try:

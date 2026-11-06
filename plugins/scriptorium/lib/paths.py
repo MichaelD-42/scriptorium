@@ -27,18 +27,19 @@ IMAGE_EXTS = ("png", "jpg", "jpeg", "webp", "tiff")
 SUPPORTED_INPUT_EXTS = ("pdf", "pptx", "xlsx", "docx", "html") + IMAGE_EXTS
 
 
-def input_pdf(doc: str, root: Path = Path(".")) -> Path:
-    return root / "input" / f"{doc}.pdf"
-
-
 def input_file(doc: str, root: Path = Path(".")) -> Path | None:
-    """Resolve input/<doc>.<ext> for whichever supported extension exists.
+    """Resolve input/<doc>.<ext> for whichever supported extension exists,
+    in any case (Scan.PDF). The first in SUPPORTED_INPUT_EXTS order wins.
     Returns None if no matching file is present."""
-    for ext in SUPPORTED_INPUT_EXTS:
-        candidate = root / "input" / f"{doc}.{ext}"
-        if candidate.exists():
-            return candidate
-    return None
+    input_dir = root / "input"
+    if not input_dir.is_dir():
+        return None
+    matches = [
+        p for p in input_dir.iterdir()
+        if p.stem == doc and p.suffix[1:].lower() in SUPPORTED_INPUT_EXTS and p.is_file()
+    ]
+    matches.sort(key=lambda p: (SUPPORTED_INPUT_EXTS.index(p.suffix[1:].lower()), p.name))
+    return matches[0] if matches else None
 
 
 def detect_input_format(doc: str, root: Path = Path(".")) -> str | None:

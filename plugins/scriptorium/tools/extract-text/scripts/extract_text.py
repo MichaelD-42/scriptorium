@@ -1336,9 +1336,9 @@ def main() -> None:
     args = parser.parse_args()
 
     page_numbers = [int(p) for p in args.pages.split(",") if p.strip()]
-    pdf_path = paths.input_pdf(args.doc)
-    if not pdf_path.exists():
-        print(f"error: {pdf_path} not found", file=sys.stderr)
+    pdf_path = paths.input_file(args.doc)
+    if pdf_path is None:
+        print(f"error: no input file found for doc '{args.doc}' in input/", file=sys.stderr)
         sys.exit(1)
 
     furniture = furniture_lib.load_furniture(args.doc)

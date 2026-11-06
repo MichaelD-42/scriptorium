@@ -28,10 +28,10 @@ def zoom_png(doc: str, page_number: int, bbox: list[float]) -> Path:
 
 
 def render_region(doc: str, page_number: int, bbox: list[float], dpi: int) -> Path:
-    pdf_path = paths.input_pdf(doc)
-    if not pdf_path.exists():
+    pdf_path = paths.input_file(doc)
+    if pdf_path is None or paths.detect_input_format(doc) != "pdf":
         raise FileNotFoundError(
-            f"{pdf_path} not found (render_region renders PDF pages only)"
+            f"no input/{doc}.pdf (render_region renders PDF pages only)"
         )
     with fitz.open(pdf_path) as pdf:
         page = pdf[page_number - 1]
