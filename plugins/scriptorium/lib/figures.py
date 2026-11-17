@@ -375,17 +375,85 @@ def page_tables(
             for row in table.rows:
                 texts = glyphs.cell_texts(chars, row.cells)
                 raw_rows.append([None if cell is None else text for cell, text in zip(row.cells, texts)])
+            bbox, cells = list(table.bbox), [list(c) for c in table.cells]
+            for top, bottom in _rows_below_header(unhighlighted, table):
+                row_cells = [[c[0], top, c[2], bottom] for c in table.rows[0].cells]
+                raw_rows.append(glyphs.cell_texts(chars, row_cells))
+                cells += row_cells
+                bbox[3] = bottom
             real = [cell for row in raw_rows for cell in row if cell is not None]
             filled = sum(1 for cell in real if str(cell).strip())
             found.append({
-                "bbox": list(table.bbox),
+                "bbox": bbox,
                 "rows": [[cell if cell is not None else "" for cell in row] for row in raw_rows],
-                "cells": [list(c) for c in table.cells],
+                "cells": cells,
                 "filled_cells": filled,
                 "filled_fraction": filled / len(real) if real else 0.0,
             })
     pl_doc.pages[page_number - 1].close()  # free the page's parsed objects, as closing the doc used to
     return found
+
+
+# A ruled header row with no ruled rows under it (1 row, at least
+# HEADER_ROW_MIN_COLUMNS cells) takes the unruled rows printed below it.
+# A row is the words at one y (within HEADER_ROW_SAME_Y); a phrase is a
+# run of words less than HEADER_ROW_WORD_GAP font sizes apart, and each
+# phrase must lie inside one header cell (HEADER_ROW_X_SLACK). The rows
+# stop at a gap over HEADER_ROW_MAX_GAP row heights, a horizontal rule, a
+# font larger than the first row's, or a phrase across cells (a
+# paragraph). The first row must fill at least 2 cells.
+HEADER_ROW_MIN_COLUMNS = 3
+HEADER_ROW_SAME_Y = 3.0  # pt
+HEADER_ROW_WORD_GAP = 0.6
+HEADER_ROW_X_SLACK = 2.0  # pt
+HEADER_ROW_MAX_GAP = 1.5
+
+
+def _rows_below_header(pl_page, table) -> list[tuple[float, float]]:
+    """`(top, bottom)` of each unruled row a header-only `table` takes
+    (see HEADER_ROW_MIN_COLUMNS). The rows tile the space below the header
+    with no gaps, so every line of them lies in a cell."""
+    header = table.rows[0].cells if len(table.rows) == 1 else []
+    if len(header) < HEADER_ROW_MIN_COLUMNS or any(c is None for c in header):
+        return []
+    x0, _top, x1, bottom = table.bbox
+    words = sorted(
+        (w for w in pl_page.extract_words(extra_attrs=["size"]) if w["top"] >= bottom - 1 and w["x1"] > x0 and w["x0"] < x1),
+        key=lambda w: (w["top"], w["x0"]),
+    )
+    rules = [e["top"] for e in pl_page.edges if e["orientation"] == "h" and e["x1"] > x0 and e["x0"] < x1]
+    rows: list[list[float]] = []  # [top, bottom] per row
+    size = None
+    while words:
+        row = [w for w in words if w["top"] - words[0]["top"] <= HEADER_ROW_SAME_Y]
+        words = words[len(row):]
+        top, row_bottom = min(w["top"] for w in row), max(w["bottom"] for w in row)
+        prev = rows[-1][1] if rows else bottom
+        row_size = max(w["size"] for w in row)
+        size = size or row_size
+        if top - prev > HEADER_ROW_MAX_GAP * (row_bottom - top) or row_size > size + 0.5:
+            break
+        if any(prev + 1 < y < top for y in rules):
+            break
+        phrases: list[list[float]] = []
+        for w in sorted(row, key=lambda w: w["x0"]):
+            if phrases and w["x0"] - phrases[-1][1] < HEADER_ROW_WORD_GAP * w["size"]:
+                phrases[-1][1] = w["x1"]
+            else:
+                phrases.append([w["x0"], w["x1"]])
+        columns = [
+            next((i for i, c in enumerate(header) if c[0] - HEADER_ROW_X_SLACK <= p[0] and p[1] <= c[2] + HEADER_ROW_X_SLACK), None)
+            for p in phrases
+        ]
+        if None in columns or (not rows and len(set(columns)) < 2):
+            break
+        rows.append([top, row_bottom])
+    tiled = []
+    for i, (_top, row_bottom) in enumerate(rows):
+        start = tiled[-1][1] if tiled else bottom
+        end = (row_bottom + rows[i + 1][0]) / 2 if i + 1 < len(rows) else row_bottom + 1
+        tiled.append((start, end))
+    return tiled
 
 
 def _find_tables(pl_page, crop):

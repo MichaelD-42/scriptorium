@@ -75,7 +75,11 @@ document.
   diagram label's background) and highlights (thicker than 2 pt, with an
   edge more than 1.5 pt from every thin rule). Shading that matches the
   cell grid stays. When no table is left without the highlights, the
-  page is read with them (a table drawn only by its shading).
+  page is read with them (a table drawn only by its shading). A ruled
+  header row with no ruled rows under it (1 row, 3 or more cells) takes
+  the unruled rows printed below it while each run of words lies inside
+  one header cell; the rows stop at a large gap, a horizontal rule, a
+  larger font or a line across cells (a paragraph).
 - Follow-up R27: a paragraph block made of label/value rows and a body
   (for example "HWC requirement | REQ ..." and "ASIL Value: | To Be /
   Selected" above the requirement text) is split into one paragraph per
