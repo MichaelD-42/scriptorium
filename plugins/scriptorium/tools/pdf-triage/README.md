@@ -120,7 +120,9 @@ Also writes `work/<doc-name>/toc.json`:
 1. **PDF outline** (`document.get_toc()`) — used directly if the document
    has one. A leading `"<number> "` in the outline title is split into
    `number`; otherwise `number` is `null`. `level` is the outline's own
-   level. The printed TOC page scan (step 2) still runs, but only to find
+   level, except for a section number (dotted parts of at most 3 digits):
+   then it is the number's dot depth, because an outline level set from a
+   wrong paragraph style is more common than a wrong printed number. The printed TOC page scan (step 2) still runs, but only to find
    the TOC pages: every page it finds is marked `role: "toc"`, so the
    extractors skip it (fix wave M6). Its lines are not parsed into
    entries for this path.
@@ -142,6 +144,8 @@ Also writes `work/<doc-name>/toc.json`:
    has at least 3 dot-leader lines and its dot-leader plus number-only
    lines are at least 30% of its lines (a short last TOC page).
    `level` is the entry number's dot-depth (`"1"` → 1, `"1.2"` → 2, ...) —
+   a number may end in a dot (`"4.1.1."`, level 3), and `number` keeps the
+   dot so that `number title` is the printed heading text —
    a later heading-classification step may assign a different level from
    actual font size; this one only reads the printed number. Every page in
    the detected contiguous run is marked `role: "toc"` in `triage.json`.

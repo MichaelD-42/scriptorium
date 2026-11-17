@@ -83,12 +83,14 @@ TITLE_LEADER_PAGE_RE = re.compile(r"^(.*?)\s*\.{2,}\s*(\d+)\s*$")
 # previous entry's page.
 TRAILING_PAGE_RE = re.compile(r"^(.*\S)\s+(\d+)$")
 
-# A bare section number on its own line, e.g. "2.1.1".
-NUMBER_ONLY_RE = re.compile(r"^(\d+(?:\.\d+)*)$")
+# A bare section number on its own line, e.g. "2.1.1" or "2.1.1.".
+NUMBER_ONLY_RE = re.compile(r"^(\d+(?:\.\d+)*\.?)$")
 
 # A leading section number followed by the rest of the text, e.g.
-# "1.2 Document Overview" -> ("1.2", "Document Overview").
-NUMBER_PREFIX_RE = re.compile(r"^(\d+(?:\.\d+)*)\s+(.+)$")
+# "1.2 Document Overview" -> ("1.2", "Document Overview"). A trailing dot
+# ("4.1.1. Title") stays in the number, so `toc_entry_heading_text` gives
+# the printed heading's text back.
+NUMBER_PREFIX_RE = re.compile(r"^(\d+(?:\.\d+)*\.?)\s+(.+)$")
 
 # A TOC is always near the front of a document -- find_printed_toc_pages
 # only scans this many pages from the start. Without a bound, a page deep in
@@ -132,12 +134,23 @@ PAGE_ONLY_RE = re.compile(r"^(\d+)$")
 # A section-number token for the `unparsed` check: dotted parts of at most 3
 # digits each, so a long document number in the title block ("12345678") is
 # not one.
-SECTION_NUMBER_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3})*$")
+SECTION_NUMBER_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3})*\.?$")
 
 
 def _level_from_number(number: str) -> int:
-    """"1" -> 1, "1.2" -> 2, "1.2.3" -> 3, ... -- dot-depth, no hardcoded cap."""
-    return number.count(".") + 1
+    """"1" -> 1, "1.2" -> 2, "1.2.3." -> 3, ... -- dot-depth (a trailing dot
+    does not count), no hardcoded cap."""
+    return number.rstrip(".").count(".") + 1
+
+
+def section_number(text: str) -> str | None:
+    """The leading section number of `text` ("4.1.1." of "4.1.1. Title"),
+    or None: dotted parts of at most 3 digits each (SECTION_NUMBER_RE), so a
+    year ("2024 Plan") is no section number."""
+    match = NUMBER_PREFIX_RE.match(text.strip())
+    if match and SECTION_NUMBER_RE.match(match.group(1)):
+        return match.group(1)
+    return None
 
 
 def _split_leading_number(text: str) -> tuple[str | None, str]:
@@ -149,10 +162,14 @@ def _split_leading_number(text: str) -> tuple[str | None, str]:
 
 def toc_from_outline(document) -> list[dict]:
     """`document.get_toc()` entries, mapped onto this module's shape. Empty
-    list if the document has no outline."""
+    list if the document has no outline. A section number's dot depth wins
+    over a differing outline level: outline levels often come from
+    paragraph styles an author set wrong, the printed number less often."""
     entries = []
     for level, title, page in document.get_toc():
         number, clean_title = _split_leading_number(title)
+        if number is not None and SECTION_NUMBER_RE.match(number):
+            level = _level_from_number(number)
         entries.append({"number": number, "title": clean_title, "page": page, "level": level})
     return entries
 

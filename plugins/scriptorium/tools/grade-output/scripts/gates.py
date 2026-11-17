@@ -395,7 +395,9 @@ def check_toc_headings_match(doc_data: dict, toc_entries: list[dict], unparsed: 
     text (lib/toc.py's `normalize_toc_text`, the same match extract-text
     uses) equals the entry's "<number> <title>" text, on a page within
     TOC_PAGE_TOLERANCE of the entry's `page`, at the entry's `level`
-    (toc.json's dot-depth level, which is what extract-text assigns). One
+    (toc.json's dot-depth level, which is what extract-text assigns). A
+    heading that starts with a section number must also have that number's
+    dot depth as its level (`number_level_mismatch`). One
     heading satisfies one entry only. Every heading that no entry uses is
     reported as `extra` -- extract-text's TOC-driven rule should make none.
 
@@ -412,7 +414,7 @@ def check_toc_headings_match(doc_data: dict, toc_entries: list[dict], unparsed: 
     TOC, or not a PDF): heading levels then come from extract-text's
     size-rank fallback, and there is nothing to compare against."""
     unparsed = list(unparsed or [])
-    empty = {"missing": [], "page_mismatch": [], "level_mismatch": [], "extra": [], "unparsed": unparsed}
+    empty = {"missing": [], "page_mismatch": [], "level_mismatch": [], "number_level_mismatch": [], "extra": [], "unparsed": unparsed}
     if not toc_entries and not unparsed:
         return {"name": "toc_headings_match", "passed": True, "detail": "no TOC entries -- nothing to check", "pages": [], **empty}
 
@@ -442,13 +444,25 @@ def check_toc_headings_match(doc_data: dict, toc_entries: list[dict], unparsed: 
             level_mismatch.append({"text": closest["text"], "page": closest["page"], "toc_level": entry["level"], "heading_level": closest["level"]})
 
     extra = [{"text": h["text"], "page": h["page"], "level": h["level"]} for h in headings if not h["used"]]
+    # A section number's dot depth is its level; an outline or TOC level
+    # that differs from it is the error (both sides would otherwise agree).
+    # Past depth 6 a heading may be capped at level 6, so it is not checked.
+    number_level_mismatch = []
+    for h in headings:
+        number = toc_lib.section_number(h["text"])
+        depth = toc_lib._level_from_number(number) if number else None
+        if depth is not None and depth <= 6 and h["level"] != depth:
+            number_level_mismatch.append({
+                "text": h["text"], "page": h["page"], "number_level": depth, "heading_level": h["level"],
+            })
 
     pages = {m["page"] for m in missing} | {m["page"] for m in level_mismatch} | {m["page"] for m in extra}
+    pages |= {m["page"] for m in number_level_mismatch}
     for m in page_mismatch:
         pages |= {m["toc_page"], m["heading_page"]}
 
     problems = []
-    if unparsed and (missing or page_mismatch or level_mismatch or extra or not toc_entries):
+    if unparsed and (missing or page_mismatch or level_mismatch or number_level_mismatch or extra or not toc_entries):
         problems.append("TOC lines not parsed into an entry: " + ", ".join(repr(line) for line in unparsed))
     if missing:
         problems.append("missing: " + ", ".join(f"{toc_lib.toc_entry_heading_text(m)!r} (page {m['page']})" for m in missing))
@@ -456,13 +470,15 @@ def check_toc_headings_match(doc_data: dict, toc_entries: list[dict], unparsed: 
         problems.append("page off by more than 1: " + ", ".join(f"{m['text']!r} (TOC page {m['toc_page']}, heading page {m['heading_page']})" for m in page_mismatch))
     if level_mismatch:
         problems.append("level mismatch: " + ", ".join(f"{m['text']!r} (TOC level {m['toc_level']}, heading level {m['heading_level']})" for m in level_mismatch))
+    if number_level_mismatch:
+        problems.append("level is not the section number's depth: " + ", ".join(f"{m['text']!r} (number level {m['number_level']}, heading level {m['heading_level']})" for m in number_level_mismatch))
     if extra:
         problems.append("not in the TOC: " + ", ".join(f"{m['text']!r} (page {m['page']})" for m in extra))
     detail = "; ".join(problems) if problems else f"all {len(toc_entries)} TOC entries match a heading"
     return {
         "name": "toc_headings_match", "passed": not problems, "detail": detail, "pages": sorted(pages),
-        "missing": missing, "page_mismatch": page_mismatch, "level_mismatch": level_mismatch, "extra": extra,
-        "unparsed": unparsed,
+        "missing": missing, "page_mismatch": page_mismatch, "level_mismatch": level_mismatch,
+        "number_level_mismatch": number_level_mismatch, "extra": extra, "unparsed": unparsed,
     }
 
 
