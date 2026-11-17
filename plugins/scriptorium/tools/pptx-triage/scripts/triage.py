@@ -38,18 +38,14 @@ def footer_furniture(presentation) -> dict:
     }
 
 
-def slide_has_visual(slide) -> bool:
-    return any(pptx_shapes.is_picture(s) or s.has_chart for s in pptx_shapes.iter_shapes(slide.shapes))
-
-
 def classify_slide(slide, page_number: int) -> dict:
-    image_count = sum(1 for shape in pptx_shapes.iter_shapes(slide.shapes) if pptx_shapes.is_picture(shape))
+    figures = pptx_shapes.figure_shapes(slide)
     return {
         "page_number": page_number,
         "tier": "text",
-        "image_count": image_count,
+        "image_count": len(figures),
+        "figure_shapes": figures,
         "reason": "native slide content (pptx is digital-native, no OCR needed)",
-        "has_visual": slide_has_visual(slide),
     }
 
 
@@ -68,9 +64,7 @@ def main() -> None:
         preflight.fail(pptx_path, "has no slides")
     pages = [classify_slide(slide, i) for i, slide in enumerate(presentation.slides, start=1)]
 
-    loop_size = "tight" if any(p["has_visual"] for p in pages) else "loose"
-    for p in pages:
-        del p["has_visual"]
+    loop_size = "tight" if any(p["image_count"] for p in pages) else "loose"
     result = {
         "doc": args.doc,
         "page_count": len(pages),

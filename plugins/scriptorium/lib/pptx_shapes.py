@@ -1,5 +1,7 @@
 """Shared pptx shape helpers, used by both pptx-triage and pptx-extract:
-slide geometry, hidden shapes and furniture placeholders."""
+slide geometry, hidden shapes, furniture placeholders, the figure rules,
+and the figure census (`figure_shapes`) gates.py checks the extractor
+against."""
 
 from pptx.enum.shapes import MSO_SHAPE_TYPE, PP_PLACEHOLDER
 from pptx.oxml.ns import qn
@@ -16,16 +18,6 @@ FURNITURE_PLACEHOLDERS = {PP_PLACEHOLDER.FOOTER, PP_PLACEHOLDER.SLIDE_NUMBER, PP
 
 def is_furniture_placeholder(shape) -> bool:
     return shape.is_placeholder and shape.placeholder_format.type in FURNITURE_PLACEHOLDERS
-
-
-def iter_shapes(shapes):
-    """Every shape of a slide in z-order, a group's members in place of the
-    group (python-pptx yields a group as one shape with no text or image)."""
-    for shape in shapes:
-        if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
-            yield from iter_shapes(shape.shapes)
-        else:
-            yield shape
 
 
 def is_picture(shape) -> bool:
@@ -116,3 +108,55 @@ def abs_bbox(shape) -> tuple[float, float, float, float]:
             w, h = w * sx, h * sy
         group = group.getparent()
     return x, y, x + w, y + h
+
+
+# A picture showing on less of the slide than this is an icon, not a figure.
+MIN_PICTURE_AREA_FRACTION = 0.005
+
+
+def _visible_area(picture, bbox, width: int, height: int) -> float:
+    """The picture's area inside the slide, 0 when its crop leaves nothing."""
+    if picture.crop_left + picture.crop_right >= 1 or picture.crop_top + picture.crop_bottom >= 1:
+        return 0.0
+    w = min(bbox[2], width) - max(bbox[0], 0)
+    h = min(bbox[3], height) - max(bbox[1], 0)
+    return max(0.0, w) * max(0.0, h)
+
+
+def figure_shapes(slide) -> list[dict]:
+    """The figures the slide shows, read from its shape tree on its own walk
+    (not pptx-extract's), so gates.py can check that each got an element.
+    One `{shape_id, kind, bbox_emu, groups}` per figure; `groups` are the
+    ids of the groups that contain it, outermost first. Kinds:
+
+    - "pic": a picture, at any depth, showing on at least
+      MIN_PICTURE_AREA_FRACTION of the slide after its crop;
+    - "ole", "chart", "diagram": a figure graphicFrame that is not degenerate;
+    - "group": a top-level group that draws a figure (`is_figure_group`);
+    - "fill": a shape filled with a picture.
+
+    Hidden shapes, and everything in a hidden group, are left out."""
+    width, height = slide_size(slide)
+    census = []
+
+    def visit(shapes, groups):
+        for shape in shapes:
+            if is_hidden(shape):
+                continue
+            bbox = abs_bbox(shape)
+            kind = None
+            if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                kind = "group" if not groups and is_figure_group(shape) else None
+            elif is_picture(shape):
+                kind = "pic" if _visible_area(shape, bbox, width, height) >= MIN_PICTURE_AREA_FRACTION * width * height else None
+            elif frame_kind(shape):
+                kind = None if is_degenerate(bbox, slide) else frame_kind(shape)
+            elif has_picture_fill(shape):
+                kind = "fill"
+            if kind:
+                census.append({"shape_id": shape.shape_id, "kind": kind, "bbox_emu": [round(v) for v in bbox], "groups": groups})
+            if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                visit(shape.shapes, groups + [shape.shape_id])
+
+    visit(slide.shapes, [])
+    return census
