@@ -185,6 +185,62 @@ def page_content_rect(furniture: dict | None, page_width: float | None, page_hei
     return rect
 
 
+def page_drawn_limits(furniture: dict | None, page_width: float | None, page_height: float) -> tuple[float | None, float | None]:
+    """`(top, bottom)`: where a drawn boundary ends the header and starts
+    the footer on one page. The content rect's edges (`page_content_rect`)
+    when it has one, else `furniture["header_limit"]` and
+    `["footer_limit"]`, each None when absent or when the page is not the
+    body page size (`content_rect_page_size`, the same test as
+    `page_content_rect`)."""
+    rect = page_content_rect(furniture, page_width, page_height)
+    if rect is not None:
+        return rect[1], rect[3]
+    furniture = furniture or {}
+    header, footer = furniture.get("header_limit"), furniture.get("footer_limit")
+    size = furniture.get("content_rect_page_size")
+    if size and len(size) == 2 and (
+        abs(size[1] - page_height) > FRAME_MATCH_TOLERANCE
+        or (page_width and abs(size[0] - page_width) > FRAME_MATCH_TOLERANCE)
+    ):
+        return None, None
+    return (
+        header if header is not None and header < page_height else None,
+        footer if footer is not None and footer < page_height else None,
+    )
+
+
+def page_band_rect(
+    furniture: dict | None, page_width: float | None, page_height: float | None
+) -> list[float] | tuple[float, float] | None:
+    """What `band_limits` takes as `rect` on one page: `page_content_rect`
+    when the page has one. Else, when triage found a header or footer limit
+    (a running header or footer box drawn deeper than the 12% band, see
+    triage's `_header_footer_limits`), the band limits `(max(12%,
+    header_limit), min(88%, footer_limit))`, tested like the 12% bands
+    (whole span in the band). Else None (the 12% bands). Every band caller
+    passes this; table cropping uses `page_table_rect`."""
+    rect = page_content_rect(furniture, page_width, page_height)
+    if rect is not None or not page_height or page_height <= 0:
+        return rect
+    header, footer = page_drawn_limits(furniture, page_width, page_height)
+    if header is None and footer is None:
+        return None
+    top = max(FURNITURE_EDGE_BAND * page_height, header or 0.0)
+    bottom = min((1 - FURNITURE_EDGE_BAND) * page_height, footer if footer is not None else page_height)
+    return top, bottom
+
+
+def page_table_rect(furniture: dict | None, page_width: float | None, page_height: float | None) -> list[float] | None:
+    """The rect `figures.page_tables` crops a page to: `page_content_rect`,
+    or with none, the page below the header limit (top only: a table may
+    run into the bottom band)."""
+    rect = page_content_rect(furniture, page_width, page_height)
+    if rect is not None or not page_height or page_height <= 0 or not page_width:
+        return rect
+    header, _footer = page_drawn_limits(furniture, page_width, page_height)
+    return [0.0, header, page_width, page_height] if header is not None else None
+
+
 def band_limits(page_height: float, rect: list[float] | None = None) -> tuple[float, float]:
     """Follow-up R10: `(top_limit, bottom_limit)` in points. A span is in the
     top band when it ends at or above `top_limit`, and in the bottom band
@@ -194,17 +250,21 @@ def band_limits(page_height: float, rect: list[float] | None = None) -> tuple[fl
     of the page height. With one (follow-up R13), they are exactly the page
     area outside it: above rect.y0 and below rect.y1, with no 12% minimum.
     `find_content_rect` only accepts an inner rect, never an outer page
-    border. Every stage that tests the band (triage, extract_text, the merge
-    filter, the gates, lib/figures.py's cluster band test) calls this
-    function."""
+    border. A `(top, bottom)` pair (`page_band_rect`'s header/footer
+    limits) is returned as it is. Every stage that tests the band (triage,
+    extract_text, the merge filter, the gates, lib/figures.py's cluster
+    band test) calls this function."""
     if _rect_bands(page_height, rect):
         return rect[1], rect[3]
+    if rect and len(rect) == 2:
+        return rect[0], rect[1]
     return FURNITURE_EDGE_BAND * page_height, (1 - FURNITURE_EDGE_BAND) * page_height
 
 
 def _rect_bands(page_height: float, rect: list[float] | None) -> bool:
-    """True when band_limits uses `rect` (it fits the page height)."""
-    return bool(rect) and rect[3] <= page_height
+    """True when band_limits uses `rect` as a content rect (four
+    coordinates that fit the page height)."""
+    return bool(rect) and len(rect) == 4 and rect[3] <= page_height
 
 
 def furniture_edge(y0: float, y1: float, page_height: float, rect: list[float] | None = None) -> str | None:

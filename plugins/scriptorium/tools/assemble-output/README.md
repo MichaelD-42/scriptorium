@@ -56,6 +56,12 @@ The one place all three extraction tiers converge. Three scripts:
    equal to page `n`'s first rows are a repeated header and are dropped),
    page `n`'s table gains `"pages"`, and page `n+1`'s table is removed. A
    table join chains across a page that held only the continued table.
+   "First" and "last" skip an element that leaked past furniture removal:
+   one whose center lies above the drawn top limit or below the drawn
+   bottom limit (`furniture.page_drawn_limits`: the content rect, or
+   triage's `header_limit`/`footer_limit`; never the plain 12% band, which
+   body text can reach), or inside a `repeated_drawing` excluded region at
+   most 30% of the page tall.
    `gates.py`'s `no_empty_pages` counts a page listed in another
    element's `"pages"` as filled.
 2. **`assemble.py`** reads that merged file and writes the final deliverable

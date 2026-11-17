@@ -45,7 +45,7 @@ def main() -> None:
     furniture = furniture_lib.load_furniture(args.doc)
     page_sizes = (
         furniture_lib.pdf_page_sizes(input_path)
-        if input_format == "pdf" and furniture.get("line_patterns")
+        if input_format == "pdf"
         else {}
     )
     pages = elements_lib.merge_shards(

@@ -120,7 +120,9 @@ Also writes `work/<doc-name>/toc.json`:
 1. **PDF outline** (`document.get_toc()`) — used directly if the document
    has one. A leading `"<number> "` in the outline title is split into
    `number`; otherwise `number` is `null`. `level` is the outline's own
-   level. The printed TOC page scan (step 2) still runs, but only to find
+   level, except for a section number (dotted parts of at most 3 digits):
+   then it is the number's dot depth, because an outline level set from a
+   wrong paragraph style is more common than a wrong printed number. The printed TOC page scan (step 2) still runs, but only to find
    the TOC pages: every page it finds is marked `role: "toc"`, so the
    extractors skip it (fix wave M6). Its lines are not parsed into
    entries for this path.
@@ -142,6 +144,8 @@ Also writes `work/<doc-name>/toc.json`:
    has at least 3 dot-leader lines and its dot-leader plus number-only
    lines are at least 30% of its lines (a short last TOC page).
    `level` is the entry number's dot-depth (`"1"` → 1, `"1.2"` → 2, ...) —
+   a number may end in a dot (`"4.1.1."`, level 3), and `number` keeps the
+   dot so that `number title` is the printed heading text —
    a later heading-classification step may assign a different level from
    actual font size; this one only reads the printed number. Every page in
    the detected contiguous run is marked `role: "toc"` in `triage.json`.
@@ -149,10 +153,13 @@ Also writes `work/<doc-name>/toc.json`:
 `unparsed` lists, verbatim, every dot-leader line on a TOC page that gave
 no entry (for example a leader line with no section number), and every
 numbered line (a section-number token with a title) that ended up in no
-entry. It is `[]`
-for the outline path. `grade-output`'s `toc_headings_match` fails while it
-is not empty, because each such line may be a lost entry whose heading
-then became a paragraph.
+entry. A line that is furniture (its furniture key is a `line_patterns`
+entry and its y lies in that pattern's y range, such as a title-block
+field shaped like a section number) is left out. It is `[]`
+for the outline path. `grade-output`'s `toc_headings_match` reports it,
+because each such line may be a lost entry whose heading then became a
+paragraph: as a failure when another TOC problem comes with it, else as a
+`toc_unparsed_lines` warning.
 
 Empty `entries: []` and no `role` keys anywhere when there's no outline and
 no printed TOC found.
@@ -233,12 +240,27 @@ no printed TOC found.
     merge filter and the gates all use it. Without a content rect the
     bands are the top and bottom 12% of the page.
   - `content_rect_page_size` (re-review 2 I2): `[width, height]` of the
-    most common body page size, the size `content_rect` was measured on,
-    or `null` with no content rect. `lib/furniture.py`'s
+    most common body page size, the size `content_rect` (or a header or
+    footer limit) was measured on, or `null` with none. `lib/furniture.py`'s
     `page_content_rect` gives a page the rect only when the page has this
     size (within 3 pt) and the rect fits inside it. A page of another size
     (a landscape page in a portrait document) has the 12% bands and its
     tables are not cropped to the rect.
+  - `header_limit` / `footer_limit` (present only when found, and only
+    without a content rect): the bottom of a running header box, or the
+    top of a footer box, that reaches past the 12% band. The
+    `repeated_drawings` that start in the band (a rule, a logo strip) seed
+    a union, which grows by every repeated drawing that overlaps it or
+    lies within 20 pt of it (a drawing taller than 30% of the page never
+    joins). The union counts when it is at least half the page wide and
+    ends within 30% of the page height from its edge; a thin rule under a
+    one-line header stays in the band and gives no limit. With a limit,
+    `lib/furniture.py`'s `page_band_rect` gives `band_limits` the limits
+    `(max(12%, header_limit), min(88%, footer_limit))`, tested like the 12%
+    bands: a header line is furniture when it ends above `header_limit`.
+    `page_table_rect` crops `figures.page_tables` to the page below
+    `header_limit` only, so a header cell never becomes a table and a
+    body table that runs into the bottom band keeps its rows.
 - `furniture_text`: the verbatim (unmasked) text of the matched furniture
   lines on the document's first page, top-to-bottom, newline-joined. `null`
   if no line furniture was detected.

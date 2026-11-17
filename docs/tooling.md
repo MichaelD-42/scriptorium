@@ -43,7 +43,7 @@ step needs its detail.
 | `xlsx-extract` | `extract_xlsx.py` | xlsx Tier 1: sheet name → heading, used range → one table element (full rectangle, blank interior rows kept), embedded images (own shard) — charts not extracted (no rendering engine) |
 | `html-extract` | `extract_html.py` | html Tier 1: `<h1>`-`<h6>` → headings (clamped to level 1-3), `<p>`/`<li>`/`<pre>`/`<blockquote>` → paragraphs, `<table>` → table, `<img>` (`data:` URI, or an image file inside the HTML file's own folder — remote sources and paths outside the folder skipped) → image — body + image shards in one call, single page always |
 | `assemble-output` | `merge.py`, `assemble.py`, `zip_output.py` | `merge.py` combines every page's shards into `elements.json` (page count from `paths.true_page_count`, format-aware; also joins a paragraph/list item cut by a page break); `assemble.py` renders Markdown, HTML, an OKF bundle, `md-tree` (nested folders/files split at a heading depth, with a stable per-heading anchor — a byte-for-byte contract with a downstream consumer), or a ReqIF document (XML built by the internal `reqif_builder.py` helper, stdlib `xml.etree.ElementTree`, no new dependency); `zip_output.py` (optional, `/scriptorium:extract --zip`) packages `output/<doc>/` into `output/<doc>.zip` |
-| `grade-output` | `gates.py`, `write_grade_shard.py`, `merge_grades.py`, `text_mode_grade.py` | `gates.py` (deterministic, whole-doc, any format — empty pages, dangling asset refs, OCR confidence floor, output file exists, figures complete (skipped with `--no-describe`), plus text-layer coverage, furniture absent and TOC headings matched, which only find something on PDFs; and the warnings `large_region_excluded`, `orphan_figure_caption`, `table_as_figure`) + `rubric.md` (vision judge, per page batch, applied by the `grader` agent via `write_grade_shard.py` — `pdf`/`pptx`/`image` only) **or** `text_mode_grade.py` (deterministic structural check re-reading the source file directly, no agent — `docx`/`xlsx`/`html`, see `text-rubric.md`) + `merge_grades.py` (deterministic, combines every batch's grade shards identically either way) |
+| `grade-output` | `gates.py`, `write_grade_shard.py`, `merge_grades.py`, `text_mode_grade.py` | `gates.py` (deterministic, whole-doc, any format — empty pages, dangling asset refs, OCR confidence floor, output file exists, figures complete (skipped with `--no-describe`), plus text-layer coverage, furniture absent and TOC headings matched, which only find something on PDFs; and the warnings `large_region_excluded`, `orphan_figure_caption`, `table_as_figure`, `toc_unparsed_lines`) + `rubric.md` (vision judge, per page batch, applied by the `grader` agent via `write_grade_shard.py` — `pdf`/`pptx`/`image` only) **or** `text_mode_grade.py` (deterministic structural check re-reading the source file directly, no agent — `docx`/`xlsx`/`html`, see `text-rubric.md`) + `merge_grades.py` (deterministic, combines every batch's grade shards identically either way) |
 
 `lib/` holds the shard read/write/merge helpers and path
 conventions every tool script imports: `paths.py` (path conventions and
@@ -156,13 +156,18 @@ runs/env.json                                       check_env.sh's resolved tess
   and `image`, `page_count` is always `1` — neither has a page concept at
   all, not even docx's Heading-1 split. PDF triage also detects page
   furniture (`furniture`: `line_patterns`, `frame_tables`, `frame_drawings`,
-  `repeated_drawings`, `image_xrefs`) and its verbatim text (`furniture_text`), and marks any
+  `repeated_drawings`, `image_xrefs`, `content_rect`, and `header_limit` /
+  `footer_limit` for a running header or footer box deeper than the 12%
+  band) and its verbatim text (`furniture_text`), and marks any
   detected printed-TOC page `"role": "toc"` in its `pages[]` entry — see
   `pdf-triage/README.md`.
 - **`toc.json`** (pdf only) — `entries[]`, each `{number, title, page,
   level}`, from `lib/toc.py`'s `detect_toc()`: the PDF's own outline if it
   has one, else a detected printed table of contents. `extract-text` reads
-  this to drive heading-level classification; empty `entries: []` when
+  this to drive heading-level classification (a numbered heading deeper
+  than the TOC, and a `sub_heading: true` heading one level below the
+  heading above it, are the only headings it does not list; see
+  `extract-text/README.md`); empty `entries: []` when
   neither source is found.
 - **`gates-report.json`** — `gates.py`'s deterministic hard-backpressure result:
   `passed` plus the structural checks (empty pages, dangling asset
@@ -171,7 +176,8 @@ runs/env.json                                       check_env.sh's resolved tess
   `toc_headings_match` (the last two only find something on PDFs, the one
   format whose triage detects furniture and a TOC), each carrying its own
   `pages` list and structured detail. Also a top-level `warnings` list
-  (`large_region_excluded`, `orphan_figure_caption`, `table_as_figure`) that
+  (`large_region_excluded`, `orphan_figure_caption`, `table_as_figure`,
+  `toc_unparsed_lines`) that
   never affects `passed` — see `grade-output/README.md`.
 - **`grade-report.json`** — `merge_grades.py`'s output: `overall_passed`
   (`gates.passed AND rubric_passed`) and `rubric_verdict.per_page`, each entry

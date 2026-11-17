@@ -334,7 +334,7 @@ def check_furniture_absent(
                 el_type = el.get("type")
                 patterns = furniture_lib.patterns_for_element(
                     all_patterns, el.get("bbox"), page_heights.get(page_number),
-                    furniture_lib.page_content_rect(
+                    furniture_lib.page_band_rect(
                         furniture, page_widths.get(page_number), page_heights.get(page_number)
                     ),
                 )
@@ -388,6 +388,23 @@ def check_furniture_absent(
     return {"name": "furniture_absent", "passed": not offenders, "detail": detail, "pages": pages, "offenders": offenders}
 
 
+def _below_toc(heading: dict, matched_numbers: set[str]) -> bool:
+    """True for a heading the TOC does not list but extract-text may make:
+    a numbered heading under a matched TOC entry (an ancestor number is
+    one) at its dot-depth level, or a sub-heading (`sub_heading`, which
+    only extract-text sets) with a level. Its level comes from the heading
+    above it, which may be on a page or at a depth the gate cannot see."""
+    if heading["sub_heading"]:
+        return bool(heading["level"])
+    number = toc_lib.section_number(heading["text"])
+    if number is None:
+        return False
+    parts = number.rstrip(".").split(".")
+    return heading["level"] == min(len(parts), 6) and any(
+        ".".join(parts[:k]) in matched_numbers for k in range(1, len(parts))
+    )
+
+
 def check_toc_headings_match(doc_data: dict, toc_entries: list[dict], unparsed: list[str] | None = None) -> dict:
     """Task A9: the TOC (`toc.json["entries"]`) and the body headings agree.
 
@@ -395,21 +412,28 @@ def check_toc_headings_match(doc_data: dict, toc_entries: list[dict], unparsed: 
     text (lib/toc.py's `normalize_toc_text`, the same match extract-text
     uses) equals the entry's "<number> <title>" text, on a page within
     TOC_PAGE_TOLERANCE of the entry's `page`, at the entry's `level`
-    (toc.json's dot-depth level, which is what extract-text assigns). One
+    (toc.json's dot-depth level, which is what extract-text assigns). A
+    heading that starts with a section number must also have that number's
+    dot depth as its level (`number_level_mismatch`). One
     heading satisfies one entry only. Every heading that no entry uses is
-    reported as `extra` -- extract-text's TOC-driven rule should make none.
+    reported as `extra`, except the ones extract-text makes below the TOC
+    (`_below_toc`): a numbered heading deeper than the TOC lists, under a
+    matched entry, and a sub-heading (`sub_heading`).
 
     Fix wave I2: `unparsed` is toc.json's `unparsed` list -- dot-leader
     lines on a printed TOC page that gave no entry. Each one may be a lost
     entry whose heading then became a paragraph, which the comparison above
-    cannot see. So the check fails while `unparsed` is not empty, and lists
-    those lines.
+    cannot see. The check lists those lines. It fails on them when there
+    is another problem or no entry at all; when every entry matched and
+    nothing else is wrong, they are only a `toc_unparsed_lines` warning
+    (`toc_unparsed_warnings`), so a few stray lines do not block the retry
+    loop.
 
     Passes trivially when toc.json has no entries and no unparsed lines (no
     TOC, or not a PDF): heading levels then come from extract-text's
     size-rank fallback, and there is nothing to compare against."""
     unparsed = list(unparsed or [])
-    empty = {"missing": [], "page_mismatch": [], "level_mismatch": [], "extra": [], "unparsed": unparsed}
+    empty = {"missing": [], "page_mismatch": [], "level_mismatch": [], "number_level_mismatch": [], "extra": [], "unparsed": unparsed}
     if not toc_entries and not unparsed:
         return {"name": "toc_headings_match", "passed": True, "detail": "no TOC entries -- nothing to check", "pages": [], **empty}
 
@@ -420,11 +444,12 @@ def check_toc_headings_match(doc_data: dict, toc_entries: list[dict], unparsed: 
                 text = el.get("text") or ""
                 headings.append({
                     "page": page.get("page_number"), "level": el.get("level"), "text": text,
-                    "norm": toc_lib.normalize_toc_text(text), "used": False,
+                    "norm": toc_lib.normalize_toc_text(text), "used": False, "sub_heading": bool(el.get("sub_heading")),
                 })
     headings.sort(key=lambda h: h["page"] or 0)
 
     missing, page_mismatch, level_mismatch = [], [], []
+    matched_numbers = set()
     for entry in toc_entries:
         expected = toc_lib.normalize_toc_text(toc_lib.toc_entry_heading_text(entry))
         candidates = [h for h in headings if not h["used"] and h["norm"] == expected]
@@ -433,34 +458,69 @@ def check_toc_headings_match(doc_data: dict, toc_entries: list[dict], unparsed: 
             continue
         closest = min(candidates, key=lambda h: abs(h["page"] - entry["page"]))
         closest["used"] = True
+        if entry.get("number"):
+            matched_numbers.add(entry["number"].rstrip("."))
         if abs(closest["page"] - entry["page"]) > TOC_PAGE_TOLERANCE:
             page_mismatch.append({"text": closest["text"], "toc_page": entry["page"], "heading_page": closest["page"]})
         elif closest["level"] != entry["level"]:
             level_mismatch.append({"text": closest["text"], "page": closest["page"], "toc_level": entry["level"], "heading_level": closest["level"]})
 
-    extra = [{"text": h["text"], "page": h["page"], "level": h["level"]} for h in headings if not h["used"]]
+    extra = [
+        {"text": h["text"], "page": h["page"], "level": h["level"]}
+        for h in headings
+        if not h["used"] and not _below_toc(h, matched_numbers)
+    ]
+    # A section number's dot depth is its level; an outline or TOC level
+    # that differs from it is the error (both sides would otherwise agree).
+    # Past depth 6 a heading may be capped at level 6, so it is not checked.
+    number_level_mismatch = []
+    for h in headings:
+        number = toc_lib.section_number(h["text"])
+        depth = toc_lib._level_from_number(number) if number else None
+        if depth is not None and depth <= 6 and h["level"] != depth:
+            number_level_mismatch.append({
+                "text": h["text"], "page": h["page"], "number_level": depth, "heading_level": h["level"],
+            })
 
     pages = {m["page"] for m in missing} | {m["page"] for m in level_mismatch} | {m["page"] for m in extra}
+    pages |= {m["page"] for m in number_level_mismatch}
     for m in page_mismatch:
         pages |= {m["toc_page"], m["heading_page"]}
 
     problems = []
+    if unparsed and (missing or page_mismatch or level_mismatch or number_level_mismatch or extra or not toc_entries):
+        problems.append("TOC lines not parsed into an entry: " + ", ".join(repr(line) for line in unparsed))
     if missing:
         problems.append("missing: " + ", ".join(f"{toc_lib.toc_entry_heading_text(m)!r} (page {m['page']})" for m in missing))
     if page_mismatch:
         problems.append("page off by more than 1: " + ", ".join(f"{m['text']!r} (TOC page {m['toc_page']}, heading page {m['heading_page']})" for m in page_mismatch))
     if level_mismatch:
         problems.append("level mismatch: " + ", ".join(f"{m['text']!r} (TOC level {m['toc_level']}, heading level {m['heading_level']})" for m in level_mismatch))
+    if number_level_mismatch:
+        problems.append("level is not the section number's depth: " + ", ".join(f"{m['text']!r} (number level {m['number_level']}, heading level {m['heading_level']})" for m in number_level_mismatch))
     if extra:
         problems.append("not in the TOC: " + ", ".join(f"{m['text']!r} (page {m['page']})" for m in extra))
-    if unparsed:
-        problems.append("TOC lines not parsed into an entry: " + ", ".join(repr(line) for line in unparsed))
     detail = "; ".join(problems) if problems else f"all {len(toc_entries)} TOC entries match a heading"
     return {
         "name": "toc_headings_match", "passed": not problems, "detail": detail, "pages": sorted(pages),
-        "missing": missing, "page_mismatch": page_mismatch, "level_mismatch": level_mismatch, "extra": extra,
-        "unparsed": unparsed,
+        "missing": missing, "page_mismatch": page_mismatch, "level_mismatch": level_mismatch,
+        "number_level_mismatch": number_level_mismatch, "extra": extra, "unparsed": unparsed,
     }
+
+
+def toc_unparsed_warnings(toc_check: dict) -> list[dict]:
+    """A `toc_unparsed_lines` warning when `check_toc_headings_match`
+    passed with unparsed TOC lines left over."""
+    if not toc_check["passed"] or not toc_check.get("unparsed"):
+        return []
+    lines = toc_check["unparsed"]
+    return [{
+        "name": "toc_unparsed_lines",
+        "page": None,
+        "lines": lines,
+        "detail": "TOC lines not parsed into an entry: " + ", ".join(repr(line) for line in lines)
+        + " -- every TOC entry matched a heading; verify no entry was lost",
+    }]
 
 
 def check_figures_complete(doc_data: dict, input_format: str | None = None) -> dict:
@@ -550,7 +610,7 @@ def pdf_text_layer_words(input_path: Path, furniture: dict) -> dict[int, set[str
     with fitz.open(input_path) as pdf:
         for n, page in enumerate(pdf, start=1):
             width, height = page.rect.width, page.rect.height
-            rect = furniture_lib.page_content_rect(furniture, width, height)
+            rect = furniture_lib.page_band_rect(furniture, width, height)
             lines = [
                 "".join(span["text"] for span in line["spans"])
                 for block in page.get_text("dict")["blocks"]
@@ -701,6 +761,7 @@ def main() -> None:
         check_large_region_excluded(doc_data, page_areas)
         + check_orphan_figure_caption(doc_data)
         + check_table_as_figure(doc_data)
+        + toc_unparsed_warnings(next(c for c in checks if c["name"] == "toc_headings_match"))
     )
 
     result = {"doc": args.doc, "passed": all(c["passed"] for c in checks), "checks": checks, "warnings": warnings}

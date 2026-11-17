@@ -134,8 +134,9 @@ def _find_repeated_lines(document, rect_furniture: dict | None = None) -> tuple[
     """Text lines whose furniture key (`furniture_lib.furniture_key`: no
     whitespace, digit runs as "#") repeats, at the same document edge, on at
     least LINE_PATTERN_MIN_PAGE_FRACTION of pages. `rect_furniture` holds
-    `content_rect` and `content_rect_page_size`; each page's bands use
-    `furniture_lib.page_content_rect` (re-review 2 I2).
+    `content_rect`, `content_rect_page_size`, `header_limit` and
+    `footer_limit`; each page's bands use `furniture_lib.page_band_rect`
+    (re-review 2 I2).
 
     Returns `(line_patterns, occurrences)` -- `occurrences` maps each kept
     (masked_text, edge) key to its per-page raw text and y-position, so
@@ -147,7 +148,7 @@ def _find_repeated_lines(document, rect_furniture: dict | None = None) -> tuple[
         height = page.rect.height
         if height <= 0:
             continue
-        content_rect = furniture_lib.page_content_rect(rect_furniture, page.rect.width, height)
+        content_rect = furniture_lib.page_band_rect(rect_furniture, page.rect.width, height)
         for block in page.get_text("dict").get("blocks", []):
             if block.get("type") != 0:
                 continue
@@ -439,6 +440,57 @@ def _body_page_size(document, body_pages: set[int] | None) -> tuple[float, float
     return max(counts, key=counts.get) if counts else None
 
 
+# A running header or footer drawn as a box of many parts (rules, a logo
+# strip, cell borders) can reach deeper than the 12% band. Its parts are
+# `repeated_drawings`: the ones that start in the band seed a union, which
+# grows by every part that overlaps it or lies within HEADER_BOX_MAX_GAP of
+# it. The union bounds the header (footer) when it is at least
+# HEADER_BOX_MIN_WIDTH_FRACTION of the page wide and stays within
+# HEADER_BOX_MAX_DEPTH_FRACTION of its edge. A part taller than that depth
+# (a page frame) never joins.
+HEADER_BOX_MAX_GAP = 20.0  # pt, about one header row
+HEADER_BOX_MIN_WIDTH_FRACTION = 0.5
+HEADER_BOX_MAX_DEPTH_FRACTION = 0.30
+
+
+def _grown_union(parts: list[list[float]], seeds: list[list[float]]) -> list[float] | None:
+    if not seeds:
+        return None
+    union = [min(b[0] for b in seeds), min(b[1] for b in seeds), max(b[2] for b in seeds), max(b[3] for b in seeds)]
+    grown = True
+    while grown:
+        grown = False
+        for b in parts:
+            near = (
+                b[0] <= union[2] and b[2] >= union[0]
+                and b[1] <= union[3] + HEADER_BOX_MAX_GAP and b[3] >= union[1] - HEADER_BOX_MAX_GAP
+            )
+            if near and (b[0] < union[0] or b[1] < union[1] or b[2] > union[2] or b[3] > union[3]):
+                union = [min(union[0], b[0]), min(union[1], b[1]), max(union[2], b[2]), max(union[3], b[3])]
+                grown = True
+    return union
+
+
+def _header_footer_limits(repeated_drawings: list[dict], width: float, height: float) -> tuple[float | None, float | None]:
+    """`(header_limit, footer_limit)`: the bottom of the grown header box
+    and the top of the grown footer box (see HEADER_BOX_MAX_GAP), each None
+    unless the box reaches past the 12% band. A thin rule under a one-line
+    header stays inside the band and gives None."""
+    band = furniture_lib.FURNITURE_EDGE_BAND * height
+    depth = HEADER_BOX_MAX_DEPTH_FRACTION * height
+    parts = [r["bbox"] for r in repeated_drawings if r["bbox"][3] - r["bbox"][1] <= depth]
+    header_box = _grown_union(parts, [b for b in parts if b[1] <= band])
+    footer_box = _grown_union(parts, [b for b in parts if b[3] >= height - band])
+    wide = HEADER_BOX_MIN_WIDTH_FRACTION * width
+    header = header_box[3] if header_box and header_box[2] - header_box[0] >= wide and band < header_box[3] <= depth else None
+    footer = (
+        footer_box[1]
+        if footer_box and footer_box[2] - footer_box[0] >= wide and height - depth <= footer_box[1] < height - band
+        else None
+    )
+    return header, footer
+
+
 def detect_furniture(document, pdf_path: Path, body_pages: set[int] | None = None) -> tuple[dict, str | None]:
     """Runs once per document (not per page): finds repeated header/footer
     lines, repeated full-page-covering tables and drawings, repeated
@@ -464,9 +516,18 @@ def detect_furniture(document, pdf_path: Path, body_pages: set[int] | None = Non
         if page_size is not None
         else None
     )
-    content_rect_page_size = [page_size[0], page_size[1]] if content_rect else None
+    header_limit, footer_limit = (
+        _header_footer_limits(repeated_drawings, page_size[0], page_size[1])
+        if page_size is not None and content_rect is None
+        else (None, None)
+    )
+    content_rect_page_size = [page_size[0], page_size[1]] if content_rect or header_limit or footer_limit else None
     line_patterns, line_occurrences = _find_repeated_lines(
-        document, {"content_rect": content_rect, "content_rect_page_size": content_rect_page_size}
+        document,
+        {
+            "content_rect": content_rect, "content_rect_page_size": content_rect_page_size,
+            "header_limit": header_limit, "footer_limit": footer_limit,
+        },
     )
 
     furniture = {
@@ -478,8 +539,32 @@ def detect_furniture(document, pdf_path: Path, body_pages: set[int] | None = Non
         "content_rect": content_rect,
         "content_rect_page_size": content_rect_page_size,
     }
+    # Only when found, so a triage.json without a header box keeps its shape.
+    for key, limit in (("header_limit", header_limit), ("footer_limit", footer_limit)):
+        if limit is not None:
+            furniture[key] = limit
     furniture_text = _furniture_text_for_first_page(line_occurrences)
     return furniture, furniture_text
+
+
+def drop_furniture_toc_lines(document, toc_pages: list[int], unparsed: list[str], line_patterns: list[dict]) -> list[str]:
+    """`unparsed` without the TOC-page lines that are furniture: the line's
+    `furniture_key` is a line pattern's `masked`, and its top y lies within
+    that pattern's y range. A title-block field such as a revision number can
+    look like a lone section number; a real TOC line never repeats on most
+    body pages."""
+    ranges: dict[str, list[tuple[float, float]]] = {}
+    for pattern in line_patterns:
+        ranges.setdefault(pattern["masked"], []).append((pattern["y_min"], pattern["y_max"]))
+    furniture_lines = set()
+    for page_number in toc_pages:
+        page = document[page_number - 1]
+        lines, ys = toc_lib._page_line_records(page)
+        for text, y in zip(lines, ys):
+            y_frac = y / page.rect.height
+            if any(lo - 0.005 <= y_frac <= hi for lo, hi in ranges.get(furniture_lib.furniture_key(text), [])):
+                furniture_lines.add(text)
+    return [line for line in unparsed if line not in furniture_lines]
 
 
 def main() -> None:
@@ -523,6 +608,7 @@ def main() -> None:
     toc_entries, toc_pages, toc_unparsed = toc_lib.detect_toc_with_unparsed(document)
     body_pages = {p["page_number"] for p in pages} - set(toc_pages)
     furniture, furniture_text = detect_furniture(document, pdf_path, body_pages)
+    toc_unparsed = drop_furniture_toc_lines(document, toc_pages, toc_unparsed, furniture["line_patterns"])
     for page in pages:
         if page["page_number"] in toc_pages:
             page["role"] = "toc"
