@@ -64,7 +64,7 @@ pass/fail decision. It exits 1, writing nothing, when a page in
 | `ocr_confidence_floor` | a tier-`ocr` page's `ocr_confidence` < 0.5 (its `pages` go to `vision` on retry) |
 | `output_file_exists` | the assembled output is missing or near-empty (format-aware: single file for `md`/`html`, `index.md` + section files for `okf`, `index.md` whose links all resolve to files for `md-tree` (any `--split-depth`), every line valid JSON for `jsonl`) |
 | `furniture_absent` | a heading/paragraph/list_item, table cell, image `figure_text` or `caption`, or a whole line of the `.md`/`.html` files under `output/<doc>/`, has a furniture key (`lib/furniture.py`'s `furniture_key`: whitespace removed, digit runs as `#`) equal to a `triage.json` furniture `line_patterns` entry; or a `table` element's bbox matches a `frame_tables` entry (3pt). An element with a bbox matches any pattern only when its bbox is in the furniture band (`lib/furniture.py`'s `band_limits`: the top/bottom 12% of the page, or exactly the area outside `furniture.content_rect` when triage found one) of its PDF page; an element without a bbox (OCR, vision) matches a letter-bearing pattern anywhere (follow-up R14). An output line is flagged only when its pattern is a whole line at least max(3, 10% of the body pages) times in one output (a single-file md/html, or one split bundle). A digit-only pattern (no letters, e.g. `#` for a bare page-number footer) is not checked in the output files. Passes trivially with no furniture. Furniture images are not checked: no element records its source xref |
-| `toc_headings_match` | a `toc.json` entry has no `heading` with the same normalized text (`lib/toc.py`'s `normalize_toc_text`) within ±1 page, or the heading's level differs from the entry's `level`; or a heading that starts with a section number has a level other than the number's dot depth (`number_level_mismatch`, depth 6 or less); or a heading matches no entry (except the ones extract-text makes below the TOC: a numbered heading at its dot depth under a matched entry's number, and a `sub_heading` deeper than the nearest heading above it that is not one); or `toc.json`'s `unparsed` list (TOC dot-leader lines and numbered lines that gave no entry) is not empty while another of these problems is found or there is no entry. When the unparsed lines are the only problem, the check passes and a `toc_unparsed_lines` warning lists them. Passes trivially when `toc.json` has no entries and no unparsed lines |
+| `toc_headings_match` | a `toc.json` entry has no `heading` with the same normalized text (`lib/toc.py`'s `normalize_toc_text`) within ±1 page, or the heading's level differs from the entry's `level`; or a heading that starts with a section number has a level other than the number's dot depth (`number_level_mismatch`, depth 6 or less); or a heading matches no entry (except the ones extract-text makes below the TOC: a numbered heading at its dot depth under a matched entry's number, and a heading marked `sub_heading`); or `toc.json`'s `unparsed` list (TOC dot-leader lines and numbered lines that gave no entry) is not empty while another of these problems is found or there is no entry. When the unparsed lines are the only problem, the check passes and a `toc_unparsed_lines` warning lists them. Passes trivially when `toc.json` has no entries and no unparsed lines |
 | `text_layer_coverage` | (pdf) a `text`-tier page's text layer has at least 3 words (letters only, 4+ characters; furniture bands and side-margin lines left out) that are not in the output of that page or its neighbours (a page-break join), and they are at least 5% of the page's words. Its `pages` go to `vision` on retry, the missing words in the `detail` as reason |
 | `figures_complete` | (skipped with `--no-describe`) an `image` element has no non-empty `caption`, no non-empty `figure_text` and no `no_visible_text: true` flag (`describe_image.py --no-visible-text`; counts for pdf and image documents only), or no non-empty `description` |
 
@@ -119,6 +119,16 @@ of the pipeline (Task A5b fix round 1):
   in the document's `runs/state.json` queue entry and reports it to the
   human in the loop summary, regardless of `overall_passed` — a warning is
   never silently dropped even when everything else passes.
+
+## `toc_unparsed_lines` (warning, not a gate)
+
+When `toc_headings_match` passes but `toc.json`'s `unparsed` list is not
+empty (every TOC entry matched a heading, at the right page and level, and
+no heading is extra), `gates.py` appends `{"name": "toc_unparsed_lines",
+"page": null, "lines": [...], "detail": ...}` instead of failing the check,
+so a few stray lines do not send the document to a human. It has no page
+(`toc.json` does not record which TOC page a line came from), so no grader
+batch picks it up; the loop summary reports it.
 
 ## `orphan_figure_caption` (warning, not a gate)
 

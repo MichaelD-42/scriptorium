@@ -1276,9 +1276,12 @@ def classify_heading_level(
 UNLISTED_HEADING_MAX_WORDS = 12
 
 # An underline is a horizontal drawing at most this thick, from the lower
-# half of the line to this far below it, at least as wide as the line.
+# half of the line to this far below it, at least as wide as the line and
+# at most UNDERLINE_MAX_WIDTH_RATIO times as wide (a table or section rule
+# under a bold label is no underline).
 UNDERLINE_MAX_THICKNESS = 1.5  # pt
 UNDERLINE_MAX_GAP = 3.0  # pt
+UNDERLINE_MAX_WIDTH_RATIO = 1.5
 
 
 def _is_heading_shaped(text: str) -> bool:
@@ -1334,6 +1337,7 @@ def mark_underlined_lines(page, text_blocks: list[dict]) -> None:
             x0, y0, x1, y1 = line["bbox"]
             line["underlined"] = any(
                 (y0 + y1) / 2 < r.y0 <= y1 + UNDERLINE_MAX_GAP and r.x0 <= x0 + 1 and r.x1 >= x1 - 1
+                and r.width <= UNDERLINE_MAX_WIDTH_RATIO * (x1 - x0)
                 for r in rules
             )
 

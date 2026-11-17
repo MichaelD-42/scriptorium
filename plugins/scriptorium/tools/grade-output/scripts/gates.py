@@ -388,14 +388,14 @@ def check_furniture_absent(
     return {"name": "furniture_absent", "passed": not offenders, "detail": detail, "pages": pages, "offenders": offenders}
 
 
-def _below_toc(heading: dict, earlier: list[dict], matched_numbers: set[str]) -> bool:
+def _below_toc(heading: dict, matched_numbers: set[str]) -> bool:
     """True for a heading the TOC does not list but extract-text may make:
     a numbered heading under a matched TOC entry (an ancestor number is
-    one) at its dot-depth level, or a sub-heading (`sub_heading`) deeper
-    than the nearest earlier heading that is not one."""
+    one) at its dot-depth level, or a sub-heading (`sub_heading`, which
+    only extract-text sets) with a level. Its level comes from the heading
+    above it, which may be on a page or at a depth the gate cannot see."""
     if heading["sub_heading"]:
-        parent = next((h for h in reversed(earlier) if not h["sub_heading"]), None)
-        return parent is not None and (heading["level"] or 0) > (parent["level"] or 0)
+        return bool(heading["level"])
     number = toc_lib.section_number(heading["text"])
     if number is None:
         return False
@@ -418,7 +418,7 @@ def check_toc_headings_match(doc_data: dict, toc_entries: list[dict], unparsed: 
     heading satisfies one entry only. Every heading that no entry uses is
     reported as `extra`, except the ones extract-text makes below the TOC
     (`_below_toc`): a numbered heading deeper than the TOC lists, under a
-    matched entry, and a sub-heading one level below the heading above it.
+    matched entry, and a sub-heading (`sub_heading`).
 
     Fix wave I2: `unparsed` is toc.json's `unparsed` list -- dot-leader
     lines on a printed TOC page that gave no entry. Each one may be a lost
@@ -467,8 +467,8 @@ def check_toc_headings_match(doc_data: dict, toc_entries: list[dict], unparsed: 
 
     extra = [
         {"text": h["text"], "page": h["page"], "level": h["level"]}
-        for i, h in enumerate(headings)
-        if not h["used"] and not _below_toc(h, headings[:i], matched_numbers)
+        for h in headings
+        if not h["used"] and not _below_toc(h, matched_numbers)
     ]
     # A section number's dot depth is its level; an outline or TOC level
     # that differs from it is the error (both sides would otherwise agree).

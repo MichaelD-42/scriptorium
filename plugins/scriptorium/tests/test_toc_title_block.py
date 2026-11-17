@@ -170,3 +170,23 @@ def test_bold_sub_heading_is_one_level_below_the_heading_above(tmp_project):
     assert by_text["Plain bold label"]["type"] == "paragraph"
     check = _gate_on_page(doc, 5, elements)
     assert check["passed"], check["detail"]
+
+
+def test_gate_accepts_sub_headings_whose_parent_it_cannot_see():
+    gates = load_script("grade-output/scripts/gates.py", "gates_toc_title_block")
+    entries = [{"number": "1", "title": "Alpha", "page": 1, "level": 1}]
+
+    def heading(text, level, **extra):
+        return {"type": "heading", "level": level, "text": text, **extra}
+
+    doc_data = {"pages": {
+        1: {"page_number": 1, "elements": [
+            heading("1 Alpha", 1),
+            heading("1.1.1.1.1.1 Deep six", 6),
+            heading("Below the level-six heading", 6, sub_heading=True),
+        ]},
+        # Seeded from the TOC entry on page 1, below the deeper heading.
+        2: {"page_number": 2, "elements": [heading("Top of the next page", 2, sub_heading=True)]},
+    }}
+    check = gates.check_toc_headings_match(doc_data, entries)
+    assert check["passed"], check["detail"]

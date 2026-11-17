@@ -550,7 +550,7 @@ def detect_furniture(document, pdf_path: Path, body_pages: set[int] | None = Non
 def drop_furniture_toc_lines(document, toc_pages: list[int], unparsed: list[str], line_patterns: list[dict]) -> list[str]:
     """`unparsed` without the TOC-page lines that are furniture: the line's
     `furniture_key` is a line pattern's `masked`, and its top y lies within
-    that pattern's y range. A title-block field such as an issue number can
+    that pattern's y range. A title-block field such as a revision number can
     look like a lone section number; a real TOC line never repeats on most
     body pages."""
     ranges: dict[str, list[tuple[float, float]]] = {}
