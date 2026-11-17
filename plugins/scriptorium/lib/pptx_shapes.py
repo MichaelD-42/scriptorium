@@ -1,8 +1,16 @@
 """Shared pptx shape walk, used by both pptx-triage and pptx-extract so
 their view of a slide's pictures can never drift between them."""
 
-from pptx.enum.shapes import MSO_SHAPE_TYPE
+from pptx.enum.shapes import MSO_SHAPE_TYPE, PP_PLACEHOLDER
 from pptx.shapes.picture import Picture
+
+# Footer, slide-number and date placeholders are page furniture by
+# definition: never body content.
+FURNITURE_PLACEHOLDERS = {PP_PLACEHOLDER.FOOTER, PP_PLACEHOLDER.SLIDE_NUMBER, PP_PLACEHOLDER.DATE}
+
+
+def is_furniture_placeholder(shape) -> bool:
+    return shape.is_placeholder and shape.placeholder_format.type in FURNITURE_PLACEHOLDERS
 
 
 def iter_shapes(shapes):

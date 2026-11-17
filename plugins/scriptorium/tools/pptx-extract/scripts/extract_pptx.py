@@ -76,6 +76,9 @@ def extract_slide(slide, page_number: int, assets_dir: Path) -> tuple[list[dict]
             image_elements.append({"type": "image", "kind": "bitmap", "asset": f"assets/{out_name}", "caption": ""})
             continue
 
+        if pptx_shapes.is_furniture_placeholder(shape):
+            continue
+
         if shape.has_table:
             body_elements.append({"type": "table", "rows": table_rows(shape), "y": y})
             continue

@@ -32,8 +32,18 @@ prints the same JSON to stdout.
   "doc": "deck",
   "page_count": 8,
   "pages": [
-    {"page_number": 1, "tier": "text", "image_count": 0, "reason": "native slide content (pptx is digital-native, no OCR needed)"},
-    {"page_number": 6, "tier": "text", "image_count": 2, "reason": "native slide content (pptx is digital-native, no OCR needed)"}
+    {
+      "page_number": 1,
+      "tier": "text",
+      "image_count": 0,
+      "reason": "native slide content (pptx is digital-native, no OCR needed)"
+    },
+    {
+      "page_number": 6,
+      "tier": "text",
+      "image_count": 2,
+      "reason": "native slide content (pptx is digital-native, no OCR needed)"
+    }
   ],
   "loop_size": "tight"
 }
@@ -45,6 +55,11 @@ prints the same JSON to stdout.
 - `loop_size`: `tight` if any slide has an embedded picture or chart (grade
   it closely, expect a possible escalation to `vision`); `loose` if every
   slide is text/tables only.
+- `furniture`: the same shape `pdf-triage` writes, with one
+  `line_patterns` entry (`masked`, `page_count`) per footer, slide-number
+  or date placeholder line that has letters. `pptx-extract` skips these
+  placeholders; the patterns let `merge.py` strip them from a vision
+  transcription and `furniture_absent` catch them in the output.
 - No `body_size` field — pptx headings come from the slide's title
   placeholder, not a font-size ratio, so there's nothing to pass through to
   `pptx-extract`.

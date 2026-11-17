@@ -1,6 +1,8 @@
 """pptx-extract's text reading."""
 
+import pptx_shapes
 from pptx import Presentation
+from pptx.enum.shapes import PP_PLACEHOLDER
 from pptx.util import Inches
 
 from conftest import load_script
@@ -8,6 +10,7 @@ from conftest import load_script
 extract_pptx = load_script(
     "pptx-extract/scripts/extract_pptx.py", "extract_pptx_module"
 )
+pptx_triage = load_script("pptx-triage/scripts/triage.py", "pptx_triage_module")
 assemble = load_script("assemble-output/scripts/assemble.py", "assemble_pptx_module")
 
 
@@ -74,3 +77,39 @@ class TestStrikethrough:
         ]}}})
         assert "<p>keep <del>&lt;b&gt;gone&lt;/b&gt;</del></p>" in html
         assert "<td><del>x</del></td>" in html
+
+
+class TestFurniturePlaceholders:
+    @staticmethod
+    def _slide_with_footer_placeholders():
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[1])
+        slide.shapes.title.text = "Title"
+        for ph in slide.slide_layout.placeholders:
+            if ph.placeholder_format.type in pptx_shapes.FURNITURE_PLACEHOLDERS:
+                slide.shapes.clone_placeholder(ph)
+        texts = {
+            PP_PLACEHOLDER.FOOTER: "Footer line",
+            PP_PLACEHOLDER.SLIDE_NUMBER: "7",
+            PP_PLACEHOLDER.DATE: "2001-01-01",
+        }
+        for sh in slide.placeholders:
+            if sh.placeholder_format.type in texts:
+                sh.text_frame.text = texts[sh.placeholder_format.type]
+        return prs, slide
+
+    def test_footer_placeholders_are_furniture(self, tmp_path):
+        _, slide = self._slide_with_footer_placeholders()
+        body, _ = extract_pptx.extract_slide(slide, 1, tmp_path)
+        assert [(el["type"], el["text"]) for el in body] == [("heading", "Title")]
+
+    def test_a_text_box_with_the_footer_text_is_kept(self, tmp_path):
+        _, slide = self._slide_with_footer_placeholders()
+        slide.shapes.add_textbox(0, Inches(7), Inches(4), Inches(0.4)).text_frame.text = "Footer line"
+        body, _ = extract_pptx.extract_slide(slide, 1, tmp_path)
+        assert "Footer line" in _texts(body)
+
+    def test_triage_records_footer_text_as_furniture(self):
+        prs, _ = self._slide_with_footer_placeholders()
+        furniture = pptx_triage.footer_furniture(prs)
+        assert [p["masked"] for p in furniture["line_patterns"]] == ["Footerline"]

@@ -24,6 +24,8 @@ produced for a slide. It only ever writes **its own** shard files.
 - The **title placeholder** becomes a `heading` (level 1). There's no
   font-size ratio classification like `extract-text` uses (pptx headings
   are structural — a title placeholder — not inferred from size).
+- **Footer, slide-number and date placeholders** are page furniture and
+  are skipped (a date field's cached text is the last-save date anyway).
 - Every other text-bearing shape's paragraphs become `paragraph` elements,
   one per non-empty paragraph. Struck-through runs (`strike="sngStrike"` or
   `"dblStrike"`) are wrapped in Markdown `~~...~~`, in table cells too; the

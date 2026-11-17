@@ -9,11 +9,33 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+import furniture as furniture_lib  # noqa: E402
 import paths  # noqa: E402
 import pptx_shapes  # noqa: E402
 import preflight  # noqa: E402
 
 from pptx import Presentation
+
+
+def footer_furniture(presentation) -> dict:
+    """`furniture` with one `line_patterns` entry per footer, slide-number or
+    date placeholder line that has letters. pptx-extract never emits these
+    placeholders; the patterns let merge.py and gates.py's
+    furniture_absent catch them in a vision transcription. A digit-only
+    line (a slide number, a numeric date) is left out: with no page
+    geometry it would match any bare number in the body."""
+    pages: dict[str, set[int]] = {}
+    for n, slide in enumerate(presentation.slides, start=1):
+        for shape in slide.placeholders:
+            if pptx_shapes.is_furniture_placeholder(shape) and shape.has_text_frame:
+                for para in shape.text_frame.paragraphs:
+                    key = furniture_lib.furniture_key(para.text)
+                    if key and not furniture_lib.is_digit_only_pattern(key):
+                        pages.setdefault(key, set()).add(n)
+    return {
+        **furniture_lib.empty_furniture(),
+        "line_patterns": [{"masked": key, "page_count": len(found)} for key, found in sorted(pages.items())],
+    }
 
 
 def slide_has_visual(slide) -> bool:
@@ -54,6 +76,7 @@ def main() -> None:
         "page_count": len(pages),
         "pages": pages,
         "loop_size": loop_size,
+        "furniture": footer_furniture(presentation),
     }
 
     out_path = paths.triage_json(args.doc)
