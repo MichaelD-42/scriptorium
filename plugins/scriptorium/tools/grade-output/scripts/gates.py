@@ -11,6 +11,7 @@ import math
 import re
 import sys
 import zipfile
+from collections import Counter
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -505,11 +506,11 @@ def check_figures_complete(doc_data: dict, input_format: str | None = None) -> d
     return {"name": "figures_complete", "passed": not incomplete, "detail": detail, "pages": pages, "incomplete": incomplete}
 
 
-def _words(text: str) -> set[str]:
-    return set(_COVERAGE_WORD.findall(text.lower()))
+def _words(text: str) -> Counter:
+    return Counter(_COVERAGE_WORD.findall(text.lower()))
 
 
-def _element_words(el: dict) -> set[str]:
+def _element_words(el: dict) -> Counter:
     """Words of the text an element carries from the page: its text,
     caption, figure_text and table cells -- never the agent's description."""
     parts = [el.get("text") or "", el.get("caption") or "", el.get("figure_text") or ""]
@@ -517,31 +518,42 @@ def _element_words(el: dict) -> set[str]:
     return _words(" ".join(parts))
 
 
-def check_text_layer_coverage(doc_data: dict, source_words: dict[int, set[str]]) -> dict:
+def check_text_layer_coverage(doc_data: dict, source_words: dict[int, Counter]) -> dict:
     """Dropped text on a `text`-tier page, checked against the page's own
     text layer (`source_words`, from `pdf_text_layer_words`) instead of by
-    eye. The neighbouring pages count too: a page-break join moves the
-    start of page n+1 onto page n."""
+    eye. Words are counted per page, so a word lost on the page is missing
+    even when it also occurs nearby. A page-break join moves the start of
+    page n+1 onto page n: an element's words count for every page in its
+    `pages` (a joined table's repeated header is in no output of its own),
+    and a neighbouring page's surplus (its output words beyond its own
+    text layer) counts too."""
     pages = doc_data["pages"]
-    page_words = {
-        n: set().union(*(_element_words(el) for el in page.get("elements", []))) for n, page in pages.items()
-    }
+    page_words = {n: Counter() for n in pages}
+    for n, page in pages.items():
+        for el in page.get("elements", []):
+            words = _element_words(el)
+            for m in {n, *el.get("pages", [])}:
+                page_words.setdefault(m, Counter()).update(words)
+
+    def surplus(m: int) -> Counter:
+        return page_words.get(m, Counter()) - Counter(source_words.get(m) or ())
+
     failing, details = [], []
     for n, page in sorted(pages.items()):
-        src = source_words.get(n)
+        src = Counter(source_words.get(n) or ())
         if page.get("tier") != "text" or page.get("skipped") or not src:
             continue
-        out = page_words.get(n - 1, set()) | page_words[n] | page_words.get(n + 1, set())
-        missing = sorted(src - out)
-        if len(missing) >= COVERAGE_MIN_MISSING and len(missing) / len(src) >= COVERAGE_MAX_MISSING_FRACTION:
+        missing = src - page_words[n] - surplus(n - 1) - surplus(n + 1)
+        count, total = sum(missing.values()), sum(src.values())
+        if count >= COVERAGE_MIN_MISSING and count / total >= COVERAGE_MAX_MISSING_FRACTION:
             failing.append(n)
-            details.append(f"page {n}: {len(missing)} of {len(src)} text-layer words missing, e.g. {', '.join(missing[:8])}")
+            details.append(f"page {n}: {count} of {total} text-layer words missing, e.g. {', '.join(sorted(missing)[:8])}")
     detail = "; ".join(details) if details else "every text-tier page's text-layer words are in the output"
     return {"name": "text_layer_coverage", "passed": not failing, "detail": detail, "pages": failing}
 
 
-def pdf_text_layer_words(input_path: Path, furniture: dict) -> dict[int, set[str]]:
-    """{page: words} of each PDF page's horizontal text lines outside the
+def pdf_text_layer_words(input_path: Path, furniture: dict) -> dict[int, Counter]:
+    """{page: word counts} of each PDF page's horizontal text lines outside the
     furniture bands and side margins, line-end hyphens joined the way
     extraction joins them."""
     import fitz  # PyMuPDF
