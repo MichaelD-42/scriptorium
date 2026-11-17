@@ -572,7 +572,9 @@ def _off_grid_item_bbox(item, xs: list[float], ys: list[float], table_bbox, tole
     """The bbox of one path item when it is NOT on the table's cell
     boundaries (`xs`, `ys`, within `tolerance`), else None. An
     axis-aligned line is on them when it lies on a boundary y (horizontal)
-    or x (vertical); a rect when all four edges do; a small curve at a
+    or x (vertical); a rect, clipped to the table bbox, when all four
+    edges do (a fill overshooting the table edge is shading, a rule
+    outside it is border); a small curve at a
     table corner is a rounded corner (`_is_corner_arc`). Anything else (a
     diagonal, a curve, a bar) is off the grid."""
     op = item[0]
@@ -584,7 +586,9 @@ def _off_grid_item_bbox(item, xs: list[float], ys: list[float], table_bbox, tole
             return None
         return [min(p1.x, p2.x), min(p1.y, p2.y), max(p1.x, p2.x), max(p1.y, p2.y)]
     if op == "re" or (op == "qu" and item[1].is_rectangular):
-        r = item[1] if op == "re" else item[1].rect
+        r = (item[1] if op == "re" else item[1].rect) & fitz.Rect(table_bbox)
+        if r.is_empty:
+            return None
         on_grid = (
             _near_any(r.x0, xs, tolerance) and _near_any(r.x1, xs, tolerance)
             and _near_any(r.y0, ys, tolerance) and _near_any(r.y1, ys, tolerance)
@@ -607,8 +611,8 @@ def _has_data_series(
 ) -> bool:
     """Re-review 2 I1, rule (a): True when one drawing of `drawings` has
     path items off the table's cell boundaries (`_off_grid_item_bbox`),
-    and their union reaches into the table but does not stay inside one
-    cell. A data series crosses cells; a check mark, a cross or a diagonal
+    and their union (each item clipped to the table bbox) reaches into the
+    table but does not stay inside one cell. A data series crosses cells; a check mark, a cross or a diagonal
     "n/a" stroke stays inside its cell."""
     cells = table.get("cells") or []
     if not cells:
@@ -618,9 +622,11 @@ def _has_data_series(
     table_bbox = table["bbox"]
     for d in drawings:
         off = [
-            b for b in (_off_grid_item_bbox(item, xs, ys, table_bbox, tolerance) for item in d.get("items", []))
+            [max(b[0], table_bbox[0]), max(b[1], table_bbox[1]), min(b[2], table_bbox[2]), min(b[3], table_bbox[3])]
+            for b in (_off_grid_item_bbox(item, xs, ys, table_bbox, tolerance) for item in d.get("items", []))
             if b is not None
         ]
+        off = [b for b in off if b[0] <= b[2] and b[1] <= b[3]]
         if not off:
             continue
         union = _union_bbox(off)

@@ -50,7 +50,9 @@ Handles both image kinds a PDF can contain:
   - it overlaps a real (non-frame) table's bbox — unless every overlapping
     table is a grid table (follow-up R11, re-review 2: the cluster has a
     data series, a drawing off the table's cell boundaries that does not
-    stay inside one cell; or at most 10% of the table's cells hold text.
+    stay inside one cell, each part clipped to the table bbox first, so a
+    fill or rule overhanging the table edge is no series; or at most 10%
+    of the table's cells hold text.
     A spanned cell's positions are not empty cells). Then the cluster is a
     figure, the table is recorded as `grid_table` with its `filled_cells`,
     and `extract-text` emits no table for it. A
