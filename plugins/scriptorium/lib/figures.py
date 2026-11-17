@@ -76,7 +76,8 @@ Detection pipeline, per page:
    off) and `figure_text` (missing the labels entirely).
 3. Each padded candidate is dropped if it:
    - is "tiny" -- smaller than `MIN_CLUSTER_AREA_FRACTION` of the page
-     area, almost certainly a stray rule/line rather than a real figure;
+     area, almost certainly a stray rule/line rather than a real figure,
+     unless it is curve-dense with no text inside (STROKE_GRAPHIC_MIN_CURVES);
    - is a "text_box" (fix wave I1) -- its drawings form exactly one
      axis-aligned rectangle (one `re` item, or at most
      `TEXT_BOX_MAX_LINE_ITEMS` axis-aligned lines, no curves) and at least
@@ -165,6 +166,11 @@ REGION_PADDING = 10.0
 # ~4.5% of its page; a single short stray line is two to three orders of
 # magnitude smaller).
 MIN_CLUSTER_AREA_FRACTION = 0.01
+
+# A cluster under that size is still a figure when its drawings hold at
+# least this many curve items and no text line lies inside it: hand-drawn
+# strokes (a signature), not a stray rule or a bullet.
+STROKE_GRAPHIC_MIN_CURVES = 20
 
 # Overlap-ratio thresholds (see _overlap_ratio) for "this candidate region
 # is basically on top of a real table" and "this text line is basically
@@ -809,6 +815,13 @@ def _is_text_box(cluster_rect, drawings: list[dict], page_lines: list[dict]) -> 
     return any(line_in_region(line["bbox"], raw_bbox) for line in page_lines)
 
 
+def _is_stroke_graphic(cluster_rect, drawings: list[dict], page_lines: list[dict]) -> bool:
+    """See STROKE_GRAPHIC_MIN_CURVES."""
+    curves = sum(1 for d in _drawings_in_cluster(cluster_rect, drawings) for item in d.get("items", []) if item[0] == "c")
+    raw_bbox = [cluster_rect.x0, cluster_rect.y0, cluster_rect.x1, cluster_rect.y1]
+    return curves >= STROKE_GRAPHIC_MIN_CURVES and not any(line_in_region(line["bbox"], raw_bbox) for line in page_lines)
+
+
 def _boxes_adjacent(a, b, max_gap: float = BOX_GROUP_MAX_GAP) -> bool:
     """True when bboxes `a` and `b` are at most `max_gap` apart on one axis
     and overlap on the other (see BOX_GROUP_MAX_GAP)."""
@@ -994,7 +1007,7 @@ def detect_figure_regions_with_exclusions(
             continue
         bbox = padded(raw)
         area = max(0.0, bbox[2] - bbox[0]) * max(0.0, bbox[3] - bbox[1])
-        if area / page_area < MIN_CLUSTER_AREA_FRACTION:
+        if area / page_area < MIN_CLUSTER_AREA_FRACTION and not _is_stroke_graphic(rect, significant, page_lines):
             excluded_regions.append({"bbox": bbox, "reason": "tiny"})
             continue
         if _is_text_box(rect, significant, page_lines):
@@ -1385,9 +1398,12 @@ def furniture_graphics(
     return sorted(graphics, key=lambda g: (g[1], g[0]))
 
 
-def bitmap_bboxes(page, furniture_xrefs: set[int] | None = None) -> list[list[float]]:
+def bitmap_bboxes(
+    page, furniture_xrefs: set[int] | None = None, content_rect: list[float] | None = None
+) -> list[list[float]]:
     """Placement bbox for every bitmap XObject on `page`, skipping any xref
-    in `furniture_xrefs` (a repeated logo, etc.) -- the same universe
+    in `furniture_xrefs` (a repeated logo, etc.), plus `unlisted_bitmaps`
+    (with `content_rect` for its band test) -- the same universe
     extract_images.py's own extract_bitmaps() turns into `image` elements,
     factored out here (bbox only, no image bytes) so extract_text.py can
     compute the same set independently to find + exclude each bitmap's
@@ -1402,7 +1418,33 @@ def bitmap_bboxes(page, furniture_xrefs: set[int] | None = None) -> list[list[fl
             bboxes.append(list(page.get_image_bbox(img)))
         except Exception:
             continue
-    return bboxes
+    return bboxes + [b["bbox"] for b in unlisted_bitmaps(page, furniture_xrefs, content_rect)]
+
+
+def unlisted_bitmaps(
+    page, furniture_xrefs: set[int] | None = None, content_rect: list[float] | None = None
+) -> list[dict]:
+    """Bitmaps drawn on `page` that no placement of its image list covers
+    (an inline image, or one inside a form XObject that the list misses):
+    `{"bbox", "xref"}` per placement, `xref` 0 for an inline image. A
+    furniture xref, or a bitmap in the furniture band (an inline header
+    logo has no xref to match), is left out."""
+    furniture_xrefs = furniture_xrefs or set()
+    placed = []
+    for img in page.get_images(full=True):
+        try:
+            placed += [list(r) for r in page.get_image_rects(img[0])]
+        except Exception:
+            continue
+    found = []
+    for info in page.get_image_info(xrefs=True):
+        bbox = list(info["bbox"])
+        if info.get("xref") in furniture_xrefs or any(furniture_lib.bbox_matches(bbox, p) for p in placed):
+            continue
+        if furniture_lib.in_furniture_band(bbox, page.rect.height, content_rect):
+            continue
+        found.append({"bbox": bbox, "xref": info.get("xref", 0)})
+    return found
 
 
 def figure_text_for_region(page, region_bbox) -> str | None:

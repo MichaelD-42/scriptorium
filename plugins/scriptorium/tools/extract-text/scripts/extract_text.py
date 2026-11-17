@@ -1410,7 +1410,7 @@ def main() -> None:
         # A matched line's bbox is excluded from paragraph/heading
         # extraction below, since its text is now script-authoritative on
         # the matching image element's `caption` field instead.
-        image_bboxes = [r["bbox"] for r in figure_regions] + figures_lib.bitmap_bboxes(page, furniture_xrefs)
+        image_bboxes = [r["bbox"] for r in figure_regions] + figures_lib.bitmap_bboxes(page, furniture_xrefs, content_rect)
         # Follow-up R17: a caption joined from two lines (figures'
         # _join_split_captions) excludes both of its source lines.
         caption_bboxes = {

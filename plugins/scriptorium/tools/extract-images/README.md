@@ -4,6 +4,9 @@ Handles both image kinds a PDF can contain:
 
 - **Bitmaps**: images embedded via `/Image` XObjects (photos, scanned
   figures, logos) — extracted directly from the PDF at native resolution.
+  A bitmap the page's image list misses (an inline image, or one inside a
+  form XObject; `lib/figures.py`'s `unlisted_bitmaps`) is found from the
+  page's image placements, unless it lies in the furniture band.
 - **Vector graphics**: diagrams/charts drawn with PDF path operators
   (lines, curves, fills) rather than embedded as an image. These have no
   extractable "image" to pull out, so this tool clusters a page's vector
@@ -62,7 +65,9 @@ Handles both image kinds a PDF can contain:
     do not exclude it either: they are part of a large drawing (a legend,
     labels on background boxes), recorded as `table_in_figure`, and
     `extract-text` emits no table for them; or
-  - it's too small to be more than a stray line.
+  - it's too small to be more than a stray line (under 1% of the page),
+    unless its drawings hold 20 or more curves and no text line lies
+    inside it: hand-drawn strokes such as a signature.
 
   This is what catches a diagram or chart sitting on an otherwise
   text-heavy page — the old whole-page rule (gated on the page having
