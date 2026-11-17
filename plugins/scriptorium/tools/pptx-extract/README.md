@@ -59,12 +59,16 @@ produced for a slide. It only ever writes **its own** shard files.
   one stream on it.
 - **Hidden shapes** (`cNvPr hidden="1"`), and every member of a hidden
   group, are skipped.
-- **Charts** (`shape.has_chart`) are not extracted as images in this
-  version — pptx-triage flags a slide with a chart as `loop_size: "tight"`
-  so the grader looks closely, but rendering a chart to a picture asset
-  isn't implemented yet. If a grade fails on a chart-bearing slide with
-  `missing_image`, that's the known gap — the fix is a chart-to-image
-  export path, not a captioning fix.
+- **Embedded objects, charts and SmartArt** (a `graphicFrame` whose
+  `a:graphicData` uri ends in `/ole`, `/chart` or `/diagram`) become a
+  slide-PDF crop at the frame's bbox: exactly what the slide prints,
+  with no EMF decoding. A frame thinner or shorter than 0.1% of the slide
+  (an add-in helper stub) is skipped. An embedded Excel worksheet
+  (`progId` `Excel.Sheet.*`) whose workbook names an `oleSize` range
+  becomes a `table` element instead (with `source_shape_id`): the active
+  sheet's cells in that range only, without hidden rows, hidden columns
+  and empty rows. Cells outside `oleSize` are never read: they are not on
+  the slide. Values are the cached results (`data_only`), unformatted.
 
 ## Output
 

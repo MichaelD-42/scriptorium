@@ -6,7 +6,9 @@ import argparse
 import functools
 import io
 import sys
+import zipfile
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "render-pages" / "scripts"))
@@ -16,12 +18,15 @@ import pptx_shapes  # noqa: E402
 import render  # noqa: E402
 import render_region  # noqa: E402
 
+import openpyxl
+from openpyxl.utils.cell import range_boundaries
 from PIL import Image
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.oxml.ns import qn
 
 STRIKE_VALUES = {"sngStrike", "dblStrike"}
+SPREADSHEET_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 # Picture formats PIL cannot decode everywhere: cropped from the slide PDF.
 VECTOR_IMAGE_EXTS = {"emf", "wmf"}
 CROP_DPI = 200
@@ -86,6 +91,42 @@ def table_rows(shape) -> list[list[str]]:
     ]
 
 
+def ole_worksheet_rows(shape) -> list[list[str]] | None:
+    """The cells an embedded Excel worksheet shows on the slide: the active
+    sheet's `oleSize` range (xl/workbook.xml), without hidden rows, hidden
+    columns and empty rows. Never reads a cell outside `oleSize`: the rest
+    of the sheet is not on the slide, and often holds data the author chose
+    not to show. None when the object is not an xlsx workbook or names no
+    `oleSize`; the caller then crops the frame from the slide PDF."""
+    ole = shape.ole_format
+    if not (ole.prog_id or "").startswith("Excel.Sheet"):
+        return None
+    try:
+        blob = ole.blob
+        with zipfile.ZipFile(io.BytesIO(blob)) as package:
+            ole_size = ET.fromstring(package.read("xl/workbook.xml")).find(f"{{{SPREADSHEET_NS}}}oleSize")
+        if ole_size is None:
+            return None
+        min_col, min_row, max_col, max_row = range_boundaries(ole_size.get("ref") or "")
+        if None in (min_col, min_row, max_col, max_row):
+            return None
+        sheet = openpyxl.load_workbook(io.BytesIO(blob), data_only=True).active
+    except (zipfile.BadZipFile, KeyError, ValueError, TypeError, ET.ParseError):
+        return None
+    hidden_cols = {
+        c for dim in sheet.column_dimensions.values() if dim.hidden and dim.min for c in range(dim.min, dim.max + 1)
+    }
+    cols = [c for c in range(min_col, max_col + 1) if c not in hidden_cols]
+    rows = []
+    for r in range(min_row, max_row + 1):
+        if sheet.row_dimensions[r].hidden:
+            continue
+        row = ["" if (value := sheet.cell(r, c).value) is None else str(value) for c in cols]
+        if any(row):
+            rows.append(row)
+    return rows or None
+
+
 def pt(emu: float) -> float:
     return round(emu / pptx_shapes.EMU_PER_PT, 1)
 
@@ -136,8 +177,19 @@ def extract_slide(slide, page_number: int, assets_dir: Path, slide_pdf=None) -> 
         add_image(shape, bbox, out.name, "vector")
 
     for shape in visible_shapes(slide.shapes):
-        bbox = [pt(v) for v in pptx_shapes.abs_bbox(shape)]
+        bbox_emu = pptx_shapes.abs_bbox(shape)
+        bbox = [pt(v) for v in bbox_emu]
         top = bbox[1]
+
+        if frame_kind := pptx_shapes.frame_kind(shape):
+            if pptx_shapes.is_degenerate(bbox_emu, slide):
+                continue
+            rows = ole_worksheet_rows(shape) if frame_kind == "ole" else None
+            if rows:
+                body_elements.append({"type": "table", "rows": rows, "top": top, "source_shape_id": shape.shape_id})
+            else:
+                add_slide_crop(shape, bbox)
+            continue
 
         if pptx_shapes.is_picture(shape):
             crop = (shape.crop_left, shape.crop_top, shape.crop_right, shape.crop_bottom)

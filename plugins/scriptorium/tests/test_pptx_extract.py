@@ -1,11 +1,15 @@
 """pptx-extract's slide reading."""
 
 import io
+import zipfile
 
 import fitz  # PyMuPDF
+import openpyxl
 import pptx_shapes
 from PIL import Image
 from pptx import Presentation
+from pptx.chart.data import CategoryChartData
+from pptx.enum.chart import XL_CHART_TYPE
 from pptx.enum.shapes import PP_PLACEHOLDER
 from pptx.util import Inches
 
@@ -178,6 +182,76 @@ class TestPictureCrop:
         slide = _blank_slide()
         slide.shapes.add_picture(_png(40, 40), Inches(1), Inches(1), Inches(2), Inches(1))
         assert extract_pptx.extract_slide(slide, 1, tmp_path)[1] == []
+
+
+def _workbook(rows, ole_size=None, hidden_row=None):
+    """An xlsx blob; `ole_size` adds the <oleSize ref> PowerPoint writes
+    (openpyxl does not), `hidden_row` hides that 1-based row."""
+    wb = openpyxl.Workbook()
+    for row in rows:
+        wb.active.append(row)
+    if hidden_row:
+        wb.active.row_dimensions[hidden_row].hidden = True
+    raw = io.BytesIO()
+    wb.save(raw)
+    if ole_size is None:
+        raw.seek(0)
+        return raw
+    out = io.BytesIO()
+    with zipfile.ZipFile(raw) as src, zipfile.ZipFile(out, "w") as dst:
+        for item in src.infolist():
+            data = src.read(item.filename)
+            if item.filename == "xl/workbook.xml":
+                data = data.replace(b"</workbook>", f'<oleSize ref="{ole_size}"/></workbook>'.encode())
+            dst.writestr(item, data)
+    out.seek(0)
+    return out
+
+
+def _add_worksheet(slide, blob, width=Inches(4), height=Inches(2)):
+    return slide.shapes.add_ole_object(blob, "Excel.Sheet.12", Inches(1), Inches(1), width, height,
+                                       icon_file=_png(400, 200))
+
+
+def _add_chart(slide):
+    data = CategoryChartData()
+    data.categories = ["a", "b"]
+    data.add_series("s", (1, 2))
+    return slide.shapes.add_chart(XL_CHART_TYPE.PIE, Inches(1), Inches(1), Inches(3), Inches(2), data)
+
+
+class TestEmbeddedObjects:
+    def test_an_embedded_worksheet_becomes_an_element(self, tmp_path):
+        slide = _blank_slide()
+        frame = _add_worksheet(slide, _workbook([["Head A", "Head B"], ["r1a", "r1b"], ["r2a", "r2b"]]))
+        body, images = extract_pptx.extract_slide(slide, 1, tmp_path, _slide_pdf(tmp_path, slide))
+        assert body == []  # no oleSize: the slide crop, not a table
+        assert [(el["kind"], el["source_shape_id"]) for el in images] == [("vector", frame.shape_id)]
+        assert images[0]["bbox"] == [72.0, 72.0, 360.0, 216.0]
+        assert _asset_size(tmp_path, images[0]) == (800, 400)  # 4 x 2 in at 200 dpi
+
+    def test_a_worksheet_with_ole_size_becomes_a_table_of_what_the_slide_shows(self, tmp_path):
+        slide = _blank_slide()
+        rows = [["Head A", "Head B", "secret"], ["r1a", "r1b", "x"], ["r2a", "r2b", "x"], ["r3a", "r3b", "x"]]
+        frame = _add_worksheet(slide, _workbook(rows, ole_size="A1:B3", hidden_row=2))
+        body, images = extract_pptx.extract_slide(slide, 1, tmp_path)
+        assert images == []
+        assert body[0]["rows"] == [["Head A", "Head B"], ["r2a", "r2b"]]
+        assert body[0]["source_shape_id"] == frame.shape_id
+
+    def test_a_chart_is_cropped_from_the_slide_pdf(self, tmp_path):
+        slide = _blank_slide()
+        frame = _add_chart(slide)
+        _, images = extract_pptx.extract_slide(slide, 1, tmp_path, _slide_pdf(tmp_path, slide))
+        assert [el["source_shape_id"] for el in images] == [frame.shape_id]
+
+    def test_a_hidden_or_degenerate_embedded_object_has_no_element(self, tmp_path):
+        slide = _blank_slide()
+        hidden = _add_worksheet(slide, _workbook([["a"]]))
+        hidden._element.nvGraphicFramePr.cNvPr.set("hidden", "1")
+        _add_worksheet(slide, _workbook([["a"]]), width=1587, height=1587)
+        body, images = extract_pptx.extract_slide(slide, 1, tmp_path, _slide_pdf(tmp_path, slide))
+        assert body == [] and images == []
 
 
 class TestFurniturePlaceholders:

@@ -40,6 +40,27 @@ def is_hidden(shape) -> bool:
     return c_nv_pr is not None and c_nv_pr.get("hidden") in ("1", "true")
 
 
+# A graphicFrame whose graphicData uri ends in one of these holds a figure:
+# an embedded OLE object, a chart, or SmartArt (a plain table is "/table").
+FIGURE_FRAME_KINDS = ("ole", "chart", "diagram")
+# A shape narrower or shorter than this fraction of the slide is a helper
+# (e.g. add-in OLE stubs), not something the slide shows.
+DEGENERATE_FRACTION = 0.001
+
+
+def frame_kind(shape) -> str | None:
+    """"ole", "chart" or "diagram" for a figure graphicFrame, else None."""
+    data = shape._element.find(f".//{qn('a:graphicData')}") if shape._element.tag == qn("p:graphicFrame") else None
+    kind = (data.get("uri") or "").rsplit("/", 1)[-1] if data is not None else ""
+    return kind if kind in FIGURE_FRAME_KINDS else None
+
+
+def is_degenerate(bbox, slide) -> bool:
+    """`bbox` (slide EMU) is too thin or too short to show anything."""
+    width, height = slide_size(slide)
+    return bbox[2] - bbox[0] < DEGENERATE_FRACTION * width or bbox[3] - bbox[1] < DEGENERATE_FRACTION * height
+
+
 def slide_size(slide) -> tuple[int, int]:
     """(width, height) of the slide in EMU."""
     presentation = slide.part.package.presentation_part.presentation
