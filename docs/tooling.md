@@ -155,7 +155,9 @@ runs/state.json                                     per-document queue state
   and `image`, `page_count` is always `1` — neither has a page concept at
   all, not even docx's Heading-1 split. PDF triage also detects page
   furniture (`furniture`: `line_patterns`, `frame_tables`, `frame_drawings`,
-  `repeated_drawings`, `image_xrefs`) and its verbatim text (`furniture_text`), and marks any
+  `repeated_drawings`, `image_xrefs`, `content_rect`, and `header_limit` /
+  `footer_limit` for a running header or footer box deeper than the 12%
+  band) and its verbatim text (`furniture_text`), and marks any
   detected printed-TOC page `"role": "toc"` in its `pages[]` entry — see
   `pdf-triage/README.md`.
 - **`toc.json`** (pdf only) — `entries[]`, each `{number, title, page,

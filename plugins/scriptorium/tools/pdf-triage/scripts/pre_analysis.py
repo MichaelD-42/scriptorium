@@ -110,7 +110,7 @@ def analyze(
     data_table_pages = []
     for n in text_pages:
         page = document[n - 1]
-        rect = furniture_lib.page_content_rect(
+        rect = furniture_lib.page_table_rect(
             furniture, page.rect.width, page.rect.height
         )
         tables = figures_lib.page_tables(

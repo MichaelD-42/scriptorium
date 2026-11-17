@@ -114,7 +114,7 @@ def merge_shards(
     heights in points) are optional. With them, an `ocr`/`vision` body
     loses its furniture lines (`remove_furniture_lines`), and the page
     records `furniture_lines_removed` when that count is above zero.
-    `page_widths` (optional) lets `furniture.page_content_rect` test the
+    `page_widths` (optional) lets `furniture.page_band_rect` test the
     page width too."""
     all_patterns = {p["masked"] for p in (furniture or {}).get("line_patterns", [])}
     page_heights = page_heights or {}
@@ -152,7 +152,7 @@ def merge_shards(
             if all_patterns and body_tier in UNFILTERED_BODY_TIERS:
                 body_elements, furniture_removed = remove_furniture_lines(
                     body_elements, all_patterns, page_heights.get(n),
-                    furniture_lib.page_content_rect(furniture, page_widths.get(n), page_heights.get(n)),
+                    furniture_lib.page_band_rect(furniture, page_widths.get(n), page_heights.get(n)),
                 )
             combined = body_elements + image_elements
             # An ocr paragraph has no bbox, only its `top` (ocr.py).

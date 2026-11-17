@@ -334,7 +334,7 @@ def check_furniture_absent(
                 el_type = el.get("type")
                 patterns = furniture_lib.patterns_for_element(
                     all_patterns, el.get("bbox"), page_heights.get(page_number),
-                    furniture_lib.page_content_rect(
+                    furniture_lib.page_band_rect(
                         furniture, page_widths.get(page_number), page_heights.get(page_number)
                     ),
                 )
@@ -610,7 +610,7 @@ def pdf_text_layer_words(input_path: Path, furniture: dict) -> dict[int, set[str
     with fitz.open(input_path) as pdf:
         for n, page in enumerate(pdf, start=1):
             width, height = page.rect.width, page.rect.height
-            rect = furniture_lib.page_content_rect(furniture, width, height)
+            rect = furniture_lib.page_band_rect(furniture, width, height)
             lines = [
                 "".join(span["text"] for span in line["spans"])
                 for block in page.get_text("dict")["blocks"]

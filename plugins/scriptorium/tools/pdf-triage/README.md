@@ -240,12 +240,27 @@ no printed TOC found.
     merge filter and the gates all use it. Without a content rect the
     bands are the top and bottom 12% of the page.
   - `content_rect_page_size` (re-review 2 I2): `[width, height]` of the
-    most common body page size, the size `content_rect` was measured on,
-    or `null` with no content rect. `lib/furniture.py`'s
+    most common body page size, the size `content_rect` (or a header or
+    footer limit) was measured on, or `null` with none. `lib/furniture.py`'s
     `page_content_rect` gives a page the rect only when the page has this
     size (within 3 pt) and the rect fits inside it. A page of another size
     (a landscape page in a portrait document) has the 12% bands and its
     tables are not cropped to the rect.
+  - `header_limit` / `footer_limit` (present only when found, and only
+    without a content rect): the bottom of a running header box, or the
+    top of a footer box, that reaches past the 12% band. The
+    `repeated_drawings` that start in the band (a rule, a logo strip) seed
+    a union, which grows by every repeated drawing that overlaps it or
+    lies within 15 pt of it (a drawing taller than 30% of the page never
+    joins). The union counts when it is at least half the page wide and
+    ends within 30% of the page height from its edge; a thin rule under a
+    one-line header stays in the band and gives no limit. With a limit,
+    `lib/furniture.py`'s `page_band_rect` gives `band_limits` the rect
+    `[0, max(12%, header_limit), width, min(88%, footer_limit)]`, so a
+    header line is furniture when its center is above `header_limit`.
+    `page_table_rect` crops `figures.page_tables` to the page below
+    `header_limit` only, so a header cell never becomes a table and a
+    body table that runs into the bottom band keeps its rows.
 - `furniture_text`: the verbatim (unmasked) text of the matched furniture
   lines on the document's first page, top-to-bottom, newline-joined. `null`
   if no line furniture was detected.

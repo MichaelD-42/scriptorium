@@ -638,7 +638,7 @@ def document_list_marker_levels(
         if page_roles.get(page_number) == "toc":
             continue
         page_height = page.rect.height
-        content_rect = furniture_lib.page_content_rect(furniture, page.rect.width, page_height)
+        content_rect = furniture_lib.page_band_rect(furniture, page.rect.width, page_height)
         text_blocks, _ = extract_page_text_blocks(page, body_size)
         for block in text_blocks:
             kept_lines = furniture_filtered_lines(block, furniture_masked, page_height, content_rect)
@@ -1219,7 +1219,7 @@ def document_heading_size_ranks(
     sizes = set()
     for page in fitz_doc:
         page_height = page.rect.height
-        content_rect = furniture_lib.page_content_rect(furniture, page.rect.width, page_height)
+        content_rect = furniture_lib.page_band_rect(furniture, page.rect.width, page_height)
         text_blocks, _ = extract_page_text_blocks(page, body_size)
         for block in text_blocks:
             kept_lines = furniture_filtered_lines(block, furniture_masked, page_height, content_rect)
@@ -1469,6 +1469,7 @@ def main() -> None:
         page_height = page.rect.height
         # Re-review 2 I2: the content rect only on a page it was measured on.
         content_rect = furniture_lib.page_content_rect(furniture, page.rect.width, page_height)
+        band_rect = furniture_lib.page_band_rect(furniture, page.rect.width, page_height)
         text_blocks, body_size = extract_page_text_blocks(page, args.body_size)
         if toc_lookup:
             mark_underlined_lines(page, text_blocks)
@@ -1481,7 +1482,9 @@ def main() -> None:
         tables = [
             {"bbox": t["bbox"], "rows": t["rows"]}
             for t in figures_lib.page_tables(
-                pdf_path, page_number, frame_tables, content_rect, exclude_regions=figures_lib.bitmap_panels(page)
+                pdf_path, page_number, frame_tables,
+                furniture_lib.page_table_rect(furniture, page.rect.width, page_height),
+                exclude_regions=figures_lib.bitmap_panels(page),
             )
             if not figures_lib.is_layout_table(t)
         ]
@@ -1537,7 +1540,7 @@ def main() -> None:
                 kept_lines = table_filtered_lines(kept_lines, tables)
                 if not kept_lines:
                     continue
-            kept_lines = furniture_filtered_lines({**block, "lines": kept_lines}, furniture_masked, page_height, content_rect)
+            kept_lines = furniture_filtered_lines({**block, "lines": kept_lines}, furniture_masked, page_height, band_rect)
             kept_lines = figure_region_filtered_lines(kept_lines, figure_regions)
             kept_lines = caption_filtered_lines(kept_lines, caption_bboxes)
             if kept_lines:
