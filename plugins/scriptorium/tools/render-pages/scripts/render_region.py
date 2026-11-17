@@ -27,27 +27,43 @@ def zoom_png(doc: str, page_number: int, bbox: list[float]) -> Path:
     )
 
 
-def render_region(doc: str, page_number: int, bbox: list[float], dpi: int) -> Path:
-    pdf_path = paths.input_file(doc)
-    if pdf_path is None or paths.detect_input_format(doc) != "pdf":
-        raise FileNotFoundError(
-            f"no input/{doc}.pdf (render_region renders PDF pages only)"
-        )
+def crop_png(
+    pdf_path: Path, page_number: int, bbox: list[float], out: Path, dpi: int, margin: float = 0.0
+) -> Path | None:
+    """Render `bbox` (PDF points, plus `margin`) of one page to `out`. None
+    when the region lies outside the page."""
     with fitz.open(pdf_path) as pdf:
         page = pdf[page_number - 1]
         clip = (
-            fitz.Rect(
-                bbox[0] - REGION_MARGIN,
-                bbox[1] - REGION_MARGIN,
-                bbox[2] + REGION_MARGIN,
-                bbox[3] + REGION_MARGIN,
-            )
+            fitz.Rect(bbox[0] - margin, bbox[1] - margin, bbox[2] + margin, bbox[3] + margin)
             & page.rect
         )
+        if clip.is_empty:
+            return None
         pixmap = page.get_pixmap(clip=clip, dpi=dpi)
-        out = zoom_png(doc, page_number, bbox)
         out.parent.mkdir(parents=True, exist_ok=True)
         pixmap.save(str(out))
+    return out
+
+
+def source_pdf(doc: str) -> Path:
+    """The PDF whose pages the document's bboxes refer to: the input PDF, or
+    for a pptx the slide PDF render.py caches at work/<doc>/<doc>.pdf."""
+    input_format = paths.detect_input_format(doc)
+    if input_format == "pdf":
+        return paths.input_file(doc)
+    if input_format == "pptx":
+        slide_pdf = paths.work_dir(doc) / f"{doc}.pdf"
+        if slide_pdf.exists():
+            return slide_pdf
+        raise FileNotFoundError(f"no {slide_pdf} -- run render-pages/scripts/render.py first")
+    raise FileNotFoundError(f"no input/{doc}.pdf or .pptx (render_region renders PDF and pptx pages only)")
+
+
+def render_region(doc: str, page_number: int, bbox: list[float], dpi: int) -> Path:
+    out = crop_png(source_pdf(doc), page_number, bbox, zoom_png(doc, page_number, bbox), dpi, REGION_MARGIN)
+    if out is None:
+        raise FileNotFoundError(f"bbox {bbox} lies outside page {page_number}")
     return out
 
 

@@ -23,26 +23,29 @@
 {% for page in pages %}
 {% for el in page.elements %}
 {% if el.type == "heading" %}
-<h{{ el.level }}>{{ el.text }}</h{{ el.level }}>
+<h{{ el.level }}>{{ el.text | strike }}</h{{ el.level }}>
 {% elif el.type == "paragraph" %}
-<p>{{ el.text }}</p>
+<p>{{ el.text | strike }}</p>
 {% elif el.type == "list_item" %}
 {% if not loop.previtem or loop.previtem.type != "list_item" %}<ul>{% endif %}
-  <li class="level-{{ el.level }}">{{ el.text }}</li>
+  <li class="level-{{ el.level }}">{{ el.text | strike }}</li>
 {% if not loop.nextitem or loop.nextitem.type != "list_item" %}</ul>{% endif %}
 {% elif el.type == "table" %}
 <table>
 {% for row in el.rows %}
-  <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
+  <tr>{% for cell in row %}<td>{{ cell | strike }}</td>{% endfor %}</tr>
 {% endfor %}
 </table>
 {% elif el.type == "image" %}
 <figure>
-  <img src="{{ el.asset }}" alt="{{ el.description or el.caption or '' }}">
-  {% if el.caption %}<figcaption>{{ el.caption }}</figcaption>{% endif %}
+  {% set agent_caption = el.caption if el.caption_source == "agent" else "" %}
+  {% set printed_caption = "" if agent_caption else el.caption %}
+  <img src="{{ el.asset }}" alt="{{ el.description or printed_caption or '' }}">
+  {% if printed_caption %}<figcaption>{{ printed_caption }}</figcaption>{% endif %}
   {% if el.figure_text %}<blockquote style="white-space: pre-line">{{ el.figure_text }}</blockquote>{% endif %}
-  {% if el.description or el.data_table or el.mermaid %}
+  {% if agent_caption or el.description or el.data_table or el.mermaid %}
   <!-- scriptorium:interpretation -->
+  {% if agent_caption %}<p>{{ agent_caption }}</p>{% endif %}
   {% if el.description %}<p>{{ el.description }}</p>{% endif %}
   {% if el.data_table %}
   <table>

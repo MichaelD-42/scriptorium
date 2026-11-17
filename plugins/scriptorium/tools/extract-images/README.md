@@ -132,8 +132,8 @@ extractor may replace such a `figure_text` with `describe_image.py
   — same "shared detection, no ordering dependency" pattern as
   `figure_text` above, so the two scripts can never disagree about which
   line is the caption. This only applies to PDF image elements — pptx/docx/
-  xlsx/html images have no text-layer/bbox convention to search and keep
-  `caption` agent-authored via `describe_image.py`'s `--caption` (below).
+  xlsx/html images have no text-layer/bbox convention to search, so their
+  `caption` stays empty.
 - If `work/<doc>/triage.json` has a `furniture` section (`pdf-triage`'s
   furniture detection), a bitmap whose xref is in `image_xrefs` (e.g. a logo
   repeated on every page) is skipped entirely — no `image` element is
@@ -186,10 +186,11 @@ extractor may replace such a `figure_text` with `describe_image.py
     faithfully reconstruct — validated the same way `mermaid_image.py`
     validates its own stdin-read source (must start with a recognized
     diagram keyword).
-  - `--caption` still exists as a backward-compatible alias — deprecated
-    and warned-about for a PDF element (whose `caption` `extract-images`
-    already set), but still the real way to set `caption` for a pptx/docx/
-    xlsx/html image element, which has no script-side caption detection.
+  - `--caption` still exists as a deprecated, warned-about alias. It
+    stores the text with `"caption_source": "agent"`: assemble renders such
+    a caption inside the interpretation markers, never as alt text, a
+    `<figcaption>` or a ReqIF LONG-NAME, and `text_mode_grade.py`'s
+    `bad_caption` ignores it.
   - `--figure-text` (optional, PDF vector-region elements only) lands a
     vision transcription — only used when the region's script-side
     `figure_text` (above) came back null/absent, i.e. the region had no
@@ -200,9 +201,8 @@ extractor may replace such a `figure_text` with `describe_image.py
   - `--no-visible-text` (Task A9 fix round 1) sets `"no_visible_text":
     true`: the agent checked the render and the image has no printed
     caption and no visible text. It is refused (exit 1) when the element
-    has a caption or figure_text, together with `--caption`/
-    `--figure-text`, or for a document that is not pdf or image (fix
-    round 2): for pptx/docx/xlsx/html the agent writes `--caption`. It is not rendered in the output; the description
+    has a caption or figure_text, or together with `--caption`/
+    `--figure-text`. It works for every input format. It is not rendered in the output; the description
     already renders inside the interpretation markers.
 
   `mermaid_image.py` (below) still exists standalone too, for a

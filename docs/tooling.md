@@ -29,7 +29,7 @@ step needs its detail.
 | `setup-environment` | `check_env.sh` / `check_env.ps1`, `ensure_language.py` | bootstrap `uv`/Python/`tesseract`/`soffice` (LibreOffice, for pptx rendering); detect and install the OCR language pack a document actually needs |
 | `queue-state` | `state.py`, `plan.py`, `report.py`, `findings.py` | orchestrator only. `state.py` owns `runs/state.json` (init, next, reject, set-lang, decide, summary) and applies the pass / retry / needs-human rules to `grade-report.json`; `plan.py` lists the pages to extract by script, then batches the pages that need an agent by estimated turns against each agent's `maxTurns`; `report.py` writes the end-of-run `output/report.html` (summary, durations, ccusage cost, grades per document); `findings.py` (with `--findings`) saves each page of a passed PDF that failed at a script tier and passed at `vision` as a suggested correction for the scripts |
 | `pdf-triage` | `triage.py`, `pre_analysis.py` | classify PDF pages into tiers + document loop size (`loose`/`tight`); preflight rejects unreadable input and starts garbled-text or stamped-scan pages at `ocr`; the pre-analysis records detection scopes and quirks (layout tables, headings sharing a block with their body, side-margin text, garbled text layer, text-layer language), each with the measure the scripts apply |
-| `pptx-triage` | `triage.py` | classify pptx slides (always tier `text`) + loop size (`tight` if any slide has a picture/chart) |
+| `pptx-triage` | `triage.py` | classify pptx slides (always tier `text`) + loop size (`tight` if any slide has a figure) + each slide's figure census (`figure_shapes`) |
 | `docx-triage` | `triage.py` | split a docx into logical pages (Heading-1 sections, via `lib/docx_pages.split_pages`) + loop size (`tight` if any page has a table/image); its `page_count` is the pipeline's own pagination, not an independent source-file property |
 | `xlsx-triage` | `triage.py` | classify workbook sheets (always tier `text`, one sheet = one page) + loop size (`tight` if any sheet has an image/chart); its `page_count` (`workbook.sheetnames`) **is** an independent source-file property, like pptx |
 | `html-triage` | `triage.py` | classify an HTML document as a single page (always tier `text`, `page_count` always `1` — HTML has no page concept at all) + loop size (`tight` if the page has a table or a saveable image) |
@@ -37,8 +37,8 @@ step needs its detail.
 | `render-pages` | `render.py`, `render_region.py` | page → PNG; `render_region.py` crops one element's bbox at high dpi for a closer look. PDF pages rasterize directly; pptx is converted to PDF via LibreOffice first, then rasterized the same way; a standalone image document is normalized straight to PNG (no dpi/zoom step). Not used for docx/xlsx/html (no rendered page — see `grade-output/text-rubric.md`) |
 | `extract-text` | `extract_text.py` | PDF Tier 1: PyMuPDF text + pdfplumber tables → a shard per page. Removes page furniture (running headers/footers, frame borders) and skips printed-TOC pages before extraction; classifies headings from `toc.json` when present (fallback: font-size ranking) with no level cap; recognizes bullet/enumerator lines as `list_item`; excludes figure-region and caption lines (landed on the matching `image` element instead) |
 | `ocr-page` | `ocr.py`, `write_vision_page.py` | PDF Tier 2: Tesseract (`--lang`-aware); Tier 3 (vision) is agent-native, landed via `write_vision_page.py`. pptx also lands its vision escalation through `write_vision_page.py`; docx/xlsx/html have no vision rung. image documents always start here (there's no Tier 1 for image — no text layer to check) |
-| `extract-images` | `extract_images.py`, `describe_image.py`, `mermaid_image.py` | PDF: bitmaps + region-level vector-graphic detection (`lib/figures.py`, shared with `extract-text`, frame-vs-figure disambiguated by furniture repetition, not size) → an independent shard per page, each dropped candidate recorded in `excluded_regions`; a standalone image document instead lands the whole file as page 1's one bitmap element. For a PDF/image element, `caption` is script-authoritative (a nearby "Figure n"/"Table n" text-layer line); the agent always writes `--description` via `describe_image.py` (renamed from the old `caption_image.py`), plus `--data-table`/`--mermaid`/`--figure-text` where they apply, and `--caption` only for pptx/docx/xlsx/html (no script-side detection there). `mermaid_image.py` lands a `mermaid` field standalone, same as `describe_image.py --mermaid` |
-| `pptx-extract` | `extract_pptx.py` | pptx Tier 1: title → heading, text frames → paragraphs, tables, pictures (own shard), speaker notes — body + image shards in one call |
+| `extract-images` | `extract_images.py`, `describe_image.py`, `mermaid_image.py` | PDF: bitmaps + region-level vector-graphic detection (`lib/figures.py`, shared with `extract-text`, frame-vs-figure disambiguated by furniture repetition, not size) → an independent shard per page, each dropped candidate recorded in `excluded_regions`; a standalone image document instead lands the whole file as page 1's one bitmap element. For a PDF/image element, `caption` is script-authoritative (a nearby "Figure n"/"Table n" text-layer line); the agent always writes `--description` via `describe_image.py` (renamed from the old `caption_image.py`), plus `--data-table`/`--mermaid`/`--figure-text` where they apply, or `--no-visible-text` (any format) for an image with no caption and no visible text. The deprecated `--caption` stores `caption_source: "agent"`, which assemble renders as interpretation, never as document text. `mermaid_image.py` lands a `mermaid` field standalone, same as `describe_image.py --mermaid` |
+| `pptx-extract` | `extract_pptx.py` | pptx Tier 1: title → heading, text frames → paragraphs (struck runs as `~~…~~`), tables, pictures (cropped as shown) and slide-PDF crops of embedded objects, charts, SmartArt and drawn groups (own shard), speaker notes; footer/slide-number/date placeholders and hidden shapes skipped — body + image shards in one call |
 | `docx-extract` | `extract_docx.py` | docx Tier 1: headings (clamped to level 1-3), paragraphs, tables, inline images — body + image shards in one call, using the same page split as `docx-triage` |
 | `xlsx-extract` | `extract_xlsx.py` | xlsx Tier 1: sheet name → heading, used range → one table element (full rectangle, blank interior rows kept), embedded images (own shard) — charts not extracted (no rendering engine) |
 | `html-extract` | `extract_html.py` | html Tier 1: `<h1>`-`<h6>` → headings (clamped to level 1-3), `<p>`/`<li>`/`<pre>`/`<blockquote>` → paragraphs, `<table>` → table, `<img>` (`data:` URI, or an image file inside the HTML file's own folder — remote sources and paths outside the folder skipped) → image — body + image shards in one call, single page always |
@@ -54,7 +54,7 @@ table cells, shared by `docx-triage` and `docx-extract` so segmentation
 can't drift between them), `html_pages.py` (HTML block iteration, text,
 table/heading parsing, and `data:`-URI/local-file image resolution, shared
 by `html-triage`, `html-extract`, and `text_mode_grade.py`'s html path),
-`pptx_shapes.py` (the slide shape walk, group members included, shared by
+`pptx_shapes.py` (slide geometry, the figure rules and the figure census, shared by
 `pptx-triage` and `pptx-extract`), `fonts.py` (the document's body text
 size, shared by `pdf-triage` and `extract-text`), `preflight.py`
 (triage's one-line rejection of an input the extract step cannot read),
@@ -116,10 +116,13 @@ work/<doc>/<doc>.pdf                                pptx only — LibreOffice co
 work/<doc>/pages/page{N}.png                        not present for docx/xlsx/html (no rendered page)
 work/<doc>/shards/page{N}.{text|ocr|vision}.json    one body shard per page (highest tier wins)
 work/<doc>/shards/page{N}.image.json                independent of body tier
-                                                     (each image element may carry `caption`,
-                                                     `figure_text`, `no_visible_text`, and
+                                                     (each image element may carry `caption`
+                                                     (`caption_source: "agent"` when an agent
+                                                     wrote it), `figure_text`, `no_visible_text`, and
                                                      agent-authored `description`/`data_table`/
-                                                     `mermaid`; also carries `excluded_regions`,
+                                                     `mermaid`; a pptx image or table also
+                                                     carries `source_shape_id`, the slide
+                                                     shape it came from; also carries `excluded_regions`,
                                                      the page's dropped figure-region candidates)
 work/<doc>/elements.json                            merge.py's output — the merged shards
 work/<doc>/triage.json                              pdf only: also carries `furniture`, `furniture_text` and `pre_analysis`
@@ -160,7 +163,10 @@ runs/env.json                                       check_env.sh's resolved tess
   `footer_limit` for a running header or footer box deeper than the 12%
   band) and its verbatim text (`furniture_text`), and marks any
   detected printed-TOC page `"role": "toc"` in its `pages[]` entry — see
-  `pdf-triage/README.md`.
+  `pdf-triage/README.md`. pptx triage writes each slide's figure census
+  (`pages[].figure_shapes`, `{shape_id, kind, bbox_emu, groups}`, with
+  `image_count` its length) and `furniture.line_patterns` from footer
+  placeholders — see `pptx-triage/README.md`.
 - **`toc.json`** (pdf only) — `entries[]`, each `{number, title, page,
   level}`, from `lib/toc.py`'s `detect_toc()`: the PDF's own outline if it
   has one, else a detected printed table of contents. `extract-text` reads
@@ -174,7 +180,8 @@ runs/env.json                                       check_env.sh's resolved tess
   refs, OCR confidence floor, output file exists) that run for every input
   format, plus `figures_complete`, `furniture_absent` and
   `toc_headings_match` (the last two only find something on PDFs, the one
-  format whose triage detects furniture and a TOC), each carrying its own
+  format whose triage detects furniture and a TOC), and for pptx
+  `pptx_figures_covered` (every census figure has an element), each carrying its own
   `pages` list and structured detail. Also a top-level `warnings` list
   (`large_region_excluded`, `orphan_figure_caption`, `table_as_figure`,
   `toc_unparsed_lines`) that

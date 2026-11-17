@@ -533,9 +533,8 @@ def check_figures_complete(doc_data: dict, input_format: str | None = None) -> d
     the render). The agent never writes a caption for such an image --
     `caption` is only the printed caption the script extracts.
 
-    Fix round 2: the flag counts only when `input_format` is in
-    NO_VISIBLE_TEXT_FORMATS (pdf, image). For pptx/docx/xlsx/html, or an
-    unknown format, the agent writes `--caption`, so the flag is ignored.
+    The flag counts for every input format; `input_format` is accepted for
+    older callers and not used.
 
     Ordering: the extractor agent writes `description` (and, when the
     scripts found no caption and no figure_text, one of them) with
@@ -550,7 +549,7 @@ def check_figures_complete(doc_data: dict, input_format: str | None = None) -> d
                 continue
             missing = []
             has_text = (el.get("caption") or "").strip() or (el.get("figure_text") or "").strip()
-            flag_counts = input_format in NO_VISIBLE_TEXT_FORMATS and el.get("no_visible_text") is True
+            flag_counts = el.get("no_visible_text") is True
             if not has_text and not flag_counts:
                 missing.append("caption or figure_text")
             if not (el.get("description") or "").strip():
@@ -563,6 +562,37 @@ def check_figures_complete(doc_data: dict, input_format: str | None = None) -> d
         if incomplete else "every image has a caption, figure_text or no_visible_text, and a description"
     )
     return {"name": "figures_complete", "passed": not incomplete, "detail": detail, "pages": pages, "incomplete": incomplete}
+
+
+def check_pptx_figures_covered(doc_data: dict, census: dict[int, list[dict]]) -> dict:
+    """pptx only: every figure a slide shows has an element.
+    check_figures_complete sees only the images that exist; this one sees
+    the ones that were never extracted.
+
+    `census` is pptx-triage's `pages[].figure_shapes` by page, read from
+    the slide's shape tree apart from pptx-extract. A census shape is
+    covered by an `image` or `table` element whose `source_shape_id` is the
+    shape's id, or the id of a group that contains it (`groups`).
+
+    A vision-tier page's body is a transcription with no source_shape_id
+    (its image shard keeps them). There a shape missing by id still counts
+    as covered when the page has at least as many image and table elements
+    as census shapes."""
+    uncovered = []
+    for page_number, shapes in sorted(census.items()):
+        page = doc_data["pages"].get(page_number, {})
+        figures = [el for el in page.get("elements", []) if el.get("type") in ("image", "table")]
+        ids = {el.get("source_shape_id") for el in figures}
+        missing = [s for s in shapes if s["shape_id"] not in ids and not ids & set(s.get("groups", []))]
+        if missing and page.get("tier") == "vision" and len(figures) >= len(shapes):
+            continue
+        uncovered += [{"page": page_number, "shape_id": s["shape_id"], "kind": s["kind"]} for s in missing]
+    pages = sorted({u["page"] for u in uncovered})
+    detail = (
+        "figures with no element: " + "; ".join(f"page {u['page']} shape {u['shape_id']} ({u['kind']})" for u in uncovered)
+        if uncovered else "every figure on the slides has an image or table element"
+    )
+    return {"name": "pptx_figures_covered", "passed": not uncovered, "detail": detail, "pages": pages, "uncovered": uncovered}
 
 
 def _words(text: str) -> set[str]:
@@ -751,6 +781,11 @@ def main() -> None:
         ),
         check_text_layer_coverage(doc_data, pdf_text_layer_words(input_path, furniture) if input_format == "pdf" else {}),
     ]
+    if input_format == "pptx":
+        triage_pages = _load_json(paths.triage_json(args.doc)).get("pages") or []
+        checks.append(check_pptx_figures_covered(
+            doc_data, {p["page_number"]: p.get("figure_shapes") or [] for p in triage_pages}
+        ))
 
     # Task A5b: large_region_excluded is a WARNING, not one of the checks
     # above -- it never affects `passed`. See check_large_region_excluded's
