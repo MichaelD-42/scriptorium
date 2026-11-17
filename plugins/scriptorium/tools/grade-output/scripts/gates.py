@@ -388,6 +388,23 @@ def check_furniture_absent(
     return {"name": "furniture_absent", "passed": not offenders, "detail": detail, "pages": pages, "offenders": offenders}
 
 
+def _below_toc(heading: dict, earlier: list[dict], matched_numbers: set[str]) -> bool:
+    """True for a heading the TOC does not list but extract-text may make:
+    a numbered heading under a matched TOC entry (an ancestor number is
+    one) at its dot-depth level, or a sub-heading (`sub_heading`) deeper
+    than the nearest earlier heading that is not one."""
+    if heading["sub_heading"]:
+        parent = next((h for h in reversed(earlier) if not h["sub_heading"]), None)
+        return parent is not None and (heading["level"] or 0) > (parent["level"] or 0)
+    number = toc_lib.section_number(heading["text"])
+    if number is None:
+        return False
+    parts = number.rstrip(".").split(".")
+    return heading["level"] == min(len(parts), 6) and any(
+        ".".join(parts[:k]) in matched_numbers for k in range(1, len(parts))
+    )
+
+
 def check_toc_headings_match(doc_data: dict, toc_entries: list[dict], unparsed: list[str] | None = None) -> dict:
     """Task A9: the TOC (`toc.json["entries"]`) and the body headings agree.
 
@@ -399,7 +416,9 @@ def check_toc_headings_match(doc_data: dict, toc_entries: list[dict], unparsed: 
     heading that starts with a section number must also have that number's
     dot depth as its level (`number_level_mismatch`). One
     heading satisfies one entry only. Every heading that no entry uses is
-    reported as `extra` -- extract-text's TOC-driven rule should make none.
+    reported as `extra`, except the ones extract-text makes below the TOC
+    (`_below_toc`): a numbered heading deeper than the TOC lists, under a
+    matched entry, and a sub-heading one level below the heading above it.
 
     Fix wave I2: `unparsed` is toc.json's `unparsed` list -- dot-leader
     lines on a printed TOC page that gave no entry. Each one may be a lost
@@ -425,11 +444,12 @@ def check_toc_headings_match(doc_data: dict, toc_entries: list[dict], unparsed: 
                 text = el.get("text") or ""
                 headings.append({
                     "page": page.get("page_number"), "level": el.get("level"), "text": text,
-                    "norm": toc_lib.normalize_toc_text(text), "used": False,
+                    "norm": toc_lib.normalize_toc_text(text), "used": False, "sub_heading": bool(el.get("sub_heading")),
                 })
     headings.sort(key=lambda h: h["page"] or 0)
 
     missing, page_mismatch, level_mismatch = [], [], []
+    matched_numbers = set()
     for entry in toc_entries:
         expected = toc_lib.normalize_toc_text(toc_lib.toc_entry_heading_text(entry))
         candidates = [h for h in headings if not h["used"] and h["norm"] == expected]
@@ -438,12 +458,18 @@ def check_toc_headings_match(doc_data: dict, toc_entries: list[dict], unparsed: 
             continue
         closest = min(candidates, key=lambda h: abs(h["page"] - entry["page"]))
         closest["used"] = True
+        if entry.get("number"):
+            matched_numbers.add(entry["number"].rstrip("."))
         if abs(closest["page"] - entry["page"]) > TOC_PAGE_TOLERANCE:
             page_mismatch.append({"text": closest["text"], "toc_page": entry["page"], "heading_page": closest["page"]})
         elif closest["level"] != entry["level"]:
             level_mismatch.append({"text": closest["text"], "page": closest["page"], "toc_level": entry["level"], "heading_level": closest["level"]})
 
-    extra = [{"text": h["text"], "page": h["page"], "level": h["level"]} for h in headings if not h["used"]]
+    extra = [
+        {"text": h["text"], "page": h["page"], "level": h["level"]}
+        for i, h in enumerate(headings)
+        if not h["used"] and not _below_toc(h, headings[:i], matched_numbers)
+    ]
     # A section number's dot depth is its level; an outline or TOC level
     # that differs from it is the error (both sides would otherwise agree).
     # Past depth 6 a heading may be capped at level 6, so it is not checked.

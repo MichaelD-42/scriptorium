@@ -161,7 +161,10 @@ runs/state.json                                     per-document queue state
 - **`toc.json`** (pdf only) — `entries[]`, each `{number, title, page,
   level}`, from `lib/toc.py`'s `detect_toc()`: the PDF's own outline if it
   has one, else a detected printed table of contents. `extract-text` reads
-  this to drive heading-level classification; empty `entries: []` when
+  this to drive heading-level classification (a numbered heading deeper
+  than the TOC, and a `sub_heading: true` heading one level below the
+  heading above it, are the only headings it does not list; see
+  `extract-text/README.md`); empty `entries: []` when
   neither source is found.
 - **`gates-report.json`** — `gates.py`'s deterministic hard-backpressure result:
   `passed` plus the structural checks (empty pages, dangling asset

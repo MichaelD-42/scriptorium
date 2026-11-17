@@ -171,7 +171,10 @@ def build_block_element(
     is_bold_block = all(line["bold"] for line in kept_lines)
     is_accent_block = len(kept_lines) == 1 and kept_lines[0].get("accent", False)
 
-    level = classify_heading_level(text, is_bold_block, max_size, body_size, toc_lookup, heading_size_ranks, is_accent_block)
+    level = classify_heading_level(
+        text, is_bold_block, max_size, body_size, toc_lookup, heading_size_ranks, is_accent_block,
+        single_line=len(kept_lines) == 1,
+    )
     if level:
         return {"type": "heading", "level": level, "text": text, "bbox": bbox}
 
@@ -201,6 +204,10 @@ def build_block_element(
             item_level = level_for_x(first_line["bbox"][0], list_level_lookup)
             item_bbox = compute_kept_bbox(block, absorbed)
             return {"type": "list_item", "marker": marker, "level": item_level, "text": item_text, "bbox": item_bbox}
+
+    if toc_lookup and is_sub_heading_candidate(kept_lines, body_size):
+        # Its level comes from the heading above it (`resolve_sub_heading_levels`).
+        return {"type": "heading", "level": None, "text": text, "bbox": bbox, "sub_heading": True}
 
     return {"type": "paragraph", "text": text, "bbox": bbox}
 
@@ -642,7 +649,10 @@ def document_list_marker_levels(
             max_size = max(line["max_size"] for line in kept_lines)
             is_bold_block = all(line["bold"] for line in kept_lines)
             is_accent_block = len(kept_lines) == 1 and kept_lines[0].get("accent", False)
-            if classify_heading_level(text, is_bold_block, max_size, body_size, toc_lookup, heading_size_ranks, is_accent_block):
+            if classify_heading_level(
+                text, is_bold_block, max_size, body_size, toc_lookup, heading_size_ranks, is_accent_block,
+                single_line=len(kept_lines) == 1,
+            ):
                 continue  # a TOC-matched/fallback heading never seeds a marker x-position
             if _block_marker_start(kept_lines, 0) is not None:
                 j = 0
@@ -1033,7 +1043,8 @@ def merge_list_and_paragraph_blocks(
         block_is_bold = all(line["bold"] for line in kept_lines)
         block_is_accent = len(kept_lines) == 1 and kept_lines[0].get("accent", False)
         if classify_heading_level(
-            block_text, block_is_bold, block_max_size, body_size, toc_lookup, heading_size_ranks, block_is_accent
+            block_text, block_is_bold, block_max_size, body_size, toc_lookup, heading_size_ranks, block_is_accent,
+            single_line=len(kept_lines) == 1,
         ) is None:
             block_items = parse_block_list_items(kept_lines, list_level_lookup, edge)
             if block_items is not None:
@@ -1231,26 +1242,118 @@ def classify_heading_level(
     toc_lookup: dict[str, int],
     heading_size_ranks: dict[float, int],
     is_accent_block: bool = False,
+    single_line: bool = False,
 ) -> int | None:
     """Primary: TOC-driven, whenever this document has any TOC entries at
     all (`toc_lookup` non-empty). A block becomes a heading at its matching
     TOC entry's level only if its normalized text matches a TOC entry's
-    normalized "number + title" text exactly -- no match means `paragraph`,
-    no matter the block's size or boldness. This is what stops a lone
+    normalized "number + title" text exactly. This is what stops a lone
     bullet glyph, or any other large/bold text that isn't an actual
-    TOC-listed heading, from being misclassified as a heading.
+    TOC-listed heading, from being misclassified as a heading. The one
+    exception is a numbered heading deeper than the TOC lists
+    (`toc_deep_heading_level`, needs `single_line`); every other miss is a
+    `paragraph` here (`build_block_element` may still make it a
+    sub-heading, see `is_sub_heading_candidate`).
 
     Fallback: only reached when this document has zero TOC entries (no
     printed TOC, no outline) -- rank-by-distinct-bold-size instead, gated by
     `is_fallback_heading_candidate`."""
     if toc_lookup:
-        return toc_lookup.get(toc_lib.normalize_toc_text(text))
+        level = toc_lookup.get(toc_lib.normalize_toc_text(text))
+        if level is None and single_line:
+            level = toc_deep_heading_level(text, max_size, body_size, toc_lookup)
+        return level
     if is_fallback_heading_candidate(text, is_bold_block, max_size, body_size):
         return heading_size_ranks.get(max_size)
     if is_accent_block and is_accent_heading(text, max_size, body_size):
         # Follow-up R32: one level below the smallest size-ranked heading.
         return min(max(heading_size_ranks.values(), default=0) + 1, FALLBACK_MAX_LEVELS)
     return None
+
+
+# A heading the TOC does not list (a deeper numbered one, or a sub-heading)
+# is at most this many words.
+UNLISTED_HEADING_MAX_WORDS = 12
+
+# An underline is a horizontal drawing at most this thick, from the lower
+# half of the line to this far below it, at least as wide as the line.
+UNDERLINE_MAX_THICKNESS = 1.5  # pt
+UNDERLINE_MAX_GAP = 3.0  # pt
+
+
+def _is_heading_shaped(text: str) -> bool:
+    """Short, not a sentence, real text: the shape every unlisted heading
+    rule asks for."""
+    words = text.split()
+    return (
+        0 < len(words) <= UNLISTED_HEADING_MAX_WORDS
+        and not _ends_sentence(text)
+        and non_glyph_char_count(text) >= FALLBACK_NON_GLYPH_MIN_CHARS
+    )
+
+
+def toc_deep_heading_level(text: str, max_size: float, body_size: float, toc_lookup: dict[str, int]) -> int | None:
+    """A one-line block numbered deeper than the TOC goes (a TOC that lists
+    levels 1-3, a body with "2.1.1.1 Title"): its dot depth (at most
+    FALLBACK_MAX_LEVELS) when the depth is greater than the deepest TOC
+    level, an ancestor number ("2.1.1", "2.1" or "2") is a TOC entry's,
+    the text is heading-shaped (`_is_heading_shaped`) and at least body
+    size. Else None. The TOC numbers are read back from `toc_lookup`'s
+    keys, which are each entry's "number title" text."""
+    number = toc_lib.section_number(text)
+    if number is None or body_size <= 0 or max_size < body_size or not _is_heading_shaped(text):
+        return None
+    parts = number.rstrip(".").split(".")
+    if len(parts) <= max(toc_lookup.values(), default=0):
+        return None
+    toc_numbers = {n.rstrip(".") for n in map(toc_lib.section_number, toc_lookup) if n}
+    if not any(".".join(parts[:k]) in toc_numbers for k in range(1, len(parts))):
+        return None
+    return min(len(parts), FALLBACK_MAX_LEVELS)
+
+
+def is_sub_heading_candidate(kept_lines: list[dict], body_size: float) -> bool:
+    """A sub-heading the TOC does not list (unnumbered, or numbered with a
+    letter part such as "1.2.a.1"): one bold line, heading-shaped
+    (`_is_heading_shaped`), larger than body size or underlined
+    (`mark_underlined_lines`). Plain bold at body size stays a paragraph:
+    that is the label of a label/value list."""
+    if len(kept_lines) != 1 or not kept_lines[0]["bold"] or body_size <= 0:
+        return False
+    line = kept_lines[0]
+    return (line["max_size"] > body_size or line.get("underlined", False)) and _is_heading_shaped(line["text"])
+
+
+def mark_underlined_lines(page, text_blocks: list[dict]) -> None:
+    """Set `underlined` on every line of `text_blocks` with a thin
+    horizontal drawing under it (UNDERLINE_MAX_THICKNESS,
+    UNDERLINE_MAX_GAP) at least as wide as the line."""
+    rules = [d["rect"] for d in page.get_drawings() if 0 <= d["rect"].height <= UNDERLINE_MAX_THICKNESS]
+    for block in text_blocks:
+        for line in block["lines"]:
+            x0, y0, x1, y1 = line["bbox"]
+            line["underlined"] = any(
+                (y0 + y1) / 2 < r.y0 <= y1 + UNDERLINE_MAX_GAP and r.x0 <= x0 + 1 and r.x1 >= x1 - 1
+                for r in rules
+            )
+
+
+def resolve_sub_heading_levels(elements: list[dict], start_level: int | None) -> None:
+    """Give each sub-heading (`"sub_heading": True`, level None) the level
+    one below the nearest heading above it that is not a sub-heading
+    (`start_level` before the first one on the page), at most
+    FALLBACK_MAX_LEVELS. With no heading above it, it is a paragraph."""
+    level = start_level
+    for el in elements:
+        if el["type"] != "heading":
+            continue
+        if not el.get("sub_heading"):
+            level = el["level"]
+        elif level:
+            el["level"] = min(level + 1, FALLBACK_MAX_LEVELS)
+        else:
+            el["type"] = "paragraph"
+            del el["level"], el["sub_heading"]
 
 
 def is_accent_heading(text: str, max_size: float, body_size: float) -> bool:
@@ -1326,7 +1429,8 @@ def main() -> None:
     furniture_masked = {p["masked"] for p in furniture.get("line_patterns", [])}
     furniture_xrefs = set(furniture.get("image_xrefs", []))
     page_roles = furniture_lib.load_page_roles(args.doc)
-    toc_lookup = build_toc_heading_lookup(load_toc_entries(args.doc))
+    toc_entries = load_toc_entries(args.doc)
+    toc_lookup = build_toc_heading_lookup(toc_entries)
 
     fitz_doc = fitz.open(pdf_path)
 
@@ -1366,6 +1470,8 @@ def main() -> None:
         # Re-review 2 I2: the content rect only on a page it was measured on.
         content_rect = furniture_lib.page_content_rect(furniture, page.rect.width, page_height)
         text_blocks, body_size = extract_page_text_blocks(page, args.body_size)
+        if toc_lookup:
+            mark_underlined_lines(page, text_blocks)
         # Page-frame tables (furniture, not real content) are left out by
         # the shared query -- before the overlap-drop below, or a frame
         # "table" would swallow real text blocks that merely sit under it.
@@ -1452,6 +1558,11 @@ def main() -> None:
             page_elements.append({"type": "table", "rows": table["rows"], "bbox": list(table["bbox"])})
 
         page_elements.sort(key=lambda e: e["bbox"][1])
+        # The heading in force at the top of the page: the last TOC entry
+        # on an earlier page.
+        resolve_sub_heading_levels(
+            page_elements, next((e["level"] for e in reversed(toc_entries) if e["page"] < page_number), None)
+        )
 
         shard_path = paths.shard_path(args.doc, page_number, "text")
         # No text but furniture, no table, no figure: a blank page, not a dropped one.

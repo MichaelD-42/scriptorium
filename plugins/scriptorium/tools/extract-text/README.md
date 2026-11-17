@@ -45,7 +45,17 @@ document.
     means `paragraph`, no matter the block's font size or boldness. This
     is what stops a lone bullet glyph, or any other large/bold text that
     isn't an actual TOC-listed heading, from being misclassified as a
-    heading.
+    heading. Two exceptions cover headings below the TOC's depth, each a
+    one-line block of at most 12 words that does not end a sentence:
+    a numbered block (`2.1.1.1 Title`) deeper than the deepest TOC level,
+    with an ancestor number in the TOC and at least body size, is a
+    heading at its dot depth (at most 6); and a bold block that is larger
+    than body size or underlined (a thin drawing just under it) is a
+    heading one level below the nearest heading above it that is not one
+    of these (the last TOC entry before the page, at the top of a page).
+    It carries `"sub_heading": true`, and stays a paragraph when no heading
+    is above it. Bold at body size without an underline stays a paragraph:
+    it is the label of a label/value list.
   - **Fallback**, only when `toc.json` has zero entries at all (no printed
     TOC, no outline): every DISTINCT font size used by a bold,
     larger-than-body-size, >=3-alphanumeric-character block anywhere in
