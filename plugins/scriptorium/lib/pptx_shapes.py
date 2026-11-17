@@ -61,6 +61,37 @@ def is_degenerate(bbox, slide) -> bool:
     return bbox[2] - bbox[0] < DEGENERATE_FRACTION * width or bbox[3] - bbox[1] < DEGENERATE_FRACTION * height
 
 
+def _is_drawing(el) -> bool:
+    """A non-text drawing shape: a connector, a custom geometry, or a preset
+    geometry other than `rect` that holds no text."""
+    if el.tag == qn("p:cxnSp"):
+        return True
+    if el.tag != qn("p:sp") or el.find(f"./{qn('p:spPr')}/{qn('a:blipFill')}") is not None:
+        return False
+    if el.find(f"./{qn('p:spPr')}/{qn('a:custGeom')}") is not None:
+        return True
+    geometry = el.find(f"./{qn('p:spPr')}/{qn('a:prstGeom')}")
+    has_text = any((t.text or "").strip() for t in el.iter(qn("a:t")))
+    return geometry is not None and geometry.get("prst") != "rect" and not has_text
+
+
+def is_figure_group(group) -> bool:
+    """A group whose members draw a figure, so the slide PDF's crop of the
+    whole group is the figure: at least 2 drawing shapes, or a picture and
+    at least 1 drawing shape (arrows, braces or marks over a picture),
+    counted at any depth. Its text boxes are text either way."""
+    el = group._element
+    drawings = sum(1 for member in el.iter(qn("p:sp"), qn("p:cxnSp")) if _is_drawing(member))
+    has_picture = next(el.iter(qn("p:pic")), None) is not None
+    return drawings >= 2 or (has_picture and drawings >= 1)
+
+
+def has_picture_fill(shape) -> bool:
+    """An autoshape filled with a picture (`spPr/a:blipFill`)."""
+    el = shape._element
+    return el.tag == qn("p:sp") and el.find(f"./{qn('p:spPr')}/{qn('a:blipFill')}") is not None
+
+
 def slide_size(slide) -> tuple[int, int]:
     """(width, height) of the slide in EMU."""
     presentation = slide.part.package.presentation_part.presentation

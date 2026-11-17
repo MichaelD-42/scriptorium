@@ -131,16 +131,22 @@ def pt(emu: float) -> float:
     return round(emu / pptx_shapes.EMU_PER_PT, 1)
 
 
-def visible_shapes(shapes):
-    """Every shape that is not hidden, a group's members in place of the
-    group, in z-order. A hidden group hides its members."""
+def visible_shapes(shapes, figure=None, top_level: bool = True):
+    """(shape, figure) for every shape that is not hidden, in z-order, a
+    group's members in place of the group; a hidden group hides its
+    members. A top-level group that draws a figure
+    (`pptx_shapes.is_figure_group`) is yielded itself first, as
+    (group, group), and `figure` is that group for each of its members."""
     for shape in shapes:
         if pptx_shapes.is_hidden(shape):
             continue
-        if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
-            yield from visible_shapes(shape.shapes)
+        if shape.shape_type != MSO_SHAPE_TYPE.GROUP:
+            yield shape, figure
+        elif top_level and pptx_shapes.is_figure_group(shape):
+            yield shape, shape
+            yield from visible_shapes(shape.shapes, shape, False)
         else:
-            yield shape
+            yield from visible_shapes(shape.shapes, figure, False)
 
 
 def extract_slide(slide, page_number: int, assets_dir: Path, slide_pdf=None) -> tuple[list[dict], list[dict]]:
@@ -176,10 +182,17 @@ def extract_slide(slide, page_number: int, assets_dir: Path, slide_pdf=None) -> 
             return
         add_image(shape, bbox, out.name, "vector")
 
-    for shape in visible_shapes(slide.shapes):
+    for shape, figure in visible_shapes(slide.shapes):
         bbox_emu = pptx_shapes.abs_bbox(shape)
         bbox = [pt(v) for v in bbox_emu]
         top = bbox[1]
+
+        if shape is figure:
+            add_slide_crop(shape, bbox)  # also shows the overlays and labels drawn on it
+            continue
+        is_figure_part = pptx_shapes.is_picture(shape) or pptx_shapes.frame_kind(shape) or pptx_shapes.has_picture_fill(shape)
+        if figure is not None and is_figure_part:
+            continue  # its group's crop shows it; the source would be the uncropped original
 
         if frame_kind := pptx_shapes.frame_kind(shape):
             if pptx_shapes.is_degenerate(bbox_emu, slide):
@@ -206,6 +219,9 @@ def extract_slide(slide, page_number: int, assets_dir: Path, slide_pdf=None) -> 
 
         if pptx_shapes.is_furniture_placeholder(shape):
             continue
+
+        if pptx_shapes.has_picture_fill(shape):
+            add_slide_crop(shape, bbox)  # its text, if any, is still read below
 
         if shape.has_table:
             body_elements.append({"type": "table", "rows": table_rows(shape), "top": top})

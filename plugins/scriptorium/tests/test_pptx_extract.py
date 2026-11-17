@@ -10,7 +10,8 @@ from PIL import Image
 from pptx import Presentation
 from pptx.chart.data import CategoryChartData
 from pptx.enum.chart import XL_CHART_TYPE
-from pptx.enum.shapes import PP_PLACEHOLDER
+from pptx.enum.shapes import MSO_SHAPE, PP_PLACEHOLDER
+from pptx.oxml.ns import qn
 from pptx.util import Inches
 
 from conftest import load_script
@@ -252,6 +253,53 @@ class TestEmbeddedObjects:
         _add_worksheet(slide, _workbook([["a"]]), width=1587, height=1587)
         body, images = extract_pptx.extract_slide(slide, 1, tmp_path, _slide_pdf(tmp_path, slide))
         assert body == [] and images == []
+
+
+def _drawn_figure(slide):
+    """A top-level group of autoshapes with a tiny icon and a label."""
+    group = slide.shapes.add_group_shape()
+    group.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(1), Inches(1), Inches(2), Inches(2))
+    group.shapes.add_shape(MSO_SHAPE.OVAL, Inches(1.3), Inches(1.3), Inches(1.4), Inches(1.4))
+    group.shapes.add_picture(_png(40, 25), Inches(1.1), Inches(1.1), Inches(0.3), Inches(0.2))
+    group.shapes.add_textbox(Inches(1), Inches(3.1), Inches(2), Inches(0.4)).text_frame.text = "Label"
+    return group
+
+
+class TestVectorFigures:
+    def test_a_group_of_autoshapes_is_one_figure(self, tmp_path):
+        slide = _blank_slide()
+        group = _drawn_figure(slide)
+        body, images = extract_pptx.extract_slide(slide, 1, tmp_path, _slide_pdf(tmp_path, slide))
+        assert len(images) == 1
+        assert images[0]["source_shape_id"] == group.shape_id
+        assert _asset_size(tmp_path, images[0]) != (40, 25)
+        assert _texts(body) == ["Label"]  # the group's words stay text
+
+    def test_a_picture_with_a_drawn_overlay_is_one_figure(self, tmp_path):
+        slide = _blank_slide()
+        group = slide.shapes.add_group_shape()
+        pic = group.shapes.add_picture(_png(100, 100), Inches(1), Inches(1), Inches(2), Inches(2))
+        pic.crop_left = 0.5
+        group.shapes.add_shape(MSO_SHAPE.CURVED_RIGHT_ARROW, Inches(1.5), Inches(1.5), Inches(1), Inches(1))
+        _, images = extract_pptx.extract_slide(slide, 1, tmp_path, _slide_pdf(tmp_path, slide))
+        assert [el["source_shape_id"] for el in images] == [group.shape_id]
+
+    def test_a_group_of_text_boxes_is_not_a_figure(self, tmp_path):
+        slide = _blank_slide()
+        group = slide.shapes.add_group_shape()
+        group.shapes.add_picture(_png(10, 10), 0, 0, Inches(1), Inches(1))
+        group.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, Inches(2), Inches(3), Inches(1)).text_frame.text = "Box"
+        _, images = extract_pptx.extract_slide(slide, 1, tmp_path)
+        assert [el["kind"] for el in images] == ["bitmap"]
+
+    def test_a_picture_filled_shape_is_cropped_from_the_slide_pdf(self, tmp_path):
+        slide = _blank_slide()
+        shape = slide.shapes.add_shape(MSO_SHAPE.OVAL, Inches(1), Inches(1), Inches(2), Inches(2))
+        shape._element.spPr.append(shape._element.spPr.makeelement(qn("a:blipFill"), {}))
+        shape.text_frame.text = "Filled"
+        body, images = extract_pptx.extract_slide(slide, 1, tmp_path, _slide_pdf(tmp_path, slide))
+        assert [el["source_shape_id"] for el in images] == [shape.shape_id]
+        assert _texts(body) == ["Filled"]
 
 
 class TestFurniturePlaceholders:

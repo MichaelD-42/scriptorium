@@ -2,10 +2,10 @@
 
 The pptx sibling of `extract-text` + `extract-images` combined into one
 tool, since `python-pptx` gives structured access to both a slide's text
-and its embedded pictures in the same pass — there's no separate
-vector-region detection step like the PDF pipeline has, because a pptx
-diagram is either a native shape tree (already structured, no extraction
-needed) or a picture (handled here).
+and its embedded pictures in the same pass. A drawing made of shapes has
+no picture to save, so a figure the slide draws (a group of autoshapes,
+an embedded object, a chart) is cropped from the rendered slide instead.
+Its text boxes are still read as text.
 
 ## How
 
@@ -46,6 +46,15 @@ produced for a slide. It only ever writes **its own** shard files.
   conversion, run on first need only, so a deck with no such figure needs
   no LibreOffice) with `render_region.py`'s `crop_png`. If the slide PDF
   can't be made, the figure gets no element and a warning on stderr.
+- **Drawn figures**: a top-level group whose members draw a figure — at
+  least 2 drawing shapes (a connector, a custom geometry, or a preset
+  geometry other than `rect` with no text), or a picture and at least 1
+  drawing shape, at any depth — becomes one slide-PDF crop at the group's
+  bbox, which also shows arrows and labels drawn over a picture. Its
+  member pictures, objects and charts get no element of their own (the
+  crop shows them as the slide does); its text is extracted as usual.
+  A shape filled with a picture (`spPr/a:blipFill`) is cropped the same
+  way, and its text kept.
 - Every image element records `source_shape_id`, the id of the shape it
   came from.
 - **Speaker notes**, if present, become a trailing `paragraph` prefixed
