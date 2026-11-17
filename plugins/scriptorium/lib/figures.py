@@ -343,9 +343,12 @@ def page_tables(
                 pl_page = pl_page.crop(crop)
             else:
                 crop = None
-        caps = _open_edge_caps(pl_page, crop)
+        visible, unhighlighted = _without_fill_rects(pl_page, crop)
+        pl_tables = _find_tables(unhighlighted, crop)
+        if not pl_tables and len(unhighlighted.rects) < len(visible.rects):
+            pl_tables = _find_tables(visible, crop)  # a borderless table drawn only by its shading
         chars = None
-        for table in pl_page.find_tables({"explicit_horizontal_lines": caps} if caps else {}):
+        for table in pl_tables:
             if furniture_lib.matches_any_frame(table.bbox, frame_tables):
                 continue
             if crop is not None and _is_content_frame(table.bbox, crop):
@@ -373,6 +376,59 @@ def page_tables(
             })
     pl_doc.pages[page_number - 1].close()  # free the page's parsed objects, as closing the doc used to
     return found
+
+
+def _find_tables(pl_page, crop):
+    caps = _open_edge_caps(pl_page, crop)
+    return pl_page.find_tables({"explicit_horizontal_lines": caps} if caps else {})
+
+
+# A fill-only rect thicker than HIGHLIGHT_MIN_SIDE on both sides with an
+# edge more than HIGHLIGHT_RULE_TOLERANCE from every thin rule (a thin rect
+# or a line) is a text highlight, not a cell: its edges are no table edges.
+HIGHLIGHT_MIN_SIDE = 2.0  # pt
+HIGHLIGHT_RULE_TOLERANCE = 1.5  # pt
+
+
+def _is_white(color) -> bool:
+    """True for a pdfplumber colour that is white: gray or RGB channels at
+    INVISIBLE_FILL_MIN or more, or CMYK channels near 0."""
+    if isinstance(color, (int, float)):
+        color = (color,)
+    if not isinstance(color, (tuple, list)) or not color or not all(isinstance(c, (int, float)) for c in color):
+        return False
+    if len(color) == 4:
+        return all(c <= 1 - INVISIBLE_FILL_MIN for c in color)
+    return all(c >= INVISIBLE_FILL_MIN for c in color)
+
+
+def _without_fill_rects(pl_page, crop: list[float] | None):
+    """`(visible, unhighlighted)`: `pl_page` without its invisible
+    fill-only rects (white, no stroke: they paint nothing, so they draw no
+    table edge), and that page without its highlight rects too
+    (HIGHLIGHT_MIN_SIDE). A rect that matches the crop rect is the content
+    frame's own fill, which closes a table cut at the crop edge; it stays."""
+    def frame(o) -> bool:
+        return crop is not None and furniture_lib.bbox_matches([o["x0"], o["top"], o["x1"], o["bottom"]], crop)
+
+    def fill_only(o) -> bool:
+        return o["object_type"] == "rect" and bool(o.get("fill")) and not o.get("stroke") and not frame(o)
+
+    def thick(o) -> bool:
+        return fill_only(o) and o["width"] > HIGHLIGHT_MIN_SIDE and o["height"] > HIGHLIGHT_MIN_SIDE
+
+    visible = pl_page.filter(lambda o: not (fill_only(o) and _is_white(o.get("non_stroking_color"))))
+    rules = visible.filter(lambda o: not thick(o)).edges
+    xs = [e["x0"] for e in rules if e["orientation"] == "v"]
+    ys = [e["top"] for e in rules if e["orientation"] == "h"]
+
+    def highlight(o) -> bool:
+        return thick(o) and not (
+            _near_any(o["x0"], xs, HIGHLIGHT_RULE_TOLERANCE) and _near_any(o["x1"], xs, HIGHLIGHT_RULE_TOLERANCE)
+            and _near_any(o["top"], ys, HIGHLIGHT_RULE_TOLERANCE) and _near_any(o["bottom"], ys, HIGHLIGHT_RULE_TOLERANCE)
+        )
+
+    return visible, visible.filter(lambda o: not highlight(o))
 
 
 _plumber_cache: dict = {}

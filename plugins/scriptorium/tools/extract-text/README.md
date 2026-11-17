@@ -70,7 +70,12 @@ document.
   stays on its line ("UN = 12V"). Follow-up R20: a row left open at the
   page's top or bottom edge (column rules with an open end beyond the
   first or last word, no horizontal rule) gets a cap rule, so a continued
-  table keeps its first row.
+  table keeps its first row. Fill-only rects that draw no table edge are
+  left out before detection: white ones (they paint nothing, such as a
+  diagram label's background) and highlights (thicker than 2 pt, with an
+  edge more than 1.5 pt from every thin rule). Shading that matches the
+  cell grid stays. When no table is left without the highlights, the
+  page is read with them (a table drawn only by its shading).
 - Follow-up R27: a paragraph block made of label/value rows and a body
   (for example "HWC requirement | REQ ..." and "ASIL Value: | To Be /
   Selected" above the requirement text) is split into one paragraph per
