@@ -5,6 +5,7 @@ and a paragraph cut by the page break must still join."""
 
 import json
 
+import elements as elements_lib
 import fitz  # PyMuPDF
 import furniture as furniture_lib
 import paths
@@ -111,3 +112,38 @@ def test_header_limit_band_applies_only_on_the_body_page_size():
     assert furniture_lib.page_table_rect(furniture, W, H) == [0.0, 167.5, W, H]
     assert furniture_lib.page_band_rect(furniture, H, W) is None  # a landscape page
     assert furniture_lib.page_table_rect(furniture, H, W) is None
+
+
+def _pages(region_bottom: float) -> dict:
+    return {
+        1: {"page_number": 1, "elements": [
+            {"type": "paragraph", "text": "A sentence cut by the page break and", "bbox": [93, 700, 531, 771]},
+        ]},
+        2: {"page_number": 2, "excluded_regions": [{"bbox": [53, 28, 545, region_bottom], "reason": "repeated_drawing"}],
+            "elements": [
+                {"type": "table", "rows": [[""], [""]], "bbox": [55, 28, 543, 82]},
+                {"type": "paragraph", "text": "Leaked header value", "bbox": [60, 116, 434, 128]},
+                {"type": "paragraph", "text": "continues on the next page.", "bbox": [93, 210, 500, 222]},
+            ]},
+    }
+
+
+def test_join_skips_leaked_elements_in_a_header_box():
+    pages = _pages(167.5)
+    elements_lib.apply_page_break_joins(pages, {}, {1: H, 2: H}, {1: W, 2: W})
+    assert pages[1]["elements"][0]["pages"] == [1, 2]
+    assert [el["text"] for el in pages[2]["elements"] if el["type"] == "paragraph"] == ["Leaked header value"]
+
+
+def test_join_does_not_skip_on_a_page_tall_repeated_region_or_without_geometry():
+    for pages, heights in ((_pages(800.0), {1: H, 2: H}), (_pages(167.5), None)):
+        elements_lib.apply_page_break_joins(pages, {}, heights)
+        assert "pages" not in pages[1]["elements"][0]
+
+
+def test_join_skips_elements_above_the_header_limit():
+    pages = _pages(167.5)
+    del pages[2]["excluded_regions"]
+    furniture = {"content_rect": None, "content_rect_page_size": [W, H], "header_limit": 167.5, "footer_limit": None}
+    elements_lib.apply_page_break_joins(pages, furniture, {1: H, 2: H}, {1: W, 2: W})
+    assert pages[1]["elements"][0]["pages"] == [1, 2]
