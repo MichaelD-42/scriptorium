@@ -473,9 +473,8 @@ def check_figures_complete(doc_data: dict, input_format: str | None = None) -> d
     the render). The agent never writes a caption for such an image --
     `caption` is only the printed caption the script extracts.
 
-    Fix round 2: the flag counts only when `input_format` is in
-    NO_VISIBLE_TEXT_FORMATS (pdf, image). For pptx/docx/xlsx/html, or an
-    unknown format, the agent writes `--caption`, so the flag is ignored.
+    The flag counts for every input format; `input_format` is accepted for
+    older callers and not used.
 
     Ordering: the extractor agent writes `description` (and, when the
     scripts found no caption and no figure_text, one of them) with
@@ -490,7 +489,7 @@ def check_figures_complete(doc_data: dict, input_format: str | None = None) -> d
                 continue
             missing = []
             has_text = (el.get("caption") or "").strip() or (el.get("figure_text") or "").strip()
-            flag_counts = input_format in NO_VISIBLE_TEXT_FORMATS and el.get("no_visible_text") is True
+            flag_counts = el.get("no_visible_text") is True
             if not has_text and not flag_counts:
                 missing.append("caption or figure_text")
             if not (el.get("description") or "").strip():

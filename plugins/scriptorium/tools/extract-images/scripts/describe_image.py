@@ -26,19 +26,12 @@ way `mermaid_image.py` validates its own stdin-read source (must start with
 a recognized diagram keyword) -- reuses `mermaid_image.validate_diagram_source`
 rather than duplicating that check.
 
-`--caption` is kept as a backward-compatible alias, NOT a no-op: pptx/docx/
-xlsx/html image elements have no script-side caption detection (this
-codebase's caption search only exists for PDF pages, which have a fitz text
-layer to search near each image's bbox) -- caption stays agent-authored for
-those formats, unchanged from before this task. Using `--caption` prints a
-warning (for a PDF element, extract_images.py already set `caption`, and
-any value passed here would just be overwritten by a future re-run of that
-script) but still writes the field, so existing non-PDF captioning behavior
--- and `grade-output/text_mode_grade.py`'s `bad_caption` check, which
-depends on a real caption for docx/xlsx/html images -- keeps working
-unchanged. A judgment call: the brief suggested a true no-op, but that would
-have silently regressed captioning for every non-PDF format with no
-replacement in this task's scope.
+`--caption` is a deprecated backward-compatible alias, NOT a no-op: it
+prints a warning, writes `caption`, and marks it `caption_source: "agent"`.
+`caption` otherwise means the printed caption a script found (PDF only
+today). An agent caption is interpretation: assemble renders it inside the
+interpretation markers and never as alt text, a `<figcaption>` or a ReqIF
+LONG-NAME, and text_mode_grade's `bad_caption` ignores it.
 
 `--figure-text` is a small addition beyond the brief's three named fields:
 Task A5 pre-ruled that the agent fills a PDF vector-region element's
@@ -63,12 +56,8 @@ for an image with no printed caption and no visible text, after the agent
 checked the render. It exists so that grade-output's figures_complete gate
 can accept such an image without an agent-written caption (`caption` is
 only the printed caption). Refused when the element already has a caption
-or figure_text, or together with `--caption`/`--figure-text`.
-
-Fix round 2: `--no-visible-text` is also refused unless the document's
-input format (paths.detect_input_format) is pdf or image -- the formats
-whose caption is verbatim-only. For pptx/docx/xlsx/html the agent writes
-`--caption` instead.
+or figure_text, or together with `--caption`/`--figure-text`. It works
+for every input format.
 """
 
 import argparse
@@ -79,7 +68,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 import elements as elements_lib  # noqa: E402
-import furniture as furniture_lib  # noqa: E402
 import paths  # noqa: E402
 
 # Sibling import -- same convention assemble.py's `import reqif_builder`
@@ -87,8 +75,6 @@ import paths  # noqa: E402
 # mermaid_image.py's exact keyword validation instead of duplicating it.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mermaid_image  # noqa: E402
-
-NO_VISIBLE_TEXT_FORMATS = furniture_lib.NO_VISIBLE_TEXT_FORMATS
 
 
 # Follow-up R26: words that mark a note about the transcription, not text
@@ -155,21 +141,11 @@ def main() -> None:
         print("error: --no-visible-text cannot be combined with --caption or --figure-text", file=sys.stderr)
         sys.exit(1)
 
-    if args.no_visible_text:
-        input_format = paths.detect_input_format(args.doc)
-        if input_format not in NO_VISIBLE_TEXT_FORMATS:
-            print(
-                f"error: --no-visible-text is only for pdf and image documents (this one is {input_format!r}); "
-                "for pptx/docx/xlsx/html write the caption with --caption",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-
     if args.caption is not None:
         print(
-            "warning: --caption is deprecated -- caption is script-authoritative for PDF "
-            "image elements now (set automatically by extract-images); still applied here "
-            "for formats without script-side caption detection (pptx/docx/xlsx/html)",
+            "warning: --caption is deprecated -- caption is the printed caption a script "
+            "finds; stored with caption_source \"agent\" and rendered as interpretation. "
+            "For an image with no printed caption and no visible text, use --no-visible-text",
             file=sys.stderr,
         )
 
@@ -217,6 +193,7 @@ def main() -> None:
                 el["mermaid"] = args.mermaid
             if args.caption is not None:
                 el["caption"] = args.caption
+                el["caption_source"] = "agent"
             if args.figure_text is not None:
                 el["figure_text"] = args.figure_text
                 el.pop("figure_text_source", None)  # the extractor's reading replaces Tesseract's

@@ -363,3 +363,10 @@ def save_doc(elements_path: Path, doc: dict) -> None:
     pages_sorted = sorted(doc["pages"].values(), key=lambda p: p["page_number"])
     payload = {**doc, "pages": pages_sorted}
     elements_path.write_text(json.dumps(payload, indent=2), encoding="utf-8", newline="")
+
+
+def printed_caption(el: dict) -> str:
+    """An image element's caption when it is printed document text, else "".
+    A caption an agent wrote (`caption_source: "agent"`, describe_image.py
+    --caption) is interpretation, not document text."""
+    return "" if el.get("caption_source") == "agent" else (el.get("caption") or "")
