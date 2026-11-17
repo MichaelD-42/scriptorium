@@ -25,7 +25,9 @@ produced for a slide. It only ever writes **its own** shard files.
   font-size ratio classification like `extract-text` uses (pptx headings
   are structural — a title placeholder — not inferred from size).
 - Every other text-bearing shape's paragraphs become `paragraph` elements,
-  one per non-empty paragraph.
+  one per non-empty paragraph. Struck-through runs (`strike="sngStrike"` or
+  `"dblStrike"`) are wrapped in Markdown `~~...~~`, in table cells too; the
+  HTML output shows them as `<del>`.
 - **Tables** (`shape.has_table`) become `table` elements (row-major list of
   lists, cell text as-is).
 - **Pictures** (`shape.shape_type == PICTURE`) are saved to

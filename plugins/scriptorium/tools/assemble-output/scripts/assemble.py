@@ -18,8 +18,17 @@ import reqif_builder  # noqa: E402
 
 import yaml
 from jinja2 import Environment, FileSystemLoader
+from markupsafe import Markup, escape
 
 TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
+
+# Struck text in an element's text is written as Markdown `~~...~~`
+# (pptx-extract); the HTML output shows it as <del>.
+STRIKE_RE = re.compile(r"~~(\S(?:.*?\S)?)~~")
+
+
+def strike_html(text) -> Markup:
+    return Markup(STRIKE_RE.sub(r"<del>\1</del>", str(escape(text))))
 
 
 def render_markdown_table(rows: list[list[str]]) -> str:
@@ -220,6 +229,7 @@ def to_html(doc_data: dict) -> str:
         for el in page["elements"]
     )
     env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)), autoescape=True)
+    env.filters["strike"] = strike_html
     template = env.get_template("output.html.j2")
     return template.render(doc=doc_data["doc"], pages=pages, has_mermaid=has_mermaid)
 

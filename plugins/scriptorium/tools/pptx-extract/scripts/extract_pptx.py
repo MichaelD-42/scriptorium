@@ -12,6 +12,31 @@ import paths  # noqa: E402
 import pptx_shapes  # noqa: E402
 
 from pptx import Presentation
+from pptx.oxml.ns import qn
+
+STRIKE_VALUES = {"sngStrike", "dblStrike"}
+
+
+def paragraph_text(para) -> str:
+    """The paragraph's runs, fields and line breaks (a break as \\v, like
+    `para.text`), with each span of struck runs wrapped in `~~...~~`.
+    Whitespace at a span's edge goes outside the markers: Markdown does not
+    render `~~struck ~~`."""
+    spans: list[list] = []  # [struck, text]; adjacent struck runs share one span
+    for child in para._p.content_children:
+        rpr = child.find(qn("a:rPr"))
+        struck = rpr is not None and rpr.get("strike") in STRIKE_VALUES
+        if spans and spans[-1][0] == struck:
+            spans[-1][1] += child.text
+        else:
+            spans.append([struck, child.text])
+    parts = []
+    for struck, text in spans:
+        core = text.strip()
+        if struck and core:
+            text = text[: len(text) - len(text.lstrip())] + f"~~{core}~~" + text[len(text.rstrip()) :]
+        parts.append(text)
+    return "".join(parts)
 
 
 def shape_paragraphs(shape) -> list[str]:
@@ -19,14 +44,17 @@ def shape_paragraphs(shape) -> list[str]:
         return []
     paragraphs = []
     for para in shape.text_frame.paragraphs:
-        text = para.text.replace("\v", " ").strip()  # python-pptx reads a line break (<a:br/>) as \v
+        text = paragraph_text(para).replace("\v", " ").strip()  # python-pptx reads a line break (<a:br/>) as \v
         if text:
             paragraphs.append(text)
     return paragraphs
 
 
 def table_rows(shape) -> list[list[str]]:
-    return [[cell.text for cell in row.cells] for row in shape.table.rows]
+    return [
+        ["\n".join(paragraph_text(p) for p in cell.text_frame.paragraphs) for cell in row.cells]
+        for row in shape.table.rows
+    ]
 
 
 def extract_slide(slide, page_number: int, assets_dir: Path) -> tuple[list[dict], list[dict]]:
