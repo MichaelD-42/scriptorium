@@ -74,9 +74,10 @@ def _tesseract_cmd() -> str:
 
 
 def detect_script(image_path: str) -> str | None:
+    cmd = _tesseract_cmd()
     try:
         result = subprocess.run(
-            [_tesseract_cmd(), image_path, "stdout", "--psm", "0"],
+            [cmd, tesseract_lib.wsl.path_for(cmd, image_path), "stdout", "--psm", "0"],
             capture_output=True, text=True, timeout=30,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):

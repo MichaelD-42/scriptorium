@@ -67,6 +67,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}\tools
 Exit code 1 is fatal (uv couldn't be obtained, or `uv sync` failed) — stop and report it. Any
 other outcome, proceed; a missing `tesseract` only matters for documents
 that actually have scanned pages, and that's handled per-document below.
+Pass any "missing ... To fix it" block it prints on to the user. On
+Linux/macOS it also writes `runs/env.json`, `{"tesseract": <path or null>,
+"soffice": <path or null>}`, which you may read (two keys).
 
 ## Setup
 
@@ -103,6 +106,12 @@ documents with warnings) with the report's path, and **stop**.
   you how closely to read the reports that follow: `loose` (all tier
   `text`, no visuals) — dispatch and wait; `tight` — expect a retry and read
   each batch's summary closely.
+- **pptx without LibreOffice**: if the document is a pptx, `runs/env.json`
+  has `"soffice": null` and `work/<name>/<name>.pdf` does not exist, stop
+  the run before any render and tell the user: set `SCRIPTORIUM_SOFFICE` to
+  LibreOffice's `soffice`, or convert the pptx to PDF and save it as
+  `work/<name>/<name>.pdf`, which render-pages reuses. The document stays
+  queued for the next run.
 - **Retry** (attempt > 0): don't re-triage. `plan.py` reads the escalated
   pages from `runs/state.json`.
 - **OCR language**: if this attempt has an `ocr` or `vision` page (PDF
@@ -137,7 +146,11 @@ with no pages):
 
 Their stdout is one short line per page; that is all you read.
 
-**2b. Agents.** `plan.py --doc <name> --stage extract [--max-pages <n>] [--no-describe]`
+**2b. Agents.** Run this only after every 2a command has finished: it reads
+the shards those scripts wrote. If you ran it earlier in this attempt, run it
+again now and use only the new output. A non-empty `stale_pages` (with a
+`warning:` line) means the 2a commands for those pages have not run yet.
+`plan.py --doc <name> --stage extract [--max-pages <n>] [--no-describe]`
 prints `batches`: only the pages that still need judgment (an `ocr`/`vision`
 body, or an image without a description). Each batch is sized to fit in an
 extractor's turn limit. **In a single message, spawn one `extractor` per
@@ -212,7 +225,8 @@ and prints the document's new `status`:
   <name> --dest <dir>` and report the folders it prints. Next document.
 - `retrying` → loop to step 2 for this document. `escalated_pages` holds
   each page's new tier, `recheck_images` flag and the grader's `reason`;
-  `plan.py` reads them from the queue file.
+  `plan.py` reads them from the queue file. A `reason` here lists what
+  will need a human once the retries are done; nothing to do for it now.
 - `needs-human` → its `reason` says why. Next document.
 
 `warnings` (a count) is recorded in the queue entry whatever the status and

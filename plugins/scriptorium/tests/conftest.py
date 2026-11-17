@@ -71,6 +71,22 @@ def run_script(relpath: str, *args: str, cwd: Path, stdin: str | None = None) ->
     )
 
 
+def fake_command(bin_dir: Path, name: str, source: str) -> Path:
+    """A stub program that runs the Python `source` with this interpreter,
+    executable by subprocess on both POSIX and Windows (a .cmd there)."""
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    script = bin_dir / f"{name}.py"
+    script.write_text(source, encoding="utf-8")
+    if sys.platform == "win32":
+        launcher = bin_dir / f"{name}.cmd"
+        launcher.write_text(f'@"{sys.executable}" "{script}" %*\n')
+    else:
+        launcher = bin_dir / name
+        launcher.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n')
+        launcher.chmod(0o755)
+    return launcher
+
+
 def gates_report(doc: str, *args: str, cwd: Path) -> dict:
     """Run gates.py and return the full report it wrote; its stdout is only
     a summary."""

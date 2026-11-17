@@ -2,6 +2,8 @@
 to batch them so no agent runs out of turns."""
 
 import json
+import os
+from datetime import datetime, timezone
 
 import elements as elements_lib
 import paths
@@ -165,6 +167,45 @@ class TestExtractStage:
         assert batch["pages"] == [1]
         assert batch["tiers"] == {}
         assert batch["recheck_images"] == [1]
+
+
+class TestStaleImageShard:
+    """On a retry, a recheck page's image shard from the previous attempt
+    still has its descriptions until the scripts stage rewrites it."""
+
+    def _retry(self, tmp_project):
+        doc = _setup(
+            tmp_project,
+            attempt=1,
+            escalated={"1": {"tier": "text", "recheck_images": True, "body": False, "reason": "bad_caption"}},
+        )
+        state_path = tmp_project / "runs" / "state.json"
+        state = json.loads(state_path.read_text())
+        state["docs"][doc]["attempts"] = [{"attempt": 1, "started_at": "2026-10-17T10:00:00+00:00"}]
+        state_path.write_text(json.dumps(state))
+        return doc
+
+    def test_a_shard_older_than_the_attempt_is_stale_not_agent_free(self, tmp_project, capsys):
+        doc = self._retry(tmp_project)
+        _images(doc, 1, DESCRIBED)
+        before = datetime(2026, 10, 17, 9, 59, tzinfo=timezone.utc).timestamp()
+        os.utime(paths.shard_path(doc, 1, "image"), (before, before))
+
+        out = plan.extract_stage(doc, max_pages=None)
+
+        assert out["stale_pages"] == [1]
+        assert out["agent_free_pages"] == 0
+        assert out["batches"] == []
+        assert "warning" in capsys.readouterr().err
+
+    def test_a_shard_rewritten_this_attempt_is_batched(self, tmp_project):
+        doc = self._retry(tmp_project)
+        _images(doc, 1, BARE)
+
+        out = plan.extract_stage(doc, max_pages=None)
+
+        assert out["stale_pages"] == []
+        assert [b["pages"] for b in out["batches"]] == [[1]]
 
 
 class TestGradeStage:

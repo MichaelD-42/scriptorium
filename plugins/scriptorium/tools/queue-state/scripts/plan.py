@@ -17,6 +17,7 @@ import argparse
 import json
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
@@ -90,8 +91,25 @@ def scripts_stage(doc: str) -> dict:
     return {"format_extract": image_pages}
 
 
+def _stale(doc: str, entry: dict) -> list[int]:
+    """Recheck pages whose image shard predates this attempt: the scripts
+    stage, which rewrites it without descriptions, has not run yet."""
+    attempts = entry.get("attempts")
+    if entry["attempt"] == 0 or not attempts:
+        return []
+    started = datetime.fromisoformat(attempts[-1]["started_at"]).timestamp()
+    return [
+        n for n in _recheck(entry)
+        if (shard := paths.shard_path(doc, n, "image")).exists() and shard.stat().st_mtime < started
+    ]
+
+
 def extract_stage(doc: str, max_pages: int | None, describe: bool = True) -> dict:
     entry, tiers = _context(doc)
+    stale = _stale(doc, entry)
+    if stale:
+        print(f"warning: the image shards of pages {stale} predate this attempt; run the "
+              "--stage scripts commands first, then plan --stage extract again", file=sys.stderr)
     work = []
     for page, tier in sorted(tiers.items()):
         shard = elements_lib.read_shard(paths.shard_path(doc, page, "image")) or {"elements": []}
@@ -105,8 +123,9 @@ def extract_stage(doc: str, max_pages: int | None, describe: bool = True) -> dic
     batches, over = pack(work, turn_budget("extractor"), max_pages)
     recheck = set(_recheck(entry))
     escalated = entry["escalated_pages"]
+    in_work = {page for page, _ in work}
     return {
-        "agent_free_pages": len(tiers) - len(work),
+        "agent_free_pages": len(tiers) - len(work) - len(set(stale) - in_work),
         "batches": [
             {
                 "pages": b,
@@ -117,6 +136,7 @@ def extract_stage(doc: str, max_pages: int | None, describe: bool = True) -> dic
             for b in batches
         ],
         "over_budget_pages": over,
+        "stale_pages": stale,
     }
 
 

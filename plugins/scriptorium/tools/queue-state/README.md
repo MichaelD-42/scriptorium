@@ -55,8 +55,7 @@ own is counted at `vision`.
    - Gate `ocr_confidence_floor` or `text_layer_coverage` failed → each page
      in its `pages` goes to `vision`, the gate's `detail` as reason.
    - Any other failed gate is document-level and names no page: needs a
-     human, even when other pages could be retried, since a retry cannot
-     fix it.
+     human, since a retry cannot fix it.
    - A page tagged with a content issue (`dropped_text`, `hallucinated_text`,
      `wrong_reading_order`, `duplicated_text`, `wrong_heading_level`,
      `table_corruption`) moves one rung up its format's ladder:
@@ -74,13 +73,16 @@ own is counted at `vision`.
      A page escalated for both its body and its images keeps `body: true`.
    - The reason is the grader's `reason` text from the grade shard, or the
      tags when the grader wrote none.
-4. Status: anything that needs a human (a needs-human gate, a document-level
-   gate, a content issue with no rung left) → `needs-human` with all reasons.
-   Else `attempt >= max_attempts` → `needs-human`. Else no page to retry
-   (a document-level gate, or a low score without tags) → `needs-human`,
-   since a retry would re-run nothing. Else `retrying` with
+4. Status: a page to retry and `attempt < max_attempts` → `retrying` with
    `escalated_pages`, whose grade shards are deleted: `merge_grades.py`
-   then refuses to pass a page the retry did not regrade.
+   then refuses to pass a page the retry did not regrade. Anything that
+   needs a human is kept in `reason` meanwhile; it comes back from the next
+   grade, since the gates rerun and unescalated pages keep their grade
+   shards. Else anything that needs a human (a needs-human gate, a
+   document-level gate, a content issue with no rung left) → `needs-human`
+   with all reasons. Else `attempt >= max_attempts` → `needs-human`. Else no
+   page to retry (a low score without tags) → `needs-human`, since a retry
+   would re-run nothing.
 
 ## `findings.py` — suggested corrections from passed documents
 
@@ -126,7 +128,7 @@ its row and details; "–" when any finished attempt has none. All document text
 
 ```bash
 plan.py --doc <name> --stage scripts                  # {"extract_text": [...], "extract_images": [...]} or {"format_extract": [...]}
-plan.py --doc <name> --stage extract [--max-pages n] [--no-describe]  # {"agent_free_pages": n, "batches": [...], "over_budget_pages": [...]}
+plan.py --doc <name> --stage extract [--max-pages n] [--no-describe]  # {"agent_free_pages": n, "batches": [...], "over_budget_pages": [...], "stale_pages": [...]}
 plan.py --doc <name> --stage grade   [--max-pages n]  # {"text_mode": false, "batches": [{"pages": [...]}], "over_budget_pages": [...]}
 ```
 
@@ -143,7 +145,10 @@ on a retry.
   rest are `agent_free_pages`. Each extract batch carries `pages`, `tiers`,
   `recheck_images` and, on a retry, `reasons`. A `body: false` page is
   left out of `tiers` and costs no body turns: the extractor only redoes
-  its images.
+  its images. On a retry, a `recheck_images` page whose image shard is
+  older than the attempt's `started_at` is listed in `stale_pages` with a
+  `warning:` on stderr and is not counted agent-free: the scripts stage
+  has not rewritten it yet, so run that first and plan again.
 - **grade**: every page of the set for `pdf`/`pptx`/`image`; `text_mode:
   true` with no batches for `docx`/`xlsx`/`html`.
 

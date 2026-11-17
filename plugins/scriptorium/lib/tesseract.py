@@ -16,21 +16,35 @@ import subprocess
 import sys
 from pathlib import Path
 
+import wsl
+
+ENV_VAR = "SCRIPTORIUM_TESSERACT"
 # Common install locations winget/choco/scoop use, checked only if `tesseract`
 # isn't already on PATH.
 WINDOWS_CANDIDATES = [
     Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe"),
     Path(r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"),
 ]
+# The same installs seen from WSL, relative to C:\.
+WSL_INSTALLS = (
+    "Program Files/Tesseract-OCR/tesseract.exe",
+    "Program Files (x86)/Tesseract-OCR/tesseract.exe",
+    "Users/*/AppData/Local/Programs/Tesseract-OCR/tesseract.exe",
+    "Users/*/scoop/apps/tesseract/current/tesseract.exe",
+)
 
 
 def find_tesseract() -> str | None:
-    """Return a path (or bare command) usable to invoke tesseract, or None."""
+    """Return a path (or bare command) usable to invoke tesseract, or None.
+    SCRIPTORIUM_TESSERACT wins, then PATH, then the usual install places."""
+    if os.environ.get(ENV_VAR):
+        return os.environ[ENV_VAR]
     on_path = shutil.which("tesseract")
     if on_path:
         return on_path
     if sys.platform != "win32":
-        return None
+        installs = wsl.windows_installs(*WSL_INSTALLS)
+        return str(installs[0]) if installs else None
     candidates = list(WINDOWS_CANDIDATES)
     local_app_data = os.environ.get("LOCALAPPDATA")
     if local_app_data:
@@ -45,6 +59,25 @@ def find_tesseract() -> str | None:
         if candidate.is_file():
             return str(candidate)
     return None
+
+
+def use_tesseract(cmd: str) -> None:
+    """Point pytesseract at `cmd`. A Windows tesseract run from WSL gets its
+    image, output and --tessdata-dir paths as Windows paths."""
+    import pytesseract.pytesseract as pt
+
+    pt.tesseract_cmd = cmd
+    if not wsl.is_windows_exe(cmd) or getattr(pt.run_tesseract, "windows_paths", False):
+        return
+    run = pt.run_tesseract
+
+    def run_windows(input_filename, output_filename_base, *args, config="", **kwargs):
+        # Single quotes: pytesseract splits config POSIX-style, which would eat a UNC path's backslashes.
+        config = re.sub(r'--tessdata-dir "([^"]+)"', lambda m: f"--tessdata-dir '{wsl.path_for(cmd, m.group(1))}'", config)
+        return run(wsl.path_for(cmd, input_filename), wsl.path_for(cmd, output_filename_base), *args, config=config, **kwargs)
+
+    run_windows.windows_paths = True
+    pt.run_tesseract = run_windows
 
 
 def tessdata_dir_for(tesseract_path: str) -> Path | None:
@@ -92,7 +125,7 @@ def ocr_figure_text(image_path: Path, lang: str, tessdata_dir: str | None = None
     cmd = find_tesseract()
     if not cmd:
         return ""
-    pytesseract.pytesseract.tesseract_cmd = cmd
+    use_tesseract(cmd)
     config = f'--tessdata-dir "{tessdata_dir}"' if tessdata_dir else ""
     try:
         with Image.open(image_path) as img:
