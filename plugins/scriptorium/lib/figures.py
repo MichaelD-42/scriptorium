@@ -943,12 +943,16 @@ def detect_figure_regions_with_exclusions(
     if content_rect:
         reference_area = max(1e-6, (content_rect[2] - content_rect[0]) * (content_rect[3] - content_rect[1]))
 
+    # The padding stops at the content rect (or the page): it never takes in
+    # the title block. The drawing itself is never cut.
+    limits = content_rect or [0.0, 0.0, page_width, page_height]
+
     def padded(raw) -> list[float]:
         return [
-            max(0.0, raw[0] - REGION_PADDING),
-            max(0.0, raw[1] - REGION_PADDING),
-            min(page_width, raw[2] + REGION_PADDING),
-            min(page_height, raw[3] + REGION_PADDING),
+            max(0.0, min(raw[0], limits[0]), raw[0] - REGION_PADDING),
+            max(0.0, min(raw[1], limits[1]), raw[1] - REGION_PADDING),
+            min(page_width, max(raw[2], limits[2]), raw[2] + REGION_PADDING),
+            min(page_height, max(raw[3], limits[3]), raw[3] + REGION_PADDING),
         ]
 
     regions = []
@@ -1008,7 +1012,7 @@ def detect_figure_regions_with_exclusions(
             for raw in group:
                 excluded_regions.append({"bbox": padded(raw), "reason": "text_box"})
 
-    _absorb_edge_labels(regions, page_lines)
+    _absorb_edge_labels(regions, page_lines, page_height, content_rect)
     # A panel is a figure as printed: no table or band rule applies to it.
     regions.extend({"bbox": panel} for panel in panels)
     regions.sort(key=lambda r: r["bbox"][1])
@@ -1030,7 +1034,9 @@ def _rect_gap(a, b) -> float:
     return max(dx, dy)
 
 
-def _absorb_edge_labels(regions: list[dict], page_lines: list[dict]) -> None:
+def _absorb_edge_labels(
+    regions: list[dict], page_lines: list[dict], page_height: float | None = None, content_rect: list[float] | None = None
+) -> None:
     """Follow-up R22: grow each region over the short label lines printed
     just outside it ("CW", "Unom", "10%"). A label line has at most
     EDGE_LABEL_MAX_CHARS characters and EDGE_LABEL_MAX_WORDS words, is not
@@ -1040,14 +1046,16 @@ def _absorb_edge_labels(regions: list[dict], page_lines: list[dict]) -> None:
     label under an axis that reaches into the padding qualifies. Known
     limit: a short body line printed that close to a drawing qualifies
     too; a line at normal spacing above or below a figure does not. A
-    label goes to the nearest region. Changes `regions` in place."""
+    label goes to the nearest region. A line in the furniture band (with
+    `content_rect`, outside it) is page furniture, never a label. Changes
+    `regions` in place."""
     if not regions:
         return
     for line in page_lines:
         text = line["text"]
         if len(text) > EDGE_LABEL_MAX_CHARS or len(text.split()) > EDGE_LABEL_MAX_WORDS:
             continue
-        if CAPTION_PATTERN.match(text):
+        if CAPTION_PATTERN.match(text) or furniture_lib.in_furniture_band(line["bbox"], page_height, content_rect):
             continue
         if any(line_in_region(line["bbox"], r["bbox"]) for r in regions):
             continue

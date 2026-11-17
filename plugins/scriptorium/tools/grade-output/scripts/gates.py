@@ -287,6 +287,15 @@ def output_repeat_threshold(doc_data: dict) -> int:
     return max(OUTPUT_REPEAT_MIN_COUNT, math.ceil(OUTPUT_REPEAT_MIN_FRACTION * body))
 
 
+def _reaches_band(bbox, page_height: float | None, rect: list[float] | None) -> bool:
+    """True when `bbox` reaches into a furniture band of its page (any part
+    above the top limit or below the bottom one)."""
+    if not bbox or len(bbox) != 4 or not page_height:
+        return False
+    top, bottom = furniture_lib.band_limits(page_height, rect)
+    return bbox[1] < top or bbox[3] > bottom
+
+
 def check_furniture_absent(
     doc_data: dict, furniture: dict, output_dir: Path, page_heights: dict[int, float] | None = None,
     page_widths: dict[int, float] | None = None,
@@ -296,7 +305,9 @@ def check_furniture_absent(
 
     - Text: no heading/paragraph/list_item text, table cell, image
       `figure_text` or `caption` has a line whose furniture key equals
-      a `line_patterns` entry.
+      a `line_patterns` entry. A `figure_text` line has no position of its
+      own, so on an image that reaches into the band it is also checked
+      against the letter-bearing patterns.
     - Tables: no `table` element's bbox matches a `frame_tables` entry.
     - Assembled output: no whole line of the .md/.html files under the
       doc's output dir (md, md-tree, okf, html) matches a `line_patterns`
@@ -333,11 +344,11 @@ def check_furniture_absent(
             page_number = page.get("page_number")
             for el in page.get("elements", []):
                 el_type = el.get("type")
+                rect = furniture_lib.page_content_rect(
+                    furniture, page_widths.get(page_number), page_heights.get(page_number)
+                )
                 patterns = furniture_lib.patterns_for_element(
-                    all_patterns, el.get("bbox"), page_heights.get(page_number),
-                    furniture_lib.page_content_rect(
-                        furniture, page_widths.get(page_number), page_heights.get(page_number)
-                    ),
+                    all_patterns, el.get("bbox"), page_heights.get(page_number), rect
                 )
                 if el_type in ("heading", "paragraph", "list_item"):
                     for hit in furniture_lib.furniture_line_hits(el.get("text") or "", patterns):
@@ -351,7 +362,12 @@ def check_furniture_absent(
                         add(page_number, "frame table", f"table bbox {el.get('bbox')}")
                 elif el_type == "image":
                     for field in ("figure_text", "caption"):
-                        for hit in furniture_lib.furniture_line_hits(el.get(field) or "", patterns):
+                        # figure_text lines carry no position of their own: on
+                        # an image that reaches into the band, each is checked
+                        # against the letter-bearing patterns too.
+                        reaches = _reaches_band(el.get("bbox"), page_heights.get(page_number), rect)
+                        field_patterns = patterns | masked_patterns if field == "figure_text" and reaches else patterns
+                        for hit in furniture_lib.furniture_line_hits(el.get(field) or "", field_patterns):
                             add(page_number, f"image {field}", hit)
 
     if masked_patterns and output_dir.exists():

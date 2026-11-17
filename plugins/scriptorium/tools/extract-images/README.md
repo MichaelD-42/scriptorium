@@ -118,7 +118,10 @@ extractor may replace such a `figure_text` with `describe_image.py
   characters, 2 words, not a caption) within 6 pt of a region and beside
   it (its y-range overlaps the region's) grows the region first, so the
   label lands in `figure_text` and in the crop. Known limit: a short body
-  line printed that close to a drawing is taken too.
+  line printed that close to a drawing is taken too. A line in the
+  furniture band (outside the content rect, when triage found one) is
+  never a label, and a region's padding stops at the content rect, so a
+  figure drawn just below the frame top does not take in the title block.
 - Every `image` element (bitmap or vector-region) also gets a
   script-authoritative `caption`: `lib/figures.py`'s `find_caption_line`
   searches the text layer within 60pt directly above or below the
