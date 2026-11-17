@@ -95,8 +95,10 @@ that's a subagent's job.
 7. **Decide** (`state.py decide`, a script): `overall_passed` (gates AND
    rubric) → `passed`, next document. Otherwise escalate (below),
    `status: retrying` (which opens the next attempt), loop back to step 4 — or `status: needs-human` at
-   `max-attempts`, when no tier is left, or when nothing page-level is left
-   to retry.
+   `max-attempts`, or when nothing page-level is left to retry. A failure
+   only a human can fix (no tier left, a page-break join, a document-level
+   gate) does not stop the other pages' retries: it rides along in the
+   entry's `reason` and decides the document once those retries are done.
 
 ```mermaid
 flowchart TD
@@ -135,7 +137,7 @@ re-run — decides what happens next:
 | Failure tag | Effect on retry |
 |---|---|
 | `dropped_text`, `hallucinated_text`, `wrong_reading_order`, `duplicated_text`, `wrong_heading_level`, `table_corruption` | move that page's body tier up to `vision` (`text → vision`, `ocr → vision`). A text-layer page skips OCR: Tesseract writes only paragraphs, so its tables and headings would be lost |
-| a page already at `vision` still failing | don't retry again — `status: needs-human` for the whole document immediately |
+| a page already at `vision` still failing | don't retry that page again — the document goes `needs-human` once no other page is left to retry |
 | `split_paragraph` | `needs-human`: page-break joins are a script rule (`lib/elements.py`), so no tier changes the result |
 | `missing_image`, `bad_caption` | body tier unchanged; set `recheck_images: true` so the next `extractor` batch redoes just the image step |
 

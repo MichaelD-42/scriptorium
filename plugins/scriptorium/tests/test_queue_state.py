@@ -81,9 +81,28 @@ class TestDecide:
         assert out["escalated_pages"]["1"]["reason"] == "hallucinated_text"
 
     def test_page_already_at_vision_is_needs_human(self):
+        out = _decide(_report([_page(1, ["dropped_text"])]), {1: "vision"})
+        assert out["status"] == "needs-human"
+        assert "page 1" in out["reason"]
+        assert out["escalated_pages"] == {}
+
+    def test_a_human_item_does_not_drop_the_other_pages_retry(self):
+        """Page 2 can still be retried; page 1's human item is carried in
+        the reason and decided once nothing is left to retry."""
         out = _decide(
             _report([_page(1, ["dropped_text"]), _page(2, ["dropped_text"])]),
             {1: "vision", 2: "text"},
+        )
+        assert out["status"] == "retrying"
+        assert list(out["escalated_pages"]) == ["2"]
+        assert "page 1" in out["reason"]
+
+    def test_a_human_item_is_needs_human_on_the_last_attempt(self):
+        out = _decide(
+            _report([_page(1, ["dropped_text"]), _page(2, ["dropped_text"])]),
+            {1: "vision", 2: "text"},
+            attempt=2,
+            max_attempts=3,
         )
         assert out["status"] == "needs-human"
         assert "page 1" in out["reason"]
@@ -151,10 +170,15 @@ class TestDecide:
             "detail": "title block on page 3",
             "pages": [3],
         }
-        out = _decide(
-            _report([_page(1, ["missing_image"])], checks=[check]), {1: "text"}
-        )
+        out = _decide(_report(checks=[check]), {1: "text"})
         assert out["status"] == "needs-human"
+        assert "furniture_absent" in out["reason"]
+
+    def test_a_human_gate_waits_for_the_page_retries(self):
+        check = {"name": "furniture_absent", "passed": False, "detail": "title block on page 3", "pages": [3]}
+        out = _decide(_report([_page(1, ["missing_image"])], checks=[check]), {1: "text"})
+        assert out["status"] == "retrying"
+        assert list(out["escalated_pages"]) == ["1"]
         assert "furniture_absent" in out["reason"]
 
     def test_last_attempt_is_needs_human(self):
@@ -224,16 +248,16 @@ class TestDecide:
         assert out["status"] == "retrying"
         assert out["escalated_pages"]["2"]["tier"] == "vision"
 
-    def test_unretryable_gate_is_needs_human_even_with_pages_to_retry(self):
+    def test_unretryable_gate_is_carried_through_the_page_retries(self):
         """A retry re-extracts pages; it cannot fix a document-level gate,
-        and the gate's detail must reach the reason."""
+        so the gate's detail stays in the reason while the pages retry."""
         check = {
             "name": "image_refs_resolve",
             "passed": False,
             "detail": "missing assets: ['assets/p1-1.png']",
         }
         out = _decide(_report([_page(1, ["missing_image"])], checks=[check]), {1: "text"})
-        assert out["status"] == "needs-human"
+        assert out["status"] == "retrying"
         assert "image_refs_resolve: missing assets" in out["reason"]
 
     def test_a_gate_escalation_keeps_its_tier_when_the_grader_tags_an_image(self):

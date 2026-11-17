@@ -212,7 +212,8 @@ and prints the document's new `status`:
   <name> --dest <dir>` and report the folders it prints. Next document.
 - `retrying` → loop to step 2 for this document. `escalated_pages` holds
   each page's new tier, `recheck_images` flag and the grader's `reason`;
-  `plan.py` reads them from the queue file.
+  `plan.py` reads them from the queue file. A `reason` here lists what
+  will need a human once the retries are done; nothing to do for it now.
 - `needs-human` → its `reason` says why. Next document.
 
 `warnings` (a count) is recorded in the queue entry whatever the status and
