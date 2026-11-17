@@ -128,7 +128,7 @@ its row and details; "–" when any finished attempt has none. All document text
 
 ```bash
 plan.py --doc <name> --stage scripts                  # {"extract_text": [...], "extract_images": [...]} or {"format_extract": [...]}
-plan.py --doc <name> --stage extract [--max-pages n] [--no-describe]  # {"agent_free_pages": n, "batches": [...], "over_budget_pages": [...]}
+plan.py --doc <name> --stage extract [--max-pages n] [--no-describe]  # {"agent_free_pages": n, "batches": [...], "over_budget_pages": [...], "stale_pages": [...]}
 plan.py --doc <name> --stage grade   [--max-pages n]  # {"text_mode": false, "batches": [{"pages": [...]}], "over_budget_pages": [...]}
 ```
 
@@ -145,7 +145,10 @@ on a retry.
   rest are `agent_free_pages`. Each extract batch carries `pages`, `tiers`,
   `recheck_images` and, on a retry, `reasons`. A `body: false` page is
   left out of `tiers` and costs no body turns: the extractor only redoes
-  its images.
+  its images. On a retry, a `recheck_images` page whose image shard is
+  older than the attempt's `started_at` is listed in `stale_pages` with a
+  `warning:` on stderr and is not counted agent-free: the scripts stage
+  has not rewritten it yet, so run that first and plan again.
 - **grade**: every page of the set for `pdf`/`pptx`/`image`; `text_mode:
   true` with no batches for `docx`/`xlsx`/`html`.
 

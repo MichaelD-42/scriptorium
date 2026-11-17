@@ -137,7 +137,11 @@ with no pages):
 
 Their stdout is one short line per page; that is all you read.
 
-**2b. Agents.** `plan.py --doc <name> --stage extract [--max-pages <n>] [--no-describe]`
+**2b. Agents.** Run this only after every 2a command has finished: it reads
+the shards those scripts wrote. If you ran it earlier in this attempt, run it
+again now and use only the new output. A non-empty `stale_pages` (with a
+`warning:` line) means the 2a commands for those pages have not run yet.
+`plan.py --doc <name> --stage extract [--max-pages <n>] [--no-describe]`
 prints `batches`: only the pages that still need judgment (an `ocr`/`vision`
 body, or an image without a description). Each batch is sized to fit in an
 extractor's turn limit. **In a single message, spawn one `extractor` per
