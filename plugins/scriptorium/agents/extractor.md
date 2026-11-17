@@ -41,7 +41,7 @@ Bash doesn't have; put this path in its place.
 - `render-pages/scripts/render.py --doc <doc> [--pages 1,3]` — page PNGs
   to `work/<doc>/pages/page{N}.png`; skips pages already rendered.
 - `render-pages/scripts/render_region.py --doc <doc> --page <n> --bbox x0,y0,x1,y1 [--dpi 400]`
-  — a high-resolution crop of one region (PDF only); prints its path.
+  — a high-resolution crop of one region (a PDF page, or a pptx slide after `render.py`); prints its path.
 - `ocr-page/scripts/ocr.py --doc <doc> --pages 5,6 --lang <lang> [--tessdata-dir <dir>]`
   — writes `page{N}.ocr.json` shards with `ocr_confidence`.
 - `ocr-page/scripts/write_vision_page.py --doc <doc> --page <n>` — reads

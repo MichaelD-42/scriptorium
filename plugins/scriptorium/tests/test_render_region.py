@@ -50,6 +50,31 @@ def test_bad_bbox_is_an_error(tmp_project):
     assert result.returncode == 1
 
 
+def test_a_pptx_region_is_cropped_from_the_cached_slide_pdf(tmp_project):
+    (tmp_project / "input" / "deck.pptx").write_bytes(b"synthetic")
+    (tmp_project / "work" / "deck").mkdir(parents=True)
+    pdf = fitz.open()
+    pdf.new_page(width=720, height=405)
+    pdf.save(str(tmp_project / "work" / "deck" / "deck.pdf"))
+    pdf.close()
+    result = run_script(
+        "render-pages/scripts/render_region.py", "--doc", "deck", "--page", "1", "--bbox", "10,10,110,60",
+        cwd=tmp_project,
+    )
+    assert result.returncode == 0, result.stderr
+    assert (Path(tmp_project) / result.stdout.strip()).exists()
+
+
+def test_a_pptx_without_the_slide_pdf_is_an_error(tmp_project):
+    (tmp_project / "input" / "deck.pptx").write_bytes(b"synthetic")
+    result = run_script(
+        "render-pages/scripts/render_region.py", "--doc", "deck", "--page", "1", "--bbox", "10,10,110,60",
+        cwd=tmp_project,
+    )
+    assert result.returncode == 1
+    assert "render.py" in result.stderr
+
+
 def test_describe_image_refuses_a_note_in_figure_text():
     from conftest import load_script
 

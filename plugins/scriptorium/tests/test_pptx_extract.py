@@ -2,6 +2,7 @@
 
 import io
 
+import fitz  # PyMuPDF
 import pptx_shapes
 from PIL import Image
 from pptx import Presentation
@@ -120,6 +121,63 @@ class TestPosition:
         assert images[0]["bbox"] == [0.0, 144.0, 72.0, 216.0]
         merged = sorted(body + images, key=lambda e: e["bbox"][1] if "bbox" in e else e.get("top", 0))
         assert [e.get("text", e["type"]) for e in merged] == ["Above", "image", "Below", "Speaker notes: Say this"]
+
+
+def _slide_pdf(tmp_path, slide):
+    """A stand-in for LibreOffice's slide PDF: one page of the slide's size
+    in points, filled red, so a crop of it is a real PNG of a known size."""
+    w, h = pptx_shapes.slide_size(slide)
+    pdf = fitz.open()
+    page = pdf.new_page(width=w / 12700, height=h / 12700)
+    page.draw_rect(page.rect, color=(1, 0, 0), fill=(1, 0, 0))
+    path = tmp_path / "deck.pdf"
+    pdf.save(str(path))
+    pdf.close()
+    return lambda: path
+
+
+def _asset_size(tmp_path, el):
+    with Image.open(tmp_path / el["asset"].removeprefix("assets/")) as img:
+        return img.size
+
+
+class TestPictureCrop:
+    def test_a_cropped_picture_is_exported_cropped(self, tmp_path):
+        slide = _blank_slide()
+        pic = slide.shapes.add_picture(_png(1000, 1000), Inches(1), Inches(1), Inches(2), Inches(2))
+        pic.crop_left, pic.crop_top, pic.crop_right, pic.crop_bottom = 0.25, 0.70, 0.64, 0.03
+        _, images = extract_pptx.extract_slide(slide, 1, tmp_path)
+        w, h = _asset_size(tmp_path, images[0])
+        assert abs(w - 110) <= 1 and abs(h - 270) <= 1
+
+    def test_a_negative_crop_is_clamped(self, tmp_path):
+        slide = _blank_slide()
+        pic = slide.shapes.add_picture(_png(100, 100), Inches(1), Inches(1), Inches(2), Inches(2))
+        pic.crop_top = -0.01
+        _, images = extract_pptx.extract_slide(slide, 1, tmp_path)
+        assert _asset_size(tmp_path, images[0]) == (100, 100)
+
+    def test_a_picture_cropped_away_entirely_is_skipped(self, tmp_path):
+        slide = _blank_slide()
+        pic = slide.shapes.add_picture(_png(100, 100), Inches(1), Inches(1), Inches(2), Inches(2))
+        pic.crop_left, pic.crop_right = 0.6, 0.4
+        assert extract_pptx.extract_slide(slide, 1, tmp_path)[1] == []
+
+    def test_a_picture_pil_cannot_decode_is_cropped_from_the_slide_pdf(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(extract_pptx, "VECTOR_IMAGE_EXTS", {"png"})  # stands in for an EMF blob
+        slide = _blank_slide()
+        pic = slide.shapes.add_picture(_png(40, 40), Inches(1), Inches(1), Inches(2), Inches(1))
+        _, images = extract_pptx.extract_slide(slide, 1, tmp_path, _slide_pdf(tmp_path, slide))
+        assert images[0]["asset"] == f"assets/page1_shape{pic.shape_id}.png"
+        assert images[0]["source_shape_id"] == pic.shape_id
+        w, h = _asset_size(tmp_path, images[0])
+        assert abs(w - 2 * extract_pptx.CROP_DPI) <= 1 and abs(h - extract_pptx.CROP_DPI) <= 1
+
+    def test_without_a_slide_pdf_such_a_picture_has_no_element(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(extract_pptx, "VECTOR_IMAGE_EXTS", {"png"})
+        slide = _blank_slide()
+        slide.shapes.add_picture(_png(40, 40), Inches(1), Inches(1), Inches(2), Inches(1))
+        assert extract_pptx.extract_slide(slide, 1, tmp_path)[1] == []
 
 
 class TestFurniturePlaceholders:

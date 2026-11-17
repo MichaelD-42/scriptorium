@@ -37,7 +37,9 @@ uv run --project "${CLAUDE_PLUGIN_ROOT}" python   "${CLAUDE_PLUGIN_ROOT}/tools/r
 ```
 
 It writes `work/<doc>/zoom/page{N}_{x0}_{y0}.png` (the bbox plus 6 pt on
-each side; PDF pages only) and prints the path.
+each side; a PDF page, or a pptx slide once `render.py` has cached the
+slide PDF) and prints the path. `pptx-extract` uses its `crop_png` to
+crop slide figures.
 
 Omit `--pages` to render every page. Rendering is idempotent and skips a
 page whose PNG already exists unless `--force` is passed — re-rendering

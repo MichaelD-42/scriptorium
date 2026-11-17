@@ -3,19 +3,47 @@
 See README.md."""
 
 import argparse
+import functools
+import io
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "render-pages" / "scripts"))
 import elements as elements_lib  # noqa: E402
 import paths  # noqa: E402
 import pptx_shapes  # noqa: E402
+import render  # noqa: E402
+import render_region  # noqa: E402
 
+from PIL import Image
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.oxml.ns import qn
 
 STRIKE_VALUES = {"sngStrike", "dblStrike"}
+# Picture formats PIL cannot decode everywhere: cropped from the slide PDF.
+VECTOR_IMAGE_EXTS = {"emf", "wmf"}
+CROP_DPI = 200
+
+
+def save_cropped(blob: bytes, crop: tuple[float, float, float, float], out: Path) -> bool:
+    """Write the part of the picture the slide shows (`a:srcRect`: fractions
+    of the source cut from the left, top, right, bottom) to `out`. A
+    negative value is an outset: clamped, not padded. False when PIL cannot
+    read or write the image."""
+    if not any(crop):
+        out.write_bytes(blob)
+        return True
+    left, top, right, bottom = (max(0.0, c) for c in crop)
+    try:
+        with Image.open(io.BytesIO(blob)) as img:
+            w, h = img.size
+            img.crop((round(left * w), round(top * h), round(w - right * w), round(h - bottom * h))).save(out)
+    except (OSError, ValueError):
+        out.unlink(missing_ok=True)
+        return False
+    return True
 
 
 def paragraph_text(para) -> str:
@@ -74,29 +102,54 @@ def visible_shapes(shapes):
             yield shape
 
 
-def extract_slide(slide, page_number: int, assets_dir: Path) -> tuple[list[dict], list[dict]]:
+def extract_slide(slide, page_number: int, assets_dir: Path, slide_pdf=None) -> tuple[list[dict], list[dict]]:
     """Returns (body_elements, image_elements) for one slide, each in
     reading order. Each element carries its position on the slide in points
     (the slide PDF's unit), so merge.py can interleave the two lists: a body
-    element its `top`, an image its `bbox`."""
+    element its `top`, an image its `bbox`. Every image records the shape
+    it came from as `source_shape_id`.
+
+    `slide_pdf`: a no-argument callable returning the deck's slide PDF (or
+    None), called only when a figure must be cropped from the rendered
+    slide. Without it such a figure gets no element, and a warning."""
     title_shape = slide.shapes.title
     title_shape_id = title_shape.shape_id if title_shape is not None else None
     body_elements = []
     image_elements = []
     bitmap_idx = 0
 
+    def add_image(shape, bbox, asset: str, kind: str) -> None:
+        image_elements.append(
+            {"type": "image", "kind": kind, "asset": f"assets/{asset}", "caption": "", "bbox": bbox,
+             "source_shape_id": shape.shape_id}
+        )
+
+    def add_slide_crop(shape, bbox) -> None:
+        """An image element cut from the rendered slide at the shape's bbox:
+        what the slide shows, whatever the shape holds."""
+        out = assets_dir / f"page{page_number}_shape{shape.shape_id}.png"
+        pdf = slide_pdf() if slide_pdf else None
+        if pdf is None or render_region.crop_png(pdf, page_number, bbox, out, CROP_DPI) is None:
+            print(f"warning: slide {page_number} shape {shape.shape_id}: no slide PDF crop, no image element",
+                  file=sys.stderr)
+            return
+        add_image(shape, bbox, out.name, "vector")
+
     for shape in visible_shapes(slide.shapes):
         bbox = [pt(v) for v in pptx_shapes.abs_bbox(shape)]
         top = bbox[1]
 
         if pptx_shapes.is_picture(shape):
-            bitmap_idx += 1
+            crop = (shape.crop_left, shape.crop_top, shape.crop_right, shape.crop_bottom)
+            if crop[0] + crop[2] >= 1 or crop[1] + crop[3] >= 1:
+                continue  # cropped away entirely: nothing shows
             image = shape.image
-            out_name = f"page{page_number}_bitmap{bitmap_idx}.{image.ext}"
-            (assets_dir / out_name).write_bytes(image.blob)
-            image_elements.append(
-                {"type": "image", "kind": "bitmap", "asset": f"assets/{out_name}", "caption": "", "bbox": bbox}
-            )
+            out_name = f"page{page_number}_bitmap{bitmap_idx + 1}.{image.ext}"
+            if image.ext not in VECTOR_IMAGE_EXTS and save_cropped(image.blob, crop, assets_dir / out_name):
+                bitmap_idx += 1
+                add_image(shape, bbox, out_name, "bitmap")
+            else:
+                add_slide_crop(shape, bbox)
             continue
 
         if pptx_shapes.is_furniture_placeholder(shape):
@@ -149,9 +202,19 @@ def main() -> None:
     assets_dir = paths.assets_dir(args.doc)
     assets_dir.mkdir(parents=True, exist_ok=True)
 
+    @functools.cache
+    def slide_pdf() -> Path | None:
+        """Converted on first use only: a deck with no figure to crop needs
+        no LibreOffice."""
+        try:
+            return render.convert_pptx_to_pdf(pptx_path, args.doc)
+        except (SystemExit, OSError) as error:  # no soffice, or a failed conversion
+            print(f"warning: no slide PDF for {args.doc}: {error}", file=sys.stderr)
+            return None
+
     for page_number in page_numbers:
         slide = presentation.slides[page_number - 1]
-        body_elements, image_elements = extract_slide(slide, page_number, assets_dir)
+        body_elements, image_elements = extract_slide(slide, page_number, assets_dir, slide_pdf)
 
         elements_lib.write_shard(paths.shard_path(args.doc, page_number, "text"), page_number, body_elements)
         elements_lib.write_shard(paths.shard_path(args.doc, page_number, "image"), page_number, image_elements)

@@ -35,8 +35,19 @@ produced for a slide. It only ever writes **its own** shard files.
 - **Pictures** (`shape.shape_type == PICTURE`) are saved to
   `output/<doc>/assets/page{N}_bitmap{idx}.<ext>` and become `image`
   elements with an empty caption — same contract as `extract-images`, so
-  the same `describe_image.py` script (its `--caption` alias — pptx has no
-  script-side caption detection) fills them in afterward.
+  the same `describe_image.py` script fills them in afterward. A picture's
+  crop (`a:srcRect`) is applied, so the asset is the part the slide shows
+  (a negative value is an outset and is clamped, not padded); a picture
+  cropped away entirely is skipped. An EMF/WMF picture, or one PIL cannot
+  read, is cropped from the slide PDF instead (below).
+- **Slide-PDF crops**: some figures are taken from the rendered slide, not
+  from the file: `page{N}_shape{id}.png`, `kind: "vector"`, cut at the
+  shape's bbox from `work/<doc>/<doc>.pdf` (`render.py`'s LibreOffice
+  conversion, run on first need only, so a deck with no such figure needs
+  no LibreOffice) with `render_region.py`'s `crop_png`. If the slide PDF
+  can't be made, the figure gets no element and a warning on stderr.
+- Every image element records `source_shape_id`, the id of the shape it
+  came from.
 - **Speaker notes**, if present, become a trailing `paragraph` prefixed
   `"Speaker notes: "` so they're preserved without being confused for
   on-slide content.
