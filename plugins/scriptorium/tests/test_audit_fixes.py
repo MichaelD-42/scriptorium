@@ -1,8 +1,6 @@
 """Regression tests for the 0.5.0 audit findings."""
 
 import json
-import os
-import stat
 from pathlib import Path
 
 from bs4 import BeautifulSoup
@@ -11,7 +9,7 @@ from PIL import Image
 
 import html_pages
 import paths
-from conftest import load_script, run_script
+from conftest import fake_command, load_script, run_script
 
 text_mode = load_script("grade-output/scripts/text_mode_grade.py", "text_mode_audit")
 render = load_script("render-pages/scripts/render.py", "render_audit")
@@ -131,18 +129,13 @@ class TestPptxConversion:
     ):
         """Parallel graders each convert the deck; a shared LibreOffice profile
         and a half-written PDF at the final path made that unsafe."""
-        bin_dir = tmp_project / "bin"
-        bin_dir.mkdir()
         log = tmp_project / "soffice-args.txt"
-        fake = bin_dir / "soffice"
-        fake.write_text(
-            "#!/bin/sh\n"
-            f'echo "$@" > {log}\n'
-            'while [ "$1" != "--outdir" ]; do shift; done\n'
-            'printf "%%PDF-1.4" > "$2/deck.pdf"\n'
-        )
-        fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
-        monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+        fake = fake_command(tmp_project / "bin", "soffice", (
+            "import sys\n"
+            f"open(r'{log}', 'w').write(' '.join(sys.argv[1:]))\n"
+            "open(sys.argv[sys.argv.index('--outdir') + 1] + '/deck.pdf', 'w').write('%PDF-1.4')\n"
+        ))
+        monkeypatch.setenv("SCRIPTORIUM_SOFFICE", str(fake))
         pptx = tmp_project / "input" / "deck.pptx"
         pptx.write_bytes(b"pptx")
 

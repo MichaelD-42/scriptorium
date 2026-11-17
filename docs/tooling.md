@@ -205,6 +205,17 @@ blocks on their absence). Runs once at the start of `/scriptorium:extract`,
 and again via the plugin's `SessionStart` hook. The `.venv` lives alongside
 the plugin source.
 
+The scripts find the binaries with `lib/office.py` (`find_soffice`) and
+`lib/tesseract.py` (`find_tesseract`): the `SCRIPTORIUM_SOFFICE` /
+`SCRIPTORIUM_TESSERACT` environment variable first, then `PATH`
+(`soffice`, then `libreoffice`), then the usual install folders; under WSL
+these include the Windows installs in `C:\Program Files` and each user's
+scoop. A Windows `.exe` run from WSL gets every file path translated with
+`wslpath -w` (`lib/wsl.py`), including LibreOffice's profile URI and
+Tesseract's `--tessdata-dir`. With no `soffice`, `render.py` exits 1 with
+one line naming `SCRIPTORIUM_SOFFICE` and the `work/<doc>/<doc>.pdf` it
+would reuse if you convert the pptx by hand.
+
 OCR language packs are handled per-document, lazily: `ensure_language.py`
 runs tesseract's own script detection (OSD) on a representative scanned page
 and installs whatever's missing (on Windows, via a direct `.traineddata`

@@ -11,6 +11,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+import office  # noqa: E402
 import paths  # noqa: E402
 
 import fitz  # PyMuPDF
@@ -34,17 +35,28 @@ def convert_pptx_to_pdf(pptx_path: Path, doc: str) -> Path:
     if out_pdf.exists() and out_pdf.stat().st_mtime >= pptx_path.stat().st_mtime:
         return out_pdf
 
+    soffice = office.find_soffice()
+    missing = (
+        f"error: soffice not found; set {office.ENV_VAR} to LibreOffice's soffice, "
+        f"or convert the pptx to {out_pdf} yourself (render.py reuses it)"
+    )
+    if soffice is None:
+        print(missing, file=sys.stderr)
+        sys.exit(1)
     # Parallel graders/extractors each convert the deck: a private LibreOffice
     # profile lets two soffice runs coexist, and os.replace means a reader
     # never sees a half-written PDF at out_pdf.
     with tempfile.TemporaryDirectory(dir=work_dir) as tmp:
         tmp = Path(tmp).resolve()
-        result = subprocess.run(
-            ["soffice", f"-env:UserInstallation={(tmp / 'profile').as_uri()}", "--headless",
-             "--convert-to", "pdf", "--outdir", str(tmp), str(pptx_path)],
-            capture_output=True,
-            text=True,
-        )
+        try:
+            result = subprocess.run(
+                office.pdf_command(soffice, pptx_path.resolve(), tmp, tmp / "profile"),
+                capture_output=True,
+                text=True,
+            )
+        except FileNotFoundError:
+            print(missing, file=sys.stderr)
+            sys.exit(1)
         converted = tmp / f"{pptx_path.stem}.pdf"
         if result.returncode != 0 or not converted.exists():
             print(f"error: soffice pptx->pdf conversion failed: {result.stderr}", file=sys.stderr)
