@@ -1388,8 +1388,9 @@ def main() -> None:
             content_rect=content_rect,
         )
         # Follow-up R11: a chart's grid that pdfplumber read as a table is
-        # part of the figure, so it is not a table element.
-        grid_tables = [r["bbox"] for r in region_exclusions if r["reason"] == "grid_table"]
+        # part of the figure, so it is not a table element; so is a small
+        # table inside a large drawing ("table_in_figure").
+        grid_tables = [r["bbox"] for r in region_exclusions if r["reason"] in ("grid_table", "table_in_figure")]
         tables = [t for t in tables if not any(furniture_lib.bbox_matches(t["bbox"], g) for g in grid_tables)]
         # Follow-up R31: a "table" read inside a figure (a screenshot's
         # text layer) is part of the figure.

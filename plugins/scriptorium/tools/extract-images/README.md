@@ -55,7 +55,11 @@ Handles both image kinds a PDF can contain:
     figure, the table is recorded as `grid_table` with its `filled_cells`,
     and `extract-text` emits no table for it. A
     cluster that covers more than 60% of the page (or of the content rect)
-    never uses this rule (follow-up R16): a page-sized form stays a table; or
+    never uses this rule (follow-up R16): a page-sized form stays a table.
+    Overlapping tables that together cover less than 15% of the cluster
+    do not exclude it either: they are part of a large drawing (a legend,
+    labels on background boxes), recorded as `table_in_figure`, and
+    `extract-text` emits no table for them; or
   - it's too small to be more than a stray line.
 
   This is what catches a diagram or chart sitting on an otherwise
@@ -146,14 +150,14 @@ extractor may replace such a `figure_text` with `describe_image.py
 - **`excluded_regions` (Task A5b, "no silent drops")**: the page's image
   shard also carries `excluded_regions: [{"bbox": [...], "reason":
   "frame_drawing"|"repeated_drawing"|"tiny"|"text_box"|"furniture_band"|
-  "table_overlap"|"grid_table"|"invisible_drawing"|"bitmap_panel"}]` — every candidate a filter dropped on this page (the
+  "table_overlap"|"grid_table"|"table_in_figure"|"invisible_drawing"|"bitmap_panel"}]` — every candidate a filter dropped on this page (the
   page's `repeated_drawings` matches give ONE `repeated_drawing` entry with
   their union bbox and a `count`, not one entry per line), always present (an empty list
   when nothing was dropped), so a large region that a filter removes is
   never simply invisible. `merge.py` passes it through to the merged page
   dict the same way `skipped` already does. `grade-output`'s
   `large_region_excluded` gate flags (as a warning, not a hard failure) any
-  entry here whose reason isn't `frame_drawing`/`repeated_drawing`/`tiny`/`text_box`/`grid_table`/`invisible_drawing`/`bitmap_panel` and whose area is
+  entry here whose reason isn't `frame_drawing`/`repeated_drawing`/`tiny`/`text_box`/`grid_table`/`table_in_figure`/`invisible_drawing`/`bitmap_panel` and whose area is
   more than 20% of the page — see `grade-output`'s README.md.
 - If `work/<doc>/triage.json` marks a given page `"role": "toc"`
   (`pdf-triage`'s printed-TOC-page detection), that page's shard is written

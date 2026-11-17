@@ -103,12 +103,15 @@ Detection pipeline, per page:
      Follow-up R16: a cluster that covers more than
      GRID_TABLE_MAX_CLUSTER_FRACTION of the page (or content rect) never
      uses the grid-table rule; a page-sized form stays a table.
+     Nor when the overlapping tables together cover less than
+     TABLE_IN_FIGURE_MAX_COVER of the cluster: small tables inside a large
+     drawing are part of it, recorded as "table_in_figure".
 
 Task A5b: every candidate this pipeline drops -- a pre-filtered frame
 drawing, the page's repeated drawings, or an excluded cluster -- is also
 returned as an "excluded region" (`{"bbox": [...], "reason":
 "frame_drawing"|"repeated_drawing"|"tiny"|"text_box"|"furniture_band"|
-"table_overlap"|"grid_table"}`; a "repeated_drawing" entry also has a `count`) via
+"table_overlap"|"grid_table"|"table_in_figure"}`; a "repeated_drawing" entry also has a `count`) via
 `detect_figure_regions_with_exclusions`, so a large
 region that a filter removes is never silently dropped -- it's visible to
 `extract-images` (which writes it into the page's image shard as
@@ -200,6 +203,13 @@ GRID_CORNER_ARC_MAX = 12.0  # pt
 # there is one). A page-sized ruled form or cover page with sparse cells is
 # a table, not a chart; the cluster is excluded as table_overlap.
 GRID_TABLE_MAX_CLUSTER_FRACTION = 0.60
+
+# Overlapping tables that together cover less than this fraction of a
+# cluster's (padded) area do not exclude it: the cluster is a figure and
+# each table is recorded as "table_in_figure" (extract_text emits no table
+# for it). A table's own ruling plus REGION_PADDING covers far more. Not for
+# a cluster over GRID_TABLE_MAX_CLUSTER_FRACTION (a page border's cluster).
+TABLE_IN_FIGURE_MAX_COVER = 0.15
 
 # Follow-up R12: a table detected inside the content rect that covers more
 # than this fraction of it (and matches it within FRAME_MATCH_TOLERANCE) is
@@ -802,7 +812,7 @@ def detect_figure_regions_with_exclusions(
 
     `excluded_regions`: Task A5b -- every drawing/cluster a filter removed,
     `[{"bbox": [...], "reason": "frame_drawing"|"repeated_drawing"|"tiny"|
-    "text_box"|"furniture_band"|"table_overlap"|"grid_table"|"invisible_drawing"|
+    "text_box"|"furniture_band"|"table_overlap"|"grid_table"|"table_in_figure"|"invisible_drawing"|
     "bitmap_panel"}]`,
     sorted the same way.
     A "grid_table" entry is a pdfplumber table that is a chart's grid; its
@@ -874,12 +884,21 @@ def detect_figure_regions_with_exclusions(
             excluded_regions.append({"bbox": bbox, "reason": "furniture_band"})
             return
         overlapping = [t for t in tables if _overlaps_table(bbox, t["bbox"])]
-        if overlapping:
+        area = max(0.0, bbox[2] - bbox[0]) * max(0.0, bbox[3] - bbox[1])
+        page_sized = area / reference_area > GRID_TABLE_MAX_CLUSTER_FRACTION
+        if (
+            overlapping and not page_sized
+            and sum(_overlap_ratio(bbox, t["bbox"]) for t in overlapping) < TABLE_IN_FIGURE_MAX_COVER
+        ):
+            # Small tables inside a large drawing (a legend, labels on
+            # backgrounds) are part of the figure; not on a page-sized
+            # cluster (a page border joins every drawing into one).
+            for t in overlapping:
+                excluded_regions.append({"bbox": list(t["bbox"]), "reason": "table_in_figure"})
+        elif overlapping:
             # Follow-up R11: a chart's grid read as a table does not hide
             # the chart. Only when every overlapping table is a grid table,
             # and (R16) the cluster is not page-sized.
-            area = max(0.0, bbox[2] - bbox[0]) * max(0.0, bbox[3] - bbox[1])
-            page_sized = area / reference_area > GRID_TABLE_MAX_CLUSTER_FRACTION
             if page_sized or not all(is_grid_table(t, members) for t in overlapping):
                 excluded_regions.append({"bbox": bbox, "reason": "table_overlap"})
                 return
