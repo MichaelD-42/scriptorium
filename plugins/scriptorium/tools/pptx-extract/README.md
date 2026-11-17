@@ -40,8 +40,14 @@ produced for a slide. It only ever writes **its own** shard files.
 - **Speaker notes**, if present, become a trailing `paragraph` prefixed
   `"Speaker notes: "` so they're preserved without being confused for
   on-slide content.
-- Reading order follows each shape's vertical position (`top`) on the
-  slide, then notes last.
+- Reading order follows each shape's vertical position on the slide,
+  then notes last. A group member's position is mapped through its
+  groups' transforms (`a:chOff`/`a:chExt`), so it is in slide space. Each
+  body element carries that position as `top` and each image as `bbox`,
+  in points (1 pt = 12700 EMU), and `merge.py` sorts the two shards into
+  one stream on it.
+- **Hidden shapes** (`cNvPr hidden="1"`), and every member of a hidden
+  group, are skipped.
 - **Charts** (`shape.has_chart`) are not extracted as images in this
   version — pptx-triage flags a slide with a chart as `loop_size: "tight"`
   so the grader looks closely, but rendering a chart to a picture asset

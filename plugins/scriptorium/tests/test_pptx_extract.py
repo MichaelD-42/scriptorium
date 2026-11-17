@@ -1,6 +1,9 @@
-"""pptx-extract's text reading."""
+"""pptx-extract's slide reading."""
+
+import io
 
 import pptx_shapes
+from PIL import Image
 from pptx import Presentation
 from pptx.enum.shapes import PP_PLACEHOLDER
 from pptx.util import Inches
@@ -21,6 +24,13 @@ def _blank_slide():
 
 def _texts(elements):
     return [el.get("text") for el in elements]
+
+
+def _png(w, h):
+    b = io.BytesIO()
+    Image.new("RGB", (w, h), "white").save(b, "PNG")
+    b.seek(0)
+    return b
 
 
 def test_a_line_break_keeps_the_words_apart():
@@ -77,6 +87,39 @@ class TestStrikethrough:
         ]}}})
         assert "<p>keep <del>&lt;b&gt;gone&lt;/b&gt;</del></p>" in html
         assert "<td><del>x</del></td>" in html
+
+
+class TestPosition:
+    def test_a_group_member_is_placed_through_the_group_transform(self, tmp_path):
+        slide = _blank_slide()
+        group = slide.shapes.add_group_shape()
+        group.shapes.add_textbox(0, Inches(1), Inches(3), Inches(1)).text_frame.text = "Inside group"
+        slide.shapes.add_textbox(0, Inches(3), Inches(3), Inches(1)).text_frame.text = "Top level"
+        group._element.grpSpPr.xfrm.off.y = Inches(5)  # child space still starts at 1 in
+        body, _ = extract_pptx.extract_slide(slide, 1, tmp_path)
+        assert _texts(body) == ["Top level", "Inside group"]
+        assert body[1]["top"] == 360.0  # 5 in
+
+    def test_a_hidden_shape_is_skipped(self, tmp_path):
+        slide = _blank_slide()
+        hidden = slide.shapes.add_textbox(0, 0, Inches(3), Inches(1))
+        hidden.text_frame.text = "Hidden"
+        hidden._element.nvSpPr.cNvPr.set("hidden", "1")
+        hidden_pic = slide.shapes.add_picture(_png(10, 10), 0, 0, Inches(1), Inches(1))
+        hidden_pic._element.nvPicPr.cNvPr.set("hidden", "1")
+        body, images = extract_pptx.extract_slide(slide, 1, tmp_path)
+        assert body == [] and images == []
+
+    def test_images_interleave_with_text_and_notes_stay_last(self, tmp_path):
+        slide = _blank_slide()
+        slide.shapes.add_textbox(0, Inches(1), Inches(3), Inches(1)).text_frame.text = "Above"
+        slide.shapes.add_picture(_png(10, 10), 0, Inches(2), Inches(1), Inches(1))
+        slide.shapes.add_textbox(0, Inches(4), Inches(3), Inches(1)).text_frame.text = "Below"
+        slide.notes_slide.notes_text_frame.text = "Say this"
+        body, images = extract_pptx.extract_slide(slide, 1, tmp_path)
+        assert images[0]["bbox"] == [0.0, 144.0, 72.0, 216.0]
+        merged = sorted(body + images, key=lambda e: e["bbox"][1] if "bbox" in e else e.get("top", 0))
+        assert [e.get("text", e["type"]) for e in merged] == ["Above", "image", "Below", "Speaker notes: Say this"]
 
 
 class TestFurniturePlaceholders:

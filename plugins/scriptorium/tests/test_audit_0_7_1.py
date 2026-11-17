@@ -187,7 +187,7 @@ class TestPptxGroups:
 
         body, images = extract_pptx.extract_slide(slide, 1, tmp_path)
 
-        assert body == [{"type": "paragraph", "text": "Grouped label"}]
+        assert [(el["type"], el["text"]) for el in body] == [("paragraph", "Grouped label")]
         assert len(images) == 1
         assert (tmp_path / images[0]["asset"].removeprefix("assets/")).exists()
 

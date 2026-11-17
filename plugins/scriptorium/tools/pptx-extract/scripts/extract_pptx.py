@@ -12,6 +12,7 @@ import paths  # noqa: E402
 import pptx_shapes  # noqa: E402
 
 from pptx import Presentation
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.oxml.ns import qn
 
 STRIKE_VALUES = {"sngStrike", "dblStrike"}
@@ -57,30 +58,52 @@ def table_rows(shape) -> list[list[str]]:
     ]
 
 
+def pt(emu: float) -> float:
+    return round(emu / pptx_shapes.EMU_PER_PT, 1)
+
+
+def visible_shapes(shapes):
+    """Every shape that is not hidden, a group's members in place of the
+    group, in z-order. A hidden group hides its members."""
+    for shape in shapes:
+        if pptx_shapes.is_hidden(shape):
+            continue
+        if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+            yield from visible_shapes(shape.shapes)
+        else:
+            yield shape
+
+
 def extract_slide(slide, page_number: int, assets_dir: Path) -> tuple[list[dict], list[dict]]:
-    """Returns (body_elements, image_elements) for one slide."""
+    """Returns (body_elements, image_elements) for one slide, each in
+    reading order. Each element carries its position on the slide in points
+    (the slide PDF's unit), so merge.py can interleave the two lists: a body
+    element its `top`, an image its `bbox`."""
     title_shape = slide.shapes.title
     title_shape_id = title_shape.shape_id if title_shape is not None else None
     body_elements = []
     image_elements = []
     bitmap_idx = 0
 
-    for shape in pptx_shapes.iter_shapes(slide.shapes):
-        y = shape.top if shape.top is not None else 0
+    for shape in visible_shapes(slide.shapes):
+        bbox = [pt(v) for v in pptx_shapes.abs_bbox(shape)]
+        top = bbox[1]
 
         if pptx_shapes.is_picture(shape):
             bitmap_idx += 1
             image = shape.image
             out_name = f"page{page_number}_bitmap{bitmap_idx}.{image.ext}"
             (assets_dir / out_name).write_bytes(image.blob)
-            image_elements.append({"type": "image", "kind": "bitmap", "asset": f"assets/{out_name}", "caption": ""})
+            image_elements.append(
+                {"type": "image", "kind": "bitmap", "asset": f"assets/{out_name}", "caption": "", "bbox": bbox}
+            )
             continue
 
         if pptx_shapes.is_furniture_placeholder(shape):
             continue
 
         if shape.has_table:
-            body_elements.append({"type": "table", "rows": table_rows(shape), "y": y})
+            body_elements.append({"type": "table", "rows": table_rows(shape), "top": top})
             continue
 
         # `slide.shapes.title` and the shapes yielded by iterating
@@ -90,20 +113,22 @@ def extract_slide(slide, page_number: int, assets_dir: Path) -> tuple[list[dict]
         if title_shape_id is not None and shape.shape_id == title_shape_id:
             title_text = " ".join(shape_paragraphs(shape)).strip()
             if title_text:
-                body_elements.append({"type": "heading", "level": 1, "text": title_text, "y": y})
+                body_elements.append({"type": "heading", "level": 1, "text": title_text, "top": top})
             continue
 
         for para_text in shape_paragraphs(shape):
-            body_elements.append({"type": "paragraph", "text": para_text, "y": y})
+            body_elements.append({"type": "paragraph", "text": para_text, "top": top})
 
-    body_elements.sort(key=lambda e: e["y"])
-    for el in body_elements:
-        del el["y"]
+    body_elements.sort(key=lambda e: e["top"])
+    image_elements.sort(key=lambda e: e["bbox"][1])
 
     if slide.has_notes_slide:
         notes_text = slide.notes_slide.notes_text_frame.text.strip()
         if notes_text:
-            body_elements.append({"type": "paragraph", "text": f"Speaker notes: {notes_text}"})
+            # Below everything on the slide, so merge.py keeps it last.
+            body_elements.append(
+                {"type": "paragraph", "text": f"Speaker notes: {notes_text}", "top": pt(pptx_shapes.slide_size(slide)[1])}
+            )
 
     return body_elements, image_elements
 
