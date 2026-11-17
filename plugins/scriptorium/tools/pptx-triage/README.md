@@ -23,7 +23,7 @@ uv run --project "${CLAUDE_PLUGIN_ROOT}" python \
 ```
 
 Reads `input/<doc-name>.pptx`, writes `work/<doc-name>/triage.json`, and
-prints the same JSON to stdout.
+prints the same JSON to stdout, without the `figure_shapes` lists.
 
 ## Output schema
 
@@ -45,9 +45,9 @@ prints the same JSON to stdout.
       "image_count": 1,
       "figure_shapes": [
         {
-          "shape_id": 23,
+          "shape_id": 4,
           "kind": "group",
-          "bbox_emu": [9696714, 677264, 11200000, 2100000],
+          "bbox_emu": [914400, 914400, 4572000, 3200400],
           "groups": []
         }
       ],

@@ -250,7 +250,7 @@ class TestEmbeddedObjects:
         slide = _blank_slide()
         hidden = _add_worksheet(slide, _workbook([["a"]]))
         hidden._element.nvGraphicFramePr.cNvPr.set("hidden", "1")
-        _add_worksheet(slide, _workbook([["a"]]), width=1587, height=1587)
+        _add_worksheet(slide, _workbook([["a"]]), width=2000, height=2000)
         body, images = extract_pptx.extract_slide(slide, 1, tmp_path, _slide_pdf(tmp_path, slide))
         assert body == [] and images == []
 
@@ -336,3 +336,8 @@ class TestFurniturePlaceholders:
         prs, _ = self._slide_with_footer_placeholders()
         furniture = pptx_triage.footer_furniture(prs)
         assert [p["masked"] for p in furniture["line_patterns"]] == ["Footerline"]
+
+    def test_a_footer_that_is_also_body_text_is_not_furniture(self):
+        prs, slide = self._slide_with_footer_placeholders()
+        slide.shapes.title.text = "Footer line"  # a footer repeating the deck title
+        assert pptx_triage.footer_furniture(prs)["line_patterns"] == []

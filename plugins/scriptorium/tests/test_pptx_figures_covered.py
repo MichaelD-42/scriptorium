@@ -1,11 +1,15 @@
 """The pptx figure census (lib/pptx_shapes.figure_shapes) and the
 pptx_figures_covered gate that checks pptx-extract against it."""
 
+import json
+
+import paths
 import pptx_shapes
+from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE
 from pptx.util import Inches
 
-from conftest import load_script
+from conftest import load_script, run_script
 from test_pptx_extract import (
     _add_chart,
     _add_worksheet,
@@ -49,7 +53,7 @@ class TestCensus:
         hidden._element.nvPicPr.cNvPr.set("hidden", "1")
         cropped = slide.shapes.add_picture(_png(10, 10), 0, 0, Inches(2), Inches(2))
         cropped.crop_top, cropped.crop_bottom = 0.5, 0.5
-        _add_worksheet(slide, _workbook([["a"]]), width=1587, height=1587)
+        _add_worksheet(slide, _workbook([["a"]]), width=2000, height=2000)
         assert _kinds(slide) == []
 
     def test_a_picture_in_a_plain_group_is_listed_with_its_group(self):
@@ -88,6 +92,22 @@ class TestGate:
         image = {"type": "image", "asset": "a.png", "source_shape_id": 6}
         assert gates.check_pptx_figures_covered(_doc([image, {"type": "table", "rows": [["x"]]}], "vision"), census)["passed"] is True
         assert gates.check_pptx_figures_covered(_doc([image], "vision"), census)["passed"] is False
+
+
+def test_the_extract_script_handles_a_figure_with_or_without_libreoffice(tmp_project):
+    """The slide PDF is made on first need; without LibreOffice the chart
+    gets a warning instead of an element, and the slide's text is still
+    written."""
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    slide.shapes.add_textbox(0, 0, Inches(3), Inches(1)).text_frame.text = "Words"
+    _add_chart(slide)
+    prs.save(str(tmp_project / "input" / "deck.pptx"))
+    result = run_script("pptx-extract/scripts/extract_pptx.py", "--doc", "deck", "--pages", "1", cwd=tmp_project)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(paths.shard_path("deck", 1, "text").read_text())["elements"][0]["text"] == "Words"
+    images = json.loads(paths.shard_path("deck", 1, "image").read_text())["elements"]
+    assert images or "warning" in result.stderr
 
 
 def test_the_extractor_covers_its_own_census(tmp_path):

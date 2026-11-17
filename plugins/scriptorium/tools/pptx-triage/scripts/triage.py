@@ -15,6 +15,7 @@ import pptx_shapes  # noqa: E402
 import preflight  # noqa: E402
 
 from pptx import Presentation
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 
 def footer_furniture(presentation) -> dict:
@@ -23,18 +24,36 @@ def footer_furniture(presentation) -> dict:
     placeholders; the patterns let merge.py and gates.py's
     furniture_absent catch them in a vision transcription. A digit-only
     line (a slide number, a numeric date) is left out: with no page
-    geometry it would match any bare number in the body."""
+    geometry it would match any bare number in the body. So is a line that
+    is also body text somewhere in the deck (a footer repeating the deck
+    title): the pattern would fail or strip that body text."""
     pages: dict[str, set[int]] = {}
+    body_keys: set[str] = set()
+
+    def visit(shapes, n: int) -> None:
+        for shape in shapes:
+            if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                visit(shape.shapes, n)
+                continue
+            if not shape.has_text_frame:
+                continue
+            furniture = pptx_shapes.is_furniture_placeholder(shape)
+            for para in shape.text_frame.paragraphs:
+                key = furniture_lib.furniture_key(para.text)
+                if furniture:
+                    pages.setdefault(key, set()).add(n)
+                else:
+                    body_keys.add(key)
+
     for n, slide in enumerate(presentation.slides, start=1):
-        for shape in slide.placeholders:
-            if pptx_shapes.is_furniture_placeholder(shape) and shape.has_text_frame:
-                for para in shape.text_frame.paragraphs:
-                    key = furniture_lib.furniture_key(para.text)
-                    if key and not furniture_lib.is_digit_only_pattern(key):
-                        pages.setdefault(key, set()).add(n)
+        visit(slide.shapes, n)
     return {
         **furniture_lib.empty_furniture(),
-        "line_patterns": [{"masked": key, "page_count": len(found)} for key, found in sorted(pages.items())],
+        "line_patterns": [
+            {"masked": key, "page_count": len(found)}
+            for key, found in sorted(pages.items())
+            if key and not furniture_lib.is_digit_only_pattern(key) and key not in body_keys
+        ],
     }
 
 
@@ -76,7 +95,8 @@ def main() -> None:
     out_path = paths.triage_json(args.doc)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(result, indent=2), encoding="utf-8", newline="")
-    print(json.dumps(result, indent=2))
+    # Context-rot rule: the census (figure_shapes) stays in triage.json, out of the orchestrator's stdout.
+    print(json.dumps({**result, "pages": [{k: v for k, v in p.items() if k != "figure_shapes"} for p in pages]}, indent=2))
 
 
 if __name__ == "__main__":
