@@ -38,13 +38,27 @@ Same contract on both platforms, in order:
    no manager recognized → prints the manual command and continues (soft —
    a document with no scanned pages never needs tesseract at all, so this
    shouldn't block the whole run).
+   `check_env.sh` looks the binary up the way the scripts do (`find_tools.py`:
+   `SCRIPTORIUM_TESSERACT`, PATH, then under WSL a Windows install in
+   Program Files or scoop) and installs nothing when it finds one. It
+   installs only through cached sudo, runs `apt-get update` first, and
+   passes `http_proxy`/`https_proxy` through `sudo -n env ...`. When the
+   tool is still missing it prints one block: the root command, and the
+   options that need no root (a Windows or home install plus the env var;
+   `micromamba install -c conda-forge tesseract`).
 4. `soffice` (LibreOffice) binary missing → same package-manager detection,
    installs the base package. Needed only to rasterize **pptx** slides
    (`render-pages` shells out to `soffice --headless --convert-to pdf`
    first for that format); a document with no pptx never needs it. Missing
    with no way to install → prints the manual command and **exits 0** (soft
    for the same reason as tesseract — this only blocks pptx documents,
-   never the whole run).
+   never the whole run). Same lookup, install and message as tesseract,
+   with `SCRIPTORIUM_SOFFICE`; the no-root option is to convert the pptx to
+   PDF by hand and save it as `work/<doc>/<doc>.pdf`.
+5. `check_env.sh` writes `runs/env.json` with the paths the scripts will
+   use, `null` for a missing tool: `{"tesseract": null, "soffice":
+   "/usr/bin/soffice"}`. The orchestrator stops before rendering a pptx
+   when `soffice` is `null` and no hand-made PDF exists.
 
 ## 2. `ensure_language.py` — per document, only when triage found an `ocr`-tier page
 

@@ -138,6 +138,7 @@ output/<doc>/grade-report.json                      merge_grades.py's output
 output/<doc>.zip                                    zip_output.py's output (optional; sibling to output/<doc>/)
 
 runs/state.json                                     per-document queue state
+runs/env.json                                       check_env.sh's resolved tesseract/soffice paths (null when missing)
 ```
 
 ### Key schemas
@@ -214,7 +215,9 @@ scoop. A Windows `.exe` run from WSL gets every file path translated with
 `wslpath -w` (`lib/wsl.py`), including LibreOffice's profile URI and
 Tesseract's `--tessdata-dir`. With no `soffice`, `render.py` exits 1 with
 one line naming `SCRIPTORIUM_SOFFICE` and the `work/<doc>/<doc>.pdf` it
-would reuse if you convert the pptx by hand.
+would reuse if you convert the pptx by hand. `check_env.sh` uses the same
+lookup (`setup-environment/scripts/find_tools.py`), installs nothing when it
+finds a tool, and writes the result to `runs/env.json`.
 
 OCR language packs are handled per-document, lazily: `ensure_language.py`
 runs tesseract's own script detection (OSD) on a representative scanned page

@@ -67,6 +67,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}\tools
 Exit code 1 is fatal (uv couldn't be obtained, or `uv sync` failed) — stop and report it. Any
 other outcome, proceed; a missing `tesseract` only matters for documents
 that actually have scanned pages, and that's handled per-document below.
+Pass any "missing ... To fix it" block it prints on to the user. On
+Linux/macOS it also writes `runs/env.json`, `{"tesseract": <path or null>,
+"soffice": <path or null>}`, which you may read (two keys).
 
 ## Setup
 
@@ -103,6 +106,12 @@ documents with warnings) with the report's path, and **stop**.
   you how closely to read the reports that follow: `loose` (all tier
   `text`, no visuals) — dispatch and wait; `tight` — expect a retry and read
   each batch's summary closely.
+- **pptx without LibreOffice**: if the document is a pptx, `runs/env.json`
+  has `"soffice": null` and `work/<name>/<name>.pdf` does not exist, stop
+  the run before any render and tell the user: set `SCRIPTORIUM_SOFFICE` to
+  LibreOffice's `soffice`, or convert the pptx to PDF and save it as
+  `work/<name>/<name>.pdf`, which render-pages reuses. The document stays
+  queued for the next run.
 - **Retry** (attempt > 0): don't re-triage. `plan.py` reads the escalated
   pages from `runs/state.json`.
 - **OCR language**: if this attempt has an `ocr` or `vision` page (PDF

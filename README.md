@@ -56,7 +56,7 @@ The first run sets up the Python environment with [`uv`](https://docs.astral.sh/
 | Tool | Needed for | If missing |
 |---|---|---|
 | Tesseract | scanned pages and images (OCR) | install attempted via the package manager when `sudo` needs no password, or brew; otherwise text-layer documents still work |
-| LibreOffice (`soffice`) | `.pptx` (renders slides for grading) | same install attempt; pptx documents fail to render |
+| LibreOffice (`soffice`) | `.pptx` (renders slides for grading) | same install attempt; a pptx stops before rendering, with a message that says how to fix it |
 | [ccusage](https://github.com/ryoppippi/ccusage) | cost per document in the run report | cost shows as "–" |
 
 The scripts look for each tool in this order: the `SCRIPTORIUM_TESSERACT`
