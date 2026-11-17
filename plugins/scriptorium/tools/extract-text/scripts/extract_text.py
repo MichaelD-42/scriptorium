@@ -91,12 +91,16 @@ def figure_region_filtered_lines(lines: list[dict], figure_regions: list[dict]) 
 
 def table_filtered_lines(lines: list[dict], tables: list[dict]) -> list[dict]:
     """Follow-up R24: the subset of `lines` that are not majority-inside
-    any of the page's tables (the same `line_in_region` test figures use),
-    for a block that mostly overlaps a table: the table element carries
-    those lines' text, and the rest of the block stays body text."""
+    a table's cells (the cells together, so a line across two cells
+    counts): the table element carries those lines' text, and the rest of
+    the block stays body text. A line in the table bbox but in no cell (a
+    cell left open by a missing rule) is in no cell's text, so it stays
+    body text."""
     return [
         line for line in lines
-        if not any(figures_lib.line_in_region(line["bbox"], t["bbox"]) for t in tables)
+        if sum(
+            furniture_lib.overlap_ratio(line["bbox"], cell) for t in tables for cell in t.get("cells", [t["bbox"]])
+        ) <= figures_lib.LINE_OVERLAP_THRESHOLD
     ]
 
 
@@ -1373,7 +1377,7 @@ def main() -> None:
         # A layout table (triage's `layout_table` quirk) is no table: its
         # lines stay body text, so its headings and paragraphs are found.
         tables = [
-            {"bbox": t["bbox"], "rows": t["rows"]}
+            {"bbox": t["bbox"], "rows": t["rows"], "cells": t["cells"]}
             for t in figures_lib.page_tables(
                 pdf_path, page_number, frame_tables, content_rect, exclude_regions=figures_lib.bitmap_panels(page)
             )
@@ -1425,10 +1429,12 @@ def main() -> None:
         filtered_blocks: list[tuple[dict, list[dict]]] = []
         for block in text_blocks:
             kept_lines = block["lines"]
-            if any(furniture_lib.overlap_ratio(block["bbox"], t["bbox"]) > 0.5 for t in tables):
+            if tables:
                 # Follow-up R24: drop only the lines inside a table. A
                 # caption printed right above the table can share the block
-                # with the header cells, and is not table text.
+                # with the header cells, and is not table text. Every block
+                # is filtered: one block can hold a few table lines among
+                # many body lines.
                 kept_lines = table_filtered_lines(kept_lines, tables)
                 if not kept_lines:
                     continue

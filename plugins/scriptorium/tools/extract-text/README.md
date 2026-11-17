@@ -95,8 +95,10 @@ document.
   (`.!?:`) or leaves more than 40% of its block's width empty: the source
   broke the line on purpose. A bullet glyph drawn larger than its text
   pairs with the text when their bottoms align, too.
-- Follow-up R24: a block that mostly overlaps a table loses only its lines
-  inside the table; a caption line printed right above the table stays.
+- Follow-up R24: every block on a page with a table loses only its lines
+  inside the table's cells (majority-inside the cells together); a caption
+  line printed right above the table stays, and so does a line in the
+  table bbox that no cell holds (a cell left open by a missing rule).
 - Follow-up R25: a block that opens with the last wrapped line of the
   previous bullet item and then starts a new bullet item is read as list
   content; the leading line is appended to the open item when it sits
