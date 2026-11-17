@@ -170,7 +170,8 @@ runs/state.json                                     per-document queue state
   `toc_headings_match` (the last two only find something on PDFs, the one
   format whose triage detects furniture and a TOC), each carrying its own
   `pages` list and structured detail. Also a top-level `warnings` list
-  (`large_region_excluded`, `orphan_figure_caption`, `table_as_figure`) that
+  (`large_region_excluded`, `orphan_figure_caption`, `table_as_figure`,
+  `toc_unparsed_lines`) that
   never affects `passed` — see `grade-output/README.md`.
 - **`grade-report.json`** — `merge_grades.py`'s output: `overall_passed`
   (`gates.passed AND rubric_passed`) and `rubric_verdict.per_page`, each entry

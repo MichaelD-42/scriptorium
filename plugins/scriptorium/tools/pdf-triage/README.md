@@ -149,10 +149,13 @@ Also writes `work/<doc-name>/toc.json`:
 `unparsed` lists, verbatim, every dot-leader line on a TOC page that gave
 no entry (for example a leader line with no section number), and every
 numbered line (a section-number token with a title) that ended up in no
-entry. It is `[]`
-for the outline path. `grade-output`'s `toc_headings_match` fails while it
-is not empty, because each such line may be a lost entry whose heading
-then became a paragraph.
+entry. A line that is furniture (its furniture key is a `line_patterns`
+entry and its y lies in that pattern's y range, such as a title-block
+field shaped like a section number) is left out. It is `[]`
+for the outline path. `grade-output`'s `toc_headings_match` reports it,
+because each such line may be a lost entry whose heading then became a
+paragraph: as a failure when another TOC problem comes with it, else as a
+`toc_unparsed_lines` warning.
 
 Empty `entries: []` and no `role` keys anywhere when there's no outline and
 no printed TOC found.

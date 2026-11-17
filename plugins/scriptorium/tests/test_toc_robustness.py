@@ -8,7 +8,8 @@ fixture assertions do not change):
    lines (plus number-only lines) are a large enough share of the page.
 2. A title that wraps onto a second line is joined into one entry.
 3. A leader line that gives no entry goes to `toc.json["unparsed"]`, and
-   `toc_headings_match` fails while `unparsed` is not empty.
+   `toc_headings_match` reports it: as a failure when another problem
+   comes with it or there is no entry, else as a warning.
 """
 
 import json
@@ -180,7 +181,7 @@ class TestUnparsed:
 GATE_ENTRIES = ({"number": "1", "title": "Intro", "page": 1, "level": 1},)
 
 
-class TestGateFailsOnUnparsed:
+class TestGateReportsUnparsed:
     def _doc_data(self) -> dict:
         return {
             "doc": "d",
@@ -198,13 +199,23 @@ class TestGateFailsOnUnparsed:
         )
         assert result["passed"] is True
 
-    def test_fails_and_lists_the_unparsed_lines(self):
+    def test_unparsed_alone_is_a_warning(self):
         result = gates.check_toc_headings_match(
             self._doc_data(), list(GATE_ENTRIES), unparsed=["Foreword .......... 3"]
         )
-        assert result["passed"] is False
+        assert result["passed"] is True
         assert result["unparsed"] == ["Foreword .......... 3"]
+        warnings = gates.toc_unparsed_warnings(result)
+        assert [w["name"] for w in warnings] == ["toc_unparsed_lines"]
+        assert "Foreword .......... 3" in warnings[0]["detail"]
+
+    def test_fails_on_unparsed_with_another_problem(self):
+        doc_data = self._doc_data()
+        doc_data["pages"][1]["elements"][0]["level"] = 2
+        result = gates.check_toc_headings_match(doc_data, list(GATE_ENTRIES), unparsed=["Foreword .......... 3"])
+        assert result["passed"] is False
         assert "Foreword .......... 3" in result["detail"]
+        assert gates.toc_unparsed_warnings(result) == []
 
     def test_fails_on_unparsed_even_with_no_entries(self):
         result = gates.check_toc_headings_match(

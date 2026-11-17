@@ -402,8 +402,11 @@ def check_toc_headings_match(doc_data: dict, toc_entries: list[dict], unparsed: 
     Fix wave I2: `unparsed` is toc.json's `unparsed` list -- dot-leader
     lines on a printed TOC page that gave no entry. Each one may be a lost
     entry whose heading then became a paragraph, which the comparison above
-    cannot see. So the check fails while `unparsed` is not empty, and lists
-    those lines.
+    cannot see. The check lists those lines. It fails on them when there
+    is another problem or no entry at all; when every entry matched and
+    nothing else is wrong, they are only a `toc_unparsed_lines` warning
+    (`toc_unparsed_warnings`), so a few stray lines do not block the retry
+    loop.
 
     Passes trivially when toc.json has no entries and no unparsed lines (no
     TOC, or not a PDF): heading levels then come from extract-text's
@@ -445,6 +448,8 @@ def check_toc_headings_match(doc_data: dict, toc_entries: list[dict], unparsed: 
         pages |= {m["toc_page"], m["heading_page"]}
 
     problems = []
+    if unparsed and (missing or page_mismatch or level_mismatch or extra or not toc_entries):
+        problems.append("TOC lines not parsed into an entry: " + ", ".join(repr(line) for line in unparsed))
     if missing:
         problems.append("missing: " + ", ".join(f"{toc_lib.toc_entry_heading_text(m)!r} (page {m['page']})" for m in missing))
     if page_mismatch:
@@ -453,14 +458,27 @@ def check_toc_headings_match(doc_data: dict, toc_entries: list[dict], unparsed: 
         problems.append("level mismatch: " + ", ".join(f"{m['text']!r} (TOC level {m['toc_level']}, heading level {m['heading_level']})" for m in level_mismatch))
     if extra:
         problems.append("not in the TOC: " + ", ".join(f"{m['text']!r} (page {m['page']})" for m in extra))
-    if unparsed:
-        problems.append("TOC lines not parsed into an entry: " + ", ".join(repr(line) for line in unparsed))
     detail = "; ".join(problems) if problems else f"all {len(toc_entries)} TOC entries match a heading"
     return {
         "name": "toc_headings_match", "passed": not problems, "detail": detail, "pages": sorted(pages),
         "missing": missing, "page_mismatch": page_mismatch, "level_mismatch": level_mismatch, "extra": extra,
         "unparsed": unparsed,
     }
+
+
+def toc_unparsed_warnings(toc_check: dict) -> list[dict]:
+    """A `toc_unparsed_lines` warning when `check_toc_headings_match`
+    passed with unparsed TOC lines left over."""
+    if not toc_check["passed"] or not toc_check.get("unparsed"):
+        return []
+    lines = toc_check["unparsed"]
+    return [{
+        "name": "toc_unparsed_lines",
+        "page": None,
+        "lines": lines,
+        "detail": "TOC lines not parsed into an entry: " + ", ".join(repr(line) for line in lines)
+        + " -- every TOC entry matched a heading; verify no entry was lost",
+    }]
 
 
 def check_figures_complete(doc_data: dict, input_format: str | None = None) -> dict:
@@ -701,6 +719,7 @@ def main() -> None:
         check_large_region_excluded(doc_data, page_areas)
         + check_orphan_figure_caption(doc_data)
         + check_table_as_figure(doc_data)
+        + toc_unparsed_warnings(next(c for c in checks if c["name"] == "toc_headings_match"))
     )
 
     result = {"doc": args.doc, "passed": all(c["passed"] for c in checks), "checks": checks, "warnings": warnings}

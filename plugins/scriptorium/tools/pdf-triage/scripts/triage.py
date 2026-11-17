@@ -482,6 +482,26 @@ def detect_furniture(document, pdf_path: Path, body_pages: set[int] | None = Non
     return furniture, furniture_text
 
 
+def drop_furniture_toc_lines(document, toc_pages: list[int], unparsed: list[str], line_patterns: list[dict]) -> list[str]:
+    """`unparsed` without the TOC-page lines that are furniture: the line's
+    `furniture_key` is a line pattern's `masked`, and its top y lies within
+    that pattern's y range. A title-block field such as an issue number can
+    look like a lone section number; a real TOC line never repeats on most
+    body pages."""
+    ranges: dict[str, list[tuple[float, float]]] = {}
+    for pattern in line_patterns:
+        ranges.setdefault(pattern["masked"], []).append((pattern["y_min"], pattern["y_max"]))
+    furniture_lines = set()
+    for page_number in toc_pages:
+        page = document[page_number - 1]
+        lines, ys = toc_lib._page_line_records(page)
+        for text, y in zip(lines, ys):
+            y_frac = y / page.rect.height
+            if any(lo - 0.005 <= y_frac <= hi for lo, hi in ranges.get(furniture_lib.furniture_key(text), [])):
+                furniture_lines.add(text)
+    return [line for line in unparsed if line not in furniture_lines]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--doc", required=True, help="document name (without .pdf)")
@@ -523,6 +543,7 @@ def main() -> None:
     toc_entries, toc_pages, toc_unparsed = toc_lib.detect_toc_with_unparsed(document)
     body_pages = {p["page_number"] for p in pages} - set(toc_pages)
     furniture, furniture_text = detect_furniture(document, pdf_path, body_pages)
+    toc_unparsed = drop_furniture_toc_lines(document, toc_pages, toc_unparsed, furniture["line_patterns"])
     for page in pages:
         if page["page_number"] in toc_pages:
             page["role"] = "toc"
