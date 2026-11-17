@@ -21,7 +21,7 @@ def is_wsl() -> bool:
     if INTEROP.exists():
         return True
     try:
-        return "microsoft" in PROC_VERSION.read_text().lower()
+        return "microsoft" in PROC_VERSION.read_text(encoding="utf-8", errors="replace").lower()
     except OSError:
         return False
 
@@ -44,5 +44,5 @@ def path_for(cmd: str, path) -> str:
     if not is_windows_exe(cmd):
         return str(path)
     path = Path(path).absolute()
-    parent = subprocess.run([WSLPATH, "-w", str(path.parent)], capture_output=True, text=True, check=True).stdout.strip()
+    parent = subprocess.run([WSLPATH, "-w", str(path.parent)], capture_output=True, text=True, encoding="utf-8", check=True).stdout.strip()
     return str(PureWindowsPath(parent) / path.name)

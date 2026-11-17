@@ -23,7 +23,7 @@ def main() -> None:
         print(tools[sys.argv[1]] or "", end="")  # no newline: sh's $(...) would keep a Windows \r
         return
     ENV_JSON.parent.mkdir(parents=True, exist_ok=True)
-    ENV_JSON.write_text(json.dumps(tools, indent=2) + "\n", encoding="utf-8")
+    ENV_JSON.write_text(json.dumps(tools, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(ENV_JSON.as_posix(), end="")
 
 
