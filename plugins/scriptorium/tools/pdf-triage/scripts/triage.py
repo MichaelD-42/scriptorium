@@ -448,7 +448,7 @@ def _body_page_size(document, body_pages: set[int] | None) -> tuple[float, float
 # HEADER_BOX_MIN_WIDTH_FRACTION of the page wide and stays within
 # HEADER_BOX_MAX_DEPTH_FRACTION of its edge. A part taller than that depth
 # (a page frame) never joins.
-HEADER_BOX_MAX_GAP = 15.0  # pt
+HEADER_BOX_MAX_GAP = 20.0  # pt, about one header row
 HEADER_BOX_MIN_WIDTH_FRACTION = 0.5
 HEADER_BOX_MAX_DEPTH_FRACTION = 0.30
 

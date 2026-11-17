@@ -251,13 +251,13 @@ no printed TOC found.
     top of a footer box, that reaches past the 12% band. The
     `repeated_drawings` that start in the band (a rule, a logo strip) seed
     a union, which grows by every repeated drawing that overlaps it or
-    lies within 15 pt of it (a drawing taller than 30% of the page never
+    lies within 20 pt of it (a drawing taller than 30% of the page never
     joins). The union counts when it is at least half the page wide and
     ends within 30% of the page height from its edge; a thin rule under a
     one-line header stays in the band and gives no limit. With a limit,
-    `lib/furniture.py`'s `page_band_rect` gives `band_limits` the rect
-    `[0, max(12%, header_limit), width, min(88%, footer_limit)]`, so a
-    header line is furniture when its center is above `header_limit`.
+    `lib/furniture.py`'s `page_band_rect` gives `band_limits` the limits
+    `(max(12%, header_limit), min(88%, footer_limit))`, tested like the 12%
+    bands: a header line is furniture when it ends above `header_limit`.
     `page_table_rect` crops `figures.page_tables` to the page below
     `header_limit` only, so a header cell never becomes a table and a
     body table that runs into the bottom band keeps its rows.

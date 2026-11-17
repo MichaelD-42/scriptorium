@@ -22,13 +22,16 @@ def _fill(page, x0, y0, x1, y1) -> None:
 
 
 def _header(page, number: int) -> None:
+    """Only the logo strip and the box's top rule start in the 12% band
+    (101 pt) and they end at 96; the rules and cell borders below them
+    start 15.5 pt and more lower, so the box is found by growing."""
     page.draw_rect(fitz.Rect(55, 28, 543, 82), color=None, fill=(0.85, 0.85, 0.85), width=0)  # logo strip
-    for y in (95.0, 111.5, 131.0, 147.0, HEADER_BOTTOM - 0.5):
+    rows = (95.5, 111.5, 131.3, 147.3, HEADER_BOTTOM - 0.5)
+    for y in rows:
         _fill(page, 53, y, 545, y + 0.5)
-    for x in (53.0, 544.5):
-        _fill(page, x, 95, x + 0.5, HEADER_BOTTOM)
-    for x in (346.0, 468.0):
-        _fill(page, x, 131, x + 0.5, HEADER_BOTTOM)
+    for top, bottom in zip(rows[1:], rows[2:]):
+        for x in (53.0, 544.5) + ((346.0, 468.0) if top >= 131 else ()):
+            _fill(page, x, top, x + 0.5, bottom + 0.5)
     page.insert_text((60, 102), "Project label    Owner label", fontsize=6, fontname="hebo")
     page.insert_text((60, 125), "Synthetic project value", fontsize=10)
     page.insert_text((60, 138), "Status label    Version label", fontsize=6, fontname="hebo")
@@ -108,7 +111,12 @@ def test_thin_rule_under_one_line_header_keeps_the_12_percent_band():
 
 def test_header_limit_band_applies_only_on_the_body_page_size():
     furniture = {"content_rect": None, "content_rect_page_size": [W, H], "header_limit": 167.5, "footer_limit": None}
-    assert furniture_lib.page_band_rect(furniture, W, H) == [0.0, 167.5, W, 0.88 * H]
+    assert furniture_lib.page_band_rect(furniture, W, H) == (167.5, 0.88 * H)
+    rect = furniture_lib.page_band_rect(furniture, W, H)
+    # The bottom side has no drawn limit: a body paragraph reaching into
+    # the 12% band, but not wholly inside it, stays body.
+    assert not furniture_lib.in_furniture_band([93, 720, 533, 777], H, rect)
+    assert furniture_lib.in_furniture_band([60, 152, 525, 163], H, rect)
     assert furniture_lib.page_table_rect(furniture, W, H) == [0.0, 167.5, W, H]
     assert furniture_lib.page_band_rect(furniture, H, W) is None  # a landscape page
     assert furniture_lib.page_table_rect(furniture, H, W) is None
