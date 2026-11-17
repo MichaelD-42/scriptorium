@@ -11,6 +11,7 @@ import math
 import re
 import sys
 import zipfile
+from collections import Counter
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -38,8 +39,8 @@ MIN_OUTPUT_BYTES = 20
 # figure, so those are the ones worth a human's attention.
 LARGE_REGION_EXCLUDED_AREA_FRACTION = 0.2
 # Follow-up R11: "grid_table" is a chart's grid read as a table; its cluster
-# is the image, so nothing is lost.
-LARGE_REGION_EXCLUDED_BENIGN_REASONS = {"frame_drawing", "repeated_drawing", "tiny", "text_box", "grid_table", "invisible_drawing", "bitmap_panel"}
+# is the image, so nothing is lost; so is a "table_in_figure".
+LARGE_REGION_EXCLUDED_BENIGN_REASONS = {"frame_drawing", "repeated_drawing", "tiny", "text_box", "grid_table", "table_in_figure", "invisible_drawing", "bitmap_panel"}
 
 # Task A9: a `table` element whose bbox is within
 # furniture_lib.FRAME_MATCH_TOLERANCE of a triage `frame_tables` entry is the
@@ -51,9 +52,6 @@ LARGE_REGION_EXCLUDED_BENIGN_REASONS = {"frame_drawing", "repeated_drawing", "ti
 # page number (a heading at the very top of a page, a page-number offset).
 TOC_PAGE_TOLERANCE = 1
 
-# Task A9 fix round 2: only pdf and image documents may use the
-# no_visible_text flag (see lib/furniture.py).
-NO_VISIBLE_TEXT_FORMATS = furniture_lib.NO_VISIBLE_TEXT_FORMATS
 
 # text_layer_coverage: a text-tier page fails when its text layer holds at
 # least this many words (letters only, 4+ long) that the output lacks, and
@@ -286,6 +284,15 @@ def output_repeat_threshold(doc_data: dict) -> int:
     return max(OUTPUT_REPEAT_MIN_COUNT, math.ceil(OUTPUT_REPEAT_MIN_FRACTION * body))
 
 
+def _reaches_band(bbox, page_height: float | None, rect: list[float] | None) -> bool:
+    """True when `bbox` reaches into a furniture band of its page (any part
+    above the top limit or below the bottom one)."""
+    if not bbox or len(bbox) != 4 or not page_height:
+        return False
+    top, bottom = furniture_lib.band_limits(page_height, rect)
+    return bbox[1] < top or bbox[3] > bottom
+
+
 def check_furniture_absent(
     doc_data: dict, furniture: dict, output_dir: Path, page_heights: dict[int, float] | None = None,
     page_widths: dict[int, float] | None = None,
@@ -295,7 +302,9 @@ def check_furniture_absent(
 
     - Text: no heading/paragraph/list_item text, table cell, image
       `figure_text` or `caption` has a line whose furniture key equals
-      a `line_patterns` entry.
+      a `line_patterns` entry. A `figure_text` line has no position of its
+      own, so on an image that reaches into the band it is also checked
+      against the letter-bearing patterns.
     - Tables: no `table` element's bbox matches a `frame_tables` entry.
     - Assembled output: no whole line of the .md/.html files under the
       doc's output dir (md, md-tree, okf, html) matches a `line_patterns`
@@ -332,11 +341,11 @@ def check_furniture_absent(
             page_number = page.get("page_number")
             for el in page.get("elements", []):
                 el_type = el.get("type")
+                rect = furniture_lib.page_band_rect(
+                    furniture, page_widths.get(page_number), page_heights.get(page_number)
+                )
                 patterns = furniture_lib.patterns_for_element(
-                    all_patterns, el.get("bbox"), page_heights.get(page_number),
-                    furniture_lib.page_band_rect(
-                        furniture, page_widths.get(page_number), page_heights.get(page_number)
-                    ),
+                    all_patterns, el.get("bbox"), page_heights.get(page_number), rect
                 )
                 if el_type in ("heading", "paragraph", "list_item"):
                     for hit in furniture_lib.furniture_line_hits(el.get("text") or "", patterns):
@@ -350,7 +359,12 @@ def check_furniture_absent(
                         add(page_number, "frame table", f"table bbox {el.get('bbox')}")
                 elif el_type == "image":
                     for field in ("figure_text", "caption"):
-                        for hit in furniture_lib.furniture_line_hits(el.get(field) or "", patterns):
+                        # figure_text lines carry no position of their own: on
+                        # an image that reaches into the band, each is checked
+                        # against the letter-bearing patterns too.
+                        reaches = _reaches_band(el.get("bbox"), page_heights.get(page_number), rect)
+                        field_patterns = patterns | masked_patterns if field == "figure_text" and reaches else patterns
+                        for hit in furniture_lib.furniture_line_hits(el.get(field) or "", field_patterns):
                             add(page_number, f"image {field}", hit)
 
     if masked_patterns and output_dir.exists():
@@ -595,11 +609,11 @@ def check_pptx_figures_covered(doc_data: dict, census: dict[int, list[dict]]) ->
     return {"name": "pptx_figures_covered", "passed": not uncovered, "detail": detail, "pages": pages, "uncovered": uncovered}
 
 
-def _words(text: str) -> set[str]:
-    return set(_COVERAGE_WORD.findall(text.lower()))
+def _words(text: str) -> Counter:
+    return Counter(_COVERAGE_WORD.findall(text.lower()))
 
 
-def _element_words(el: dict) -> set[str]:
+def _element_words(el: dict) -> Counter:
     """Words of the text an element carries from the page: its text,
     caption, figure_text and table cells -- never the agent's description."""
     parts = [el.get("text") or "", el.get("caption") or "", el.get("figure_text") or ""]
@@ -607,31 +621,42 @@ def _element_words(el: dict) -> set[str]:
     return _words(" ".join(parts))
 
 
-def check_text_layer_coverage(doc_data: dict, source_words: dict[int, set[str]]) -> dict:
+def check_text_layer_coverage(doc_data: dict, source_words: dict[int, Counter]) -> dict:
     """Dropped text on a `text`-tier page, checked against the page's own
     text layer (`source_words`, from `pdf_text_layer_words`) instead of by
-    eye. The neighbouring pages count too: a page-break join moves the
-    start of page n+1 onto page n."""
+    eye. Words are counted per page, so a word lost on the page is missing
+    even when it also occurs nearby. A page-break join moves the start of
+    page n+1 onto page n: an element's words count for every page in its
+    `pages` (a joined table's repeated header is in no output of its own),
+    and a neighbouring page's surplus (its output words beyond its own
+    text layer) counts too."""
     pages = doc_data["pages"]
-    page_words = {
-        n: set().union(*(_element_words(el) for el in page.get("elements", []))) for n, page in pages.items()
-    }
+    page_words = {n: Counter() for n in pages}
+    for n, page in pages.items():
+        for el in page.get("elements", []):
+            words = _element_words(el)
+            for m in {n, *el.get("pages", [])}:
+                page_words.setdefault(m, Counter()).update(words)
+
+    def surplus(m: int) -> Counter:
+        return page_words.get(m, Counter()) - Counter(source_words.get(m) or ())
+
     failing, details = [], []
     for n, page in sorted(pages.items()):
-        src = source_words.get(n)
+        src = Counter(source_words.get(n) or ())
         if page.get("tier") != "text" or page.get("skipped") or not src:
             continue
-        out = page_words.get(n - 1, set()) | page_words[n] | page_words.get(n + 1, set())
-        missing = sorted(src - out)
-        if len(missing) >= COVERAGE_MIN_MISSING and len(missing) / len(src) >= COVERAGE_MAX_MISSING_FRACTION:
+        missing = src - page_words[n] - surplus(n - 1) - surplus(n + 1)
+        count, total = sum(missing.values()), sum(src.values())
+        if count >= COVERAGE_MIN_MISSING and count / total >= COVERAGE_MAX_MISSING_FRACTION:
             failing.append(n)
-            details.append(f"page {n}: {len(missing)} of {len(src)} text-layer words missing, e.g. {', '.join(missing[:8])}")
+            details.append(f"page {n}: {count} of {total} text-layer words missing, e.g. {', '.join(sorted(missing)[:8])}")
     detail = "; ".join(details) if details else "every text-tier page's text-layer words are in the output"
     return {"name": "text_layer_coverage", "passed": not failing, "detail": detail, "pages": failing}
 
 
-def pdf_text_layer_words(input_path: Path, furniture: dict) -> dict[int, set[str]]:
-    """{page: words} of each PDF page's horizontal text lines outside the
+def pdf_text_layer_words(input_path: Path, furniture: dict) -> dict[int, Counter]:
+    """{page: word counts} of each PDF page's horizontal text lines outside the
     furniture bands and side margins, line-end hyphens joined the way
     extraction joins them."""
     import fitz  # PyMuPDF

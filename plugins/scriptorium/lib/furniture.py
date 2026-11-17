@@ -35,11 +35,6 @@ FRAME_MATCH_TOLERANCE = 3.0  # pt
 # stays a figure. The other furniture lists keep their 50% in triage.py.
 REPEATED_DRAWING_MIN_PAGE_FRACTION = 0.80
 
-# The input formats whose image `caption` is only the printed caption the
-# script extracts. Only these may use describe_image.py's no_visible_text
-# flag; for pptx/docx/xlsx/html the agent writes --caption.
-NO_VISIBLE_TEXT_FORMATS = frozenset({"pdf", "image"})
-
 _EMPTY_FURNITURE = {
     "line_patterns": [],
     "frame_tables": [],
