@@ -45,7 +45,17 @@ document.
     means `paragraph`, no matter the block's font size or boldness. This
     is what stops a lone bullet glyph, or any other large/bold text that
     isn't an actual TOC-listed heading, from being misclassified as a
-    heading.
+    heading. Two exceptions cover headings below the TOC's depth, each a
+    one-line block of at most 12 words that does not end a sentence:
+    a numbered block (`2.1.1.1 Title`) deeper than the deepest TOC level,
+    with an ancestor number in the TOC and at least body size, is a
+    heading at its dot depth (at most 6); and a bold block that is larger
+    than body size or underlined (a thin drawing just under it) is a
+    heading one level below the nearest heading above it that is not one
+    of these (the last TOC entry before the page, at the top of a page).
+    It carries `"sub_heading": true`, and stays a paragraph when no heading
+    is above it. Bold at body size without an underline stays a paragraph:
+    it is the label of a label/value list.
   - **Fallback**, only when `toc.json` has zero entries at all (no printed
     TOC, no outline): every DISTINCT font size used by a bold,
     larger-than-body-size, >=3-alphanumeric-character block anywhere in
@@ -70,7 +80,16 @@ document.
   stays on its line ("UN = 12V"). Follow-up R20: a row left open at the
   page's top or bottom edge (column rules with an open end beyond the
   first or last word, no horizontal rule) gets a cap rule, so a continued
-  table keeps its first row.
+  table keeps its first row. Fill-only rects that draw no table edge are
+  left out before detection: white ones (they paint nothing, such as a
+  diagram label's background) and highlights (thicker than 2 pt, with an
+  edge more than 1.5 pt from every thin rule). Shading that matches the
+  cell grid stays. When no table is left without the highlights, the
+  page is read with them (a table drawn only by its shading). A ruled
+  header row with no ruled rows under it (1 row, 3 or more cells) takes
+  the unruled rows printed below it while each run of words lies inside
+  one header cell; the rows stop at a large gap, a horizontal rule, a
+  larger font or a line across cells (a paragraph).
 - Follow-up R27: a paragraph block made of label/value rows and a body
   (for example "HWC requirement | REQ ..." and "ASIL Value: | To Be /
   Selected" above the requirement text) is split into one paragraph per
@@ -86,8 +105,10 @@ document.
   (`.!?:`) or leaves more than 40% of its block's width empty: the source
   broke the line on purpose. A bullet glyph drawn larger than its text
   pairs with the text when their bottoms align, too.
-- Follow-up R24: a block that mostly overlaps a table loses only its lines
-  inside the table; a caption line printed right above the table stays.
+- Follow-up R24: every block on a page with a table loses only its lines
+  inside the table's cells (majority-inside the cells together); a caption
+  line printed right above the table stays, and so does a line in the
+  table bbox that no cell holds (a cell left open by a missing rule).
 - Follow-up R25: a block that opens with the last wrapped line of the
   previous bullet item and then starts a new bullet item is read as list
   content; the leading line is appended to the open item when it sits

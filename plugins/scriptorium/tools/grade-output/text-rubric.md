@@ -38,8 +38,10 @@ that page:
    means a `data:` URI or local file `<img src>` — remote sources are never
    fetched or counted, so they can't trip this check (see
    `lib/html_pages.saveable_images`).
-4. **`bad_caption`** — an image element's caption is empty or a generic
-   placeholder (`"image"`, `"figure"`, `"picture"`, case-insensitive).
+4. **`bad_caption`** — an image element's printed caption is a generic
+   placeholder (`"image"`, `"figure"`, `"picture"`, case-insensitive). An
+   empty caption and an agent-written one (`caption_source: "agent"`) are
+   not checked.
 5. **`wrong_heading_level`** — **docx and html only**: a source heading
    paragraph/tag's text is present in the output only as a `paragraph`, or
    as a `heading` with a different (clamped) level than the source style/

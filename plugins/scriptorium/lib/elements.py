@@ -114,7 +114,7 @@ def merge_shards(
     heights in points) are optional. With them, an `ocr`/`vision` body
     loses its furniture lines (`remove_furniture_lines`), and the page
     records `furniture_lines_removed` when that count is above zero.
-    `page_widths` (optional) lets `furniture.page_content_rect` test the
+    `page_widths` (optional) lets `furniture.page_band_rect` test the
     page width too."""
     all_patterns = {p["masked"] for p in (furniture or {}).get("line_patterns", [])}
     page_heights = page_heights or {}
@@ -152,7 +152,7 @@ def merge_shards(
             if all_patterns and body_tier in UNFILTERED_BODY_TIERS:
                 body_elements, furniture_removed = remove_furniture_lines(
                     body_elements, all_patterns, page_heights.get(n),
-                    furniture_lib.page_content_rect(furniture, page_widths.get(n), page_heights.get(n)),
+                    furniture_lib.page_band_rect(furniture, page_widths.get(n), page_heights.get(n)),
                 )
             combined = body_elements + image_elements
             # An ocr paragraph has no bbox, only its `top` (ocr.py).
@@ -169,7 +169,7 @@ def merge_shards(
         else:
             pages[n] = {"page_number": n, "tier": "text", "elements": image_elements, **image_extra}
 
-    apply_page_break_joins(pages)
+    apply_page_break_joins(pages, furniture, page_heights, page_widths)
     return pages
 
 
@@ -181,6 +181,48 @@ def _body_elements(page: dict) -> list[dict]:
     excluded_regions" needs no extra filtering here beyond dropping images
     -- there is nothing else to filter out."""
     return [el for el in page["elements"] if el["type"] != "image"]
+
+
+# A `repeated_drawing` excluded region at most this fraction of the page
+# height is a header or footer box. lib/figures.py unions every repeated
+# drawing of a page into one region, so a taller one can span the body.
+JOIN_FURNITURE_BOX_MAX_HEIGHT_FRACTION = 0.30
+
+
+def _is_furniture_box_element(el: dict, page: dict, height: float | None, limits: tuple) -> bool:
+    """True when `el` sits in the page's furniture: its center above the
+    drawn top limit or below the drawn bottom limit (`limits`,
+    `furniture.page_drawn_limits`: a content frame or a header/footer box;
+    the plain 12% band is not used, as body text can reach into it), or
+    inside a header/footer-sized `repeated_drawing` excluded region. Such
+    an element leaked past furniture removal and is never a page-break join
+    partner."""
+    bbox = el.get("bbox")
+    if not bbox or not height:
+        return False
+    center = (bbox[1] + bbox[3]) / 2
+    top, bottom = limits
+    if (top is not None and center <= top) or (bottom is not None and center >= bottom):
+        return True
+    return any(
+        region.get("reason") == "repeated_drawing"
+        and region["bbox"][3] - region["bbox"][1] <= JOIN_FURNITURE_BOX_MAX_HEIGHT_FRACTION * height
+        and furniture_lib._center_inside(bbox, region["bbox"])
+        for region in page.get("excluded_regions", [])
+    )
+
+
+def _join_partners(page: dict, furniture: dict | None, height: float | None, width: float | None) -> list[dict]:
+    """`_body_elements`, without the leading and trailing elements that sit
+    in the page's furniture (`_is_furniture_box_element`)."""
+    body = _body_elements(page)
+    limits = furniture_lib.page_drawn_limits(furniture, width, height) if height else (None, None)
+    start, end = 0, len(body)
+    while start < end and _is_furniture_box_element(body[start], page, height, limits):
+        start += 1
+    while end > start and _is_furniture_box_element(body[end - 1], page, height, limits):
+        end -= 1
+    return body[start:end]
 
 
 def _ends_with_terminal_punctuation(text: str) -> bool:
@@ -216,7 +258,12 @@ def join_texts(texts) -> str:
     return out
 
 
-def apply_page_break_joins(pages: dict[int, dict]) -> None:
+def apply_page_break_joins(
+    pages: dict[int, dict],
+    furniture: dict | None = None,
+    page_heights: dict[int, float] | None = None,
+    page_widths: dict[int, float] | None = None,
+) -> None:
     """Task A4b, controller-ruled: page-break joins are detected HERE, at
     merge time (the step that already sees every page), not in the
     extractor -- extractors run as parallel per-page-batch subprocesses, so
@@ -257,7 +304,13 @@ def apply_page_break_joins(pages: dict[int, dict]) -> None:
     marker; written by `extract_text.py`'s `list_item_text_x`), because a
     continuation line is printed at the text indent, not at the marker.
     An element without `text_x` (a paragraph, or a list item from an older
-    shard) uses `bbox[0]`, as before."""
+    shard) uses `bbox[0]`, as before.
+
+    With `page_heights` (and `furniture`, `page_widths`), the join partners
+    skip a header or footer element that leaked past furniture removal
+    (`_join_partners`), so a furniture miss does not block a join."""
+    page_heights = page_heights or {}
+    page_widths = page_widths or {}
     page_numbers = sorted(pages)
     open_table: dict | None = None  # R21: a table whose page has no body element left
     for n in page_numbers:
@@ -265,8 +318,8 @@ def apply_page_break_joins(pages: dict[int, dict]) -> None:
         if n_next not in pages:
             open_table = None
             continue
-        prev_body = _body_elements(pages[n])
-        next_body = _body_elements(pages[n_next])
+        prev_body = _join_partners(pages[n], furniture, page_heights.get(n), page_widths.get(n))
+        next_body = _join_partners(pages[n_next], furniture, page_heights.get(n_next), page_widths.get(n_next))
         if not prev_body and open_table is not None:
             prev_body = [open_table]
         open_table = None
@@ -279,7 +332,7 @@ def apply_page_break_joins(pages: dict[int, dict]) -> None:
             if _tables_continue(prev_el, next_el):
                 _join_tables(prev_el, next_el, n_next)
                 pages[n_next]["elements"] = [el for el in pages[n_next]["elements"] if el is not next_el]
-                if not _body_elements(pages[n_next]):
+                if not _join_partners(pages[n_next], furniture, page_heights.get(n_next), page_widths.get(n_next)):
                     open_table = prev_el
             continue
 
@@ -363,3 +416,10 @@ def save_doc(elements_path: Path, doc: dict) -> None:
     pages_sorted = sorted(doc["pages"].values(), key=lambda p: p["page_number"])
     payload = {**doc, "pages": pages_sorted}
     elements_path.write_text(json.dumps(payload, indent=2), encoding="utf-8", newline="")
+
+
+def printed_caption(el: dict) -> str:
+    """An image element's caption when it is printed document text, else "".
+    A caption an agent wrote (`caption_source: "agent"`, describe_image.py
+    --caption) is interpretation, not document text."""
+    return "" if el.get("caption_source") == "agent" else (el.get("caption") or "")

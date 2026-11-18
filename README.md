@@ -56,8 +56,18 @@ The first run sets up the Python environment with [`uv`](https://docs.astral.sh/
 | Tool | Needed for | If missing |
 |---|---|---|
 | Tesseract | scanned pages and images (OCR) | install attempted via the package manager when `sudo` needs no password, or brew; otherwise text-layer documents still work |
-| LibreOffice (`soffice`) | `.pptx` (renders slides for grading) | same install attempt; pptx documents fail to render |
+| LibreOffice (`soffice`) | `.pptx` (renders slides for grading) | same install attempt; a pptx stops before rendering, with a message that says how to fix it |
 | [ccusage](https://github.com/ryoppippi/ccusage) | cost per document in the run report | cost shows as "–" |
+
+The scripts look for each tool in this order: the `SCRIPTORIUM_TESSERACT`
+or `SCRIPTORIUM_SOFFICE` environment variable (the path to the program),
+then `PATH` (`soffice` or `libreoffice` for LibreOffice), then the usual
+install folders. Under WSL that includes a Windows install (Program Files or
+scoop), and file paths are passed to it as Windows paths. To set a
+variable for every Claude Code session, put it in the `env` block of
+`settings.json`. Without LibreOffice, a pptx can still go through: convert
+it to PDF yourself and save it as `work/<doc>/<doc>.pdf`, which the render
+step reuses.
 
 OCR detects the script, not the language: a German or French scan reads as
 English unless you list its language codes (e.g. `deu,fra`) in the plugin's

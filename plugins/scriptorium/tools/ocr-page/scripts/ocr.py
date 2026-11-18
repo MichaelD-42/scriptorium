@@ -16,7 +16,7 @@ import pytesseract
 
 _found = tesseract_lib.find_tesseract()
 if _found:
-    pytesseract.pytesseract.tesseract_cmd = _found
+    tesseract_lib.use_tesseract(_found)
 
 
 def ocr_tesseract(image_path: Path, lang: str, tessdata_dir: str | None = None, scale: float = 1.0) -> tuple[list[dict], float]:

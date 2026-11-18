@@ -26,9 +26,8 @@ On a retry you may also get **`recheck_images`** pages, each with the
 grader's `reason`. A `recheck_images` page with no entry in your tiers
 keeps its body: don't extract its body again. The
 orchestrator has already re-run the image step for it, so its image shard
-is fresh and undescribed: redo the `figure_text`, description, mermaid (and
-for `pptx`/`docx`/`xlsx`/`html`, caption) work for that page with the
-`reason` in mind. A page escalated to a higher body tier also comes with
+is fresh and undescribed: redo the `figure_text`, description and mermaid
+work for that page with the `reason` in mind. A page escalated to a higher body tier also comes with
 its `reason`: use it to know what the previous extraction got wrong.
 
 ## Commands
@@ -42,7 +41,7 @@ Bash doesn't have; put this path in its place.
 - `render-pages/scripts/render.py --doc <doc> [--pages 1,3]` — page PNGs
   to `work/<doc>/pages/page{N}.png`; skips pages already rendered.
 - `render-pages/scripts/render_region.py --doc <doc> --page <n> --bbox x0,y0,x1,y1 [--dpi 400]`
-  — a high-resolution crop of one region (PDF only); prints its path.
+  — a high-resolution crop of one region (a PDF page, or a pptx slide after `render.py`); prints its path.
 - `ocr-page/scripts/ocr.py --doc <doc> --pages 5,6 --lang <lang> [--tessdata-dir <dir>]`
   — writes `page{N}.ocr.json` shards with `ocr_confidence`.
 - `ocr-page/scripts/write_vision_page.py --doc <doc> --page <n>` — reads
@@ -133,17 +132,16 @@ same idea as xlsx's missing charts below.
 For a `pdf`/`image`-document image element, `caption` is already filled in
 for you — `extract-images` sets it deterministically (a nearby "Figure n:"/
 "Table n" text-layer line, verbatim, or absent if there's no such line
-nearby). You never write `caption` yourself for these: `caption` is only
-the printed caption the script extracts. `grade-output`'s
+nearby). For the other formats it stays empty. You never write `caption`
+yourself, for any format: `caption` is only the printed caption a script
+extracts. `grade-output`'s
 `figures_complete` gate needs a `caption`, a `figure_text`, or the
 recorded `no_visible_text` flag on every image. If an element has no
 caption and no figure_text after extraction, look at the rendered crop
 first. If it shows text, transcribe it with `--figure-text`. Only if it
 shows no text at all, pass `--no-visible-text` (with your
 `--description`) — `describe_image.py` refuses the flag on an element
-that has a caption or figure_text. For a `pptx`/`docx`/`xlsx`/`html`
-image element there's no such script-side detection, so `caption` is still
-yours to set — pass `--caption` to `describe_image.py` as before.
+that has a caption or figure_text. This is the same for every format.
 
 Either way, for **every** image element reported, read the saved image
 file and, with `describe_image.py`, always write a `--description` —
@@ -157,8 +155,6 @@ plainly in the description rather than guessing confidently. Additionally:
 - If the image is a block/state/sequence diagram you can faithfully
   redraw, also pass `--mermaid` (or use `mermaid_image.py` separately) —
   see **Diagrams** below for the judgment call.
-- (`pptx`/`docx`/`xlsx`/`html` only) also pass `--caption`, unchanged from
-  before this contract existed.
 
 Note `xlsx-extract` doesn't extract charts as images (no rendering engine
 available) — a chart-only sheet may have fewer image elements than

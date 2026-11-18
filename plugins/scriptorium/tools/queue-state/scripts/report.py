@@ -21,6 +21,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
 import elements as elements_lib  # noqa: E402
 import grades  # noqa: E402
+import office  # noqa: E402
 import paths  # noqa: E402
 import tesseract as tesseract_lib  # noqa: E402
 
@@ -115,7 +116,7 @@ def tool_versions() -> list[tuple[str, str]]:
         ("PyMuPDF", _package_version("PyMuPDF")),
         ("pdfplumber", _package_version("pdfplumber")),
         ("Tesseract", _command_version(tesseract_lib.find_tesseract())),
-        ("LibreOffice", _command_version(shutil.which("soffice"))),
+        ("LibreOffice", _command_version(office.find_soffice())),
         ("ccusage", _command_version(shutil.which("ccusage"))),
     ]
     return [(name, version or "not installed") for name, version in versions]

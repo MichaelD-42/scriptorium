@@ -24,7 +24,10 @@ import html_pages  # noqa: E402
 import paths  # noqa: E402
 
 MIN_UNIT_LEN = 15  # shorter fragments are too generic to reliably match/mismatch
-GENERIC_CAPTIONS = {"image", "figure", "picture", ""}
+# A printed caption that names nothing. An empty caption is not checked: these
+# formats have no script-side caption detection, and an agent-written caption
+# (caption_source "agent") is interpretation, not document text.
+GENERIC_CAPTIONS = {"image", "figure", "picture"}
 # A source word for the coverage check: letters only, 4+ long (gates.py's
 # text_layer_coverage rule).
 _WORD = re.compile(r"[^\W\d_]{4,}")
@@ -98,7 +101,7 @@ def docx_check_images(blocks: list, output_elements: list, document) -> tuple[bo
     source_image_count = sum(len(docx_pages.block_images(b, document)) for b in blocks)
     output_images = [el for el in output_elements if el["type"] == "image"]
     missing_image = source_image_count > len(output_images)
-    bad_caption = any((el.get("caption") or "").strip().lower() in GENERIC_CAPTIONS for el in output_images)
+    bad_caption = any(elements_lib.printed_caption(el).strip().lower() in GENERIC_CAPTIONS for el in output_images)
     return missing_image, bad_caption
 
 
@@ -191,7 +194,7 @@ def xlsx_check_images(ws, output_elements: list) -> tuple[bool, bool]:
     source_image_count = len(ws._images)
     output_images = [el for el in output_elements if el["type"] == "image"]
     missing_image = source_image_count > len(output_images)
-    bad_caption = any((el.get("caption") or "").strip().lower() in GENERIC_CAPTIONS for el in output_images)
+    bad_caption = any(elements_lib.printed_caption(el).strip().lower() in GENERIC_CAPTIONS for el in output_images)
     return missing_image, bad_caption
 
 
@@ -263,7 +266,7 @@ def html_check_images(soup, html_dir: Path, output_elements: list) -> tuple[bool
     source_image_count = len(html_pages.saveable_images(soup, html_dir))
     output_images = [el for el in output_elements if el["type"] == "image"]
     missing_image = source_image_count > len(output_images)
-    bad_caption = any((el.get("caption") or "").strip().lower() in GENERIC_CAPTIONS for el in output_images)
+    bad_caption = any(elements_lib.printed_caption(el).strip().lower() in GENERIC_CAPTIONS for el in output_images)
     return missing_image, bad_caption
 
 

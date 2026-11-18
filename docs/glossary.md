@@ -52,7 +52,7 @@ for a retry, its escalated pages.
 
 **Digital-native formats.** `docx`, `xlsx` and `html`. Their extraction is
 deterministic and there is no rendered page to read, so a content defect
-cannot be fixed by a higher tier: it goes straight to `needs-human`. They
+cannot be fixed by a higher tier: it goes to `needs-human`. They
 are graded by text mode.
 
 **Element.** One unit of extracted content: `heading`, `paragraph`,

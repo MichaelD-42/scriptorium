@@ -22,6 +22,7 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+import elements as elements_lib  # noqa: E402
 import paths  # noqa: E402
 
 REQIF_NS = "http://www.omg.org/spec/ReqIF/20110401/reqif.xsd"
@@ -98,7 +99,7 @@ def _image_xhtml(el: dict) -> ET.Element:
     obj = ET.Element(f"{{{XHTML_NS}}}object")
     obj.set("data", el["asset"])
     obj.set("type", "image/png")
-    obj.text = el.get("caption") or ""
+    obj.text = elements_lib.printed_caption(el)
     children.append(obj)
     return _xhtml_div(*children)
 
@@ -233,7 +234,7 @@ def _build_spec_objects_and_hierarchy(content: ET.Element, doc: str, doc_data: d
             spec_object.set("LONG-NAME", "Table")
             _add_xhtml_value(values, TEXT_ATTR_ID, _table_xhtml(el["rows"]))
         elif el["type"] == "image":
-            spec_object.set("LONG-NAME", (el.get("caption") or "Image")[:100])
+            spec_object.set("LONG-NAME", (elements_lib.printed_caption(el) or "Image")[:100])
             _add_xhtml_value(values, TEXT_ATTR_ID, _image_xhtml(el))
 
         # Headings build the hierarchy: pop back to the nearest ancestor

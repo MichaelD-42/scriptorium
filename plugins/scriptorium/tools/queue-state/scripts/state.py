@@ -112,16 +112,20 @@ def decide(entry: dict, report: dict, tiers: dict[int, str], max_attempts: int) 
             escalate(page, tier, True, reason, body=False)
 
     human += unretryable  # a retry re-extracts pages; it cannot fix a document-level gate
-    if human:
+    if escalations and entry["attempt"] < max_attempts:
+        # Retry the pages first; the human items come back from the next
+        # grade (gates rerun, unescalated pages keep their grade shards).
+        entry["status"] = "retrying"
+        entry["escalated_pages"] = {str(p): escalations[p] for p in sorted(escalations)}
+        if human:
+            entry["reason"] = "; ".join(human)
+    elif human:
         entry["status"], entry["reason"] = "needs-human", "; ".join(human)
     elif entry["attempt"] >= max_attempts:
         entry["status"], entry["reason"] = "needs-human", f"still failing after {entry['attempt']} attempts"
-    elif not escalations:
+    else:
         entry["status"] = "needs-human"
         entry["reason"] = "rubric failed without page-level issues to retry"
-    else:
-        entry["status"] = "retrying"
-        entry["escalated_pages"] = {str(p): escalations[p] for p in sorted(escalations)}
     return entry
 
 

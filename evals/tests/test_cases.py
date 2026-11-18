@@ -69,9 +69,7 @@ def test_text_layer_coverage_catches_the_dropped_paragraph_on_a_text_page(eval_r
 def _route(tag):
     if tag is None or tag not in grades.BLOCKING_ISSUES:
         return "passed"  # bad_caption/bad_mermaid count through the average only
-    # The fixture prints a TOC: toc_headings_match catches a changed level
-    # before any grader, and that gate goes to a human.
-    if tag in grades.JOIN_ISSUES or tag == "wrong_heading_level":
+    if tag in grades.JOIN_ISSUES:
         return "needs-human"
     if tag in grades.CONTENT_ISSUES:
         return "vision"
@@ -118,3 +116,7 @@ def test_each_tag_routes_as_the_rubric_says(eval_root):
             escalated = out["escalated_pages"][page]
             assert escalated["tier"] == ("vision" if route == "vision" else "text"), doc
             assert escalated["recheck_images"] is (route == "recheck_images"), doc
+            if tag == "wrong_heading_level":
+                # The fixture prints a TOC: toc_headings_match catches the
+                # changed level too; that gate waits in the reason for a human.
+                assert "toc_headings_match" in out["reason"], doc

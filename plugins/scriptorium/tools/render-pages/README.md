@@ -14,7 +14,10 @@ a slide-for-slide PDF (cached at `work/<doc>/<doc>.pdf`, skipped on a retry
 if already newer than the source `.pptx`), then rasterizes that PDF with
 the same PyMuPDF code path as a native PDF — 1 slide = 1 PDF page = 1 PNG.
 Requires the `soffice` binary (bootstrapped by `setup-environment` when a
-pptx is queued).
+pptx is queued), found by `lib/office.py`: `SCRIPTORIUM_SOFFICE`, then
+`soffice`/`libreoffice` on PATH, then under WSL a Windows install (paths are
+passed to it through `wslpath -w`). Without one it exits 1 with a single
+line; a PDF you convert by hand to `work/<doc>/<doc>.pdf` is reused instead.
 
 For a standalone **image** document (png/jpg/jpeg/webp/tiff), there's no
 rasterization to do at all — the input *is* the page. This tool just
@@ -37,7 +40,9 @@ uv run --project "${CLAUDE_PLUGIN_ROOT}" python   "${CLAUDE_PLUGIN_ROOT}/tools/r
 ```
 
 It writes `work/<doc>/zoom/page{N}_{x0}_{y0}.png` (the bbox plus 6 pt on
-each side; PDF pages only) and prints the path.
+each side; a PDF page, or a pptx slide once `render.py` has cached the
+slide PDF) and prints the path. `pptx-extract` uses its `crop_png` to
+crop slide figures.
 
 Omit `--pages` to render every page. Rendering is idempotent and skips a
 page whose PNG already exists unless `--force` is passed — re-rendering

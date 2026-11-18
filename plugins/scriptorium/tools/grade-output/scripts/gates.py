@@ -11,6 +11,7 @@ import math
 import re
 import sys
 import zipfile
+from collections import Counter
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -38,8 +39,8 @@ MIN_OUTPUT_BYTES = 20
 # figure, so those are the ones worth a human's attention.
 LARGE_REGION_EXCLUDED_AREA_FRACTION = 0.2
 # Follow-up R11: "grid_table" is a chart's grid read as a table; its cluster
-# is the image, so nothing is lost.
-LARGE_REGION_EXCLUDED_BENIGN_REASONS = {"frame_drawing", "repeated_drawing", "tiny", "text_box", "grid_table", "invisible_drawing", "bitmap_panel"}
+# is the image, so nothing is lost; so is a "table_in_figure".
+LARGE_REGION_EXCLUDED_BENIGN_REASONS = {"frame_drawing", "repeated_drawing", "tiny", "text_box", "grid_table", "table_in_figure", "invisible_drawing", "bitmap_panel"}
 
 # Task A9: a `table` element whose bbox is within
 # furniture_lib.FRAME_MATCH_TOLERANCE of a triage `frame_tables` entry is the
@@ -51,9 +52,6 @@ LARGE_REGION_EXCLUDED_BENIGN_REASONS = {"frame_drawing", "repeated_drawing", "ti
 # page number (a heading at the very top of a page, a page-number offset).
 TOC_PAGE_TOLERANCE = 1
 
-# Task A9 fix round 2: only pdf and image documents may use the
-# no_visible_text flag (see lib/furniture.py).
-NO_VISIBLE_TEXT_FORMATS = furniture_lib.NO_VISIBLE_TEXT_FORMATS
 
 # text_layer_coverage: a text-tier page fails when its text layer holds at
 # least this many words (letters only, 4+ long) that the output lacks, and
@@ -286,6 +284,15 @@ def output_repeat_threshold(doc_data: dict) -> int:
     return max(OUTPUT_REPEAT_MIN_COUNT, math.ceil(OUTPUT_REPEAT_MIN_FRACTION * body))
 
 
+def _reaches_band(bbox, page_height: float | None, rect: list[float] | None) -> bool:
+    """True when `bbox` reaches into a furniture band of its page (any part
+    above the top limit or below the bottom one)."""
+    if not bbox or len(bbox) != 4 or not page_height:
+        return False
+    top, bottom = furniture_lib.band_limits(page_height, rect)
+    return bbox[1] < top or bbox[3] > bottom
+
+
 def check_furniture_absent(
     doc_data: dict, furniture: dict, output_dir: Path, page_heights: dict[int, float] | None = None,
     page_widths: dict[int, float] | None = None,
@@ -295,7 +302,9 @@ def check_furniture_absent(
 
     - Text: no heading/paragraph/list_item text, table cell, image
       `figure_text` or `caption` has a line whose furniture key equals
-      a `line_patterns` entry.
+      a `line_patterns` entry. A `figure_text` line has no position of its
+      own, so on an image that reaches into the band it is also checked
+      against the letter-bearing patterns.
     - Tables: no `table` element's bbox matches a `frame_tables` entry.
     - Assembled output: no whole line of the .md/.html files under the
       doc's output dir (md, md-tree, okf, html) matches a `line_patterns`
@@ -332,11 +341,11 @@ def check_furniture_absent(
             page_number = page.get("page_number")
             for el in page.get("elements", []):
                 el_type = el.get("type")
+                rect = furniture_lib.page_band_rect(
+                    furniture, page_widths.get(page_number), page_heights.get(page_number)
+                )
                 patterns = furniture_lib.patterns_for_element(
-                    all_patterns, el.get("bbox"), page_heights.get(page_number),
-                    furniture_lib.page_content_rect(
-                        furniture, page_widths.get(page_number), page_heights.get(page_number)
-                    ),
+                    all_patterns, el.get("bbox"), page_heights.get(page_number), rect
                 )
                 if el_type in ("heading", "paragraph", "list_item"):
                     for hit in furniture_lib.furniture_line_hits(el.get("text") or "", patterns):
@@ -350,7 +359,12 @@ def check_furniture_absent(
                         add(page_number, "frame table", f"table bbox {el.get('bbox')}")
                 elif el_type == "image":
                     for field in ("figure_text", "caption"):
-                        for hit in furniture_lib.furniture_line_hits(el.get(field) or "", patterns):
+                        # figure_text lines carry no position of their own: on
+                        # an image that reaches into the band, each is checked
+                        # against the letter-bearing patterns too.
+                        reaches = _reaches_band(el.get("bbox"), page_heights.get(page_number), rect)
+                        field_patterns = patterns | masked_patterns if field == "figure_text" and reaches else patterns
+                        for hit in furniture_lib.furniture_line_hits(el.get(field) or "", field_patterns):
                             add(page_number, f"image {field}", hit)
 
     if masked_patterns and output_dir.exists():
@@ -388,6 +402,23 @@ def check_furniture_absent(
     return {"name": "furniture_absent", "passed": not offenders, "detail": detail, "pages": pages, "offenders": offenders}
 
 
+def _below_toc(heading: dict, matched_numbers: set[str]) -> bool:
+    """True for a heading the TOC does not list but extract-text may make:
+    a numbered heading under a matched TOC entry (an ancestor number is
+    one) at its dot-depth level, or a sub-heading (`sub_heading`, which
+    only extract-text sets) with a level. Its level comes from the heading
+    above it, which may be on a page or at a depth the gate cannot see."""
+    if heading["sub_heading"]:
+        return bool(heading["level"])
+    number = toc_lib.section_number(heading["text"])
+    if number is None:
+        return False
+    parts = number.rstrip(".").split(".")
+    return heading["level"] == min(len(parts), 6) and any(
+        ".".join(parts[:k]) in matched_numbers for k in range(1, len(parts))
+    )
+
+
 def check_toc_headings_match(doc_data: dict, toc_entries: list[dict], unparsed: list[str] | None = None) -> dict:
     """Task A9: the TOC (`toc.json["entries"]`) and the body headings agree.
 
@@ -395,21 +426,28 @@ def check_toc_headings_match(doc_data: dict, toc_entries: list[dict], unparsed: 
     text (lib/toc.py's `normalize_toc_text`, the same match extract-text
     uses) equals the entry's "<number> <title>" text, on a page within
     TOC_PAGE_TOLERANCE of the entry's `page`, at the entry's `level`
-    (toc.json's dot-depth level, which is what extract-text assigns). One
+    (toc.json's dot-depth level, which is what extract-text assigns). A
+    heading that starts with a section number must also have that number's
+    dot depth as its level (`number_level_mismatch`). One
     heading satisfies one entry only. Every heading that no entry uses is
-    reported as `extra` -- extract-text's TOC-driven rule should make none.
+    reported as `extra`, except the ones extract-text makes below the TOC
+    (`_below_toc`): a numbered heading deeper than the TOC lists, under a
+    matched entry, and a sub-heading (`sub_heading`).
 
     Fix wave I2: `unparsed` is toc.json's `unparsed` list -- dot-leader
     lines on a printed TOC page that gave no entry. Each one may be a lost
     entry whose heading then became a paragraph, which the comparison above
-    cannot see. So the check fails while `unparsed` is not empty, and lists
-    those lines.
+    cannot see. The check lists those lines. It fails on them when there
+    is another problem or no entry at all; when every entry matched and
+    nothing else is wrong, they are only a `toc_unparsed_lines` warning
+    (`toc_unparsed_warnings`), so a few stray lines do not block the retry
+    loop.
 
     Passes trivially when toc.json has no entries and no unparsed lines (no
     TOC, or not a PDF): heading levels then come from extract-text's
     size-rank fallback, and there is nothing to compare against."""
     unparsed = list(unparsed or [])
-    empty = {"missing": [], "page_mismatch": [], "level_mismatch": [], "extra": [], "unparsed": unparsed}
+    empty = {"missing": [], "page_mismatch": [], "level_mismatch": [], "number_level_mismatch": [], "extra": [], "unparsed": unparsed}
     if not toc_entries and not unparsed:
         return {"name": "toc_headings_match", "passed": True, "detail": "no TOC entries -- nothing to check", "pages": [], **empty}
 
@@ -420,11 +458,12 @@ def check_toc_headings_match(doc_data: dict, toc_entries: list[dict], unparsed: 
                 text = el.get("text") or ""
                 headings.append({
                     "page": page.get("page_number"), "level": el.get("level"), "text": text,
-                    "norm": toc_lib.normalize_toc_text(text), "used": False,
+                    "norm": toc_lib.normalize_toc_text(text), "used": False, "sub_heading": bool(el.get("sub_heading")),
                 })
     headings.sort(key=lambda h: h["page"] or 0)
 
     missing, page_mismatch, level_mismatch = [], [], []
+    matched_numbers = set()
     for entry in toc_entries:
         expected = toc_lib.normalize_toc_text(toc_lib.toc_entry_heading_text(entry))
         candidates = [h for h in headings if not h["used"] and h["norm"] == expected]
@@ -433,34 +472,69 @@ def check_toc_headings_match(doc_data: dict, toc_entries: list[dict], unparsed: 
             continue
         closest = min(candidates, key=lambda h: abs(h["page"] - entry["page"]))
         closest["used"] = True
+        if entry.get("number"):
+            matched_numbers.add(entry["number"].rstrip("."))
         if abs(closest["page"] - entry["page"]) > TOC_PAGE_TOLERANCE:
             page_mismatch.append({"text": closest["text"], "toc_page": entry["page"], "heading_page": closest["page"]})
         elif closest["level"] != entry["level"]:
             level_mismatch.append({"text": closest["text"], "page": closest["page"], "toc_level": entry["level"], "heading_level": closest["level"]})
 
-    extra = [{"text": h["text"], "page": h["page"], "level": h["level"]} for h in headings if not h["used"]]
+    extra = [
+        {"text": h["text"], "page": h["page"], "level": h["level"]}
+        for h in headings
+        if not h["used"] and not _below_toc(h, matched_numbers)
+    ]
+    # A section number's dot depth is its level; an outline or TOC level
+    # that differs from it is the error (both sides would otherwise agree).
+    # Past depth 6 a heading may be capped at level 6, so it is not checked.
+    number_level_mismatch = []
+    for h in headings:
+        number = toc_lib.section_number(h["text"])
+        depth = toc_lib._level_from_number(number) if number else None
+        if depth is not None and depth <= 6 and h["level"] != depth:
+            number_level_mismatch.append({
+                "text": h["text"], "page": h["page"], "number_level": depth, "heading_level": h["level"],
+            })
 
     pages = {m["page"] for m in missing} | {m["page"] for m in level_mismatch} | {m["page"] for m in extra}
+    pages |= {m["page"] for m in number_level_mismatch}
     for m in page_mismatch:
         pages |= {m["toc_page"], m["heading_page"]}
 
     problems = []
+    if unparsed and (missing or page_mismatch or level_mismatch or number_level_mismatch or extra or not toc_entries):
+        problems.append("TOC lines not parsed into an entry: " + ", ".join(repr(line) for line in unparsed))
     if missing:
         problems.append("missing: " + ", ".join(f"{toc_lib.toc_entry_heading_text(m)!r} (page {m['page']})" for m in missing))
     if page_mismatch:
         problems.append("page off by more than 1: " + ", ".join(f"{m['text']!r} (TOC page {m['toc_page']}, heading page {m['heading_page']})" for m in page_mismatch))
     if level_mismatch:
         problems.append("level mismatch: " + ", ".join(f"{m['text']!r} (TOC level {m['toc_level']}, heading level {m['heading_level']})" for m in level_mismatch))
+    if number_level_mismatch:
+        problems.append("level is not the section number's depth: " + ", ".join(f"{m['text']!r} (number level {m['number_level']}, heading level {m['heading_level']})" for m in number_level_mismatch))
     if extra:
         problems.append("not in the TOC: " + ", ".join(f"{m['text']!r} (page {m['page']})" for m in extra))
-    if unparsed:
-        problems.append("TOC lines not parsed into an entry: " + ", ".join(repr(line) for line in unparsed))
     detail = "; ".join(problems) if problems else f"all {len(toc_entries)} TOC entries match a heading"
     return {
         "name": "toc_headings_match", "passed": not problems, "detail": detail, "pages": sorted(pages),
-        "missing": missing, "page_mismatch": page_mismatch, "level_mismatch": level_mismatch, "extra": extra,
-        "unparsed": unparsed,
+        "missing": missing, "page_mismatch": page_mismatch, "level_mismatch": level_mismatch,
+        "number_level_mismatch": number_level_mismatch, "extra": extra, "unparsed": unparsed,
     }
+
+
+def toc_unparsed_warnings(toc_check: dict) -> list[dict]:
+    """A `toc_unparsed_lines` warning when `check_toc_headings_match`
+    passed with unparsed TOC lines left over."""
+    if not toc_check["passed"] or not toc_check.get("unparsed"):
+        return []
+    lines = toc_check["unparsed"]
+    return [{
+        "name": "toc_unparsed_lines",
+        "page": None,
+        "lines": lines,
+        "detail": "TOC lines not parsed into an entry: " + ", ".join(repr(line) for line in lines)
+        + " -- every TOC entry matched a heading; verify no entry was lost",
+    }]
 
 
 def check_figures_complete(doc_data: dict, input_format: str | None = None) -> dict:
@@ -473,9 +547,8 @@ def check_figures_complete(doc_data: dict, input_format: str | None = None) -> d
     the render). The agent never writes a caption for such an image --
     `caption` is only the printed caption the script extracts.
 
-    Fix round 2: the flag counts only when `input_format` is in
-    NO_VISIBLE_TEXT_FORMATS (pdf, image). For pptx/docx/xlsx/html, or an
-    unknown format, the agent writes `--caption`, so the flag is ignored.
+    The flag counts for every input format; `input_format` is accepted for
+    older callers and not used.
 
     Ordering: the extractor agent writes `description` (and, when the
     scripts found no caption and no figure_text, one of them) with
@@ -490,7 +563,7 @@ def check_figures_complete(doc_data: dict, input_format: str | None = None) -> d
                 continue
             missing = []
             has_text = (el.get("caption") or "").strip() or (el.get("figure_text") or "").strip()
-            flag_counts = input_format in NO_VISIBLE_TEXT_FORMATS and el.get("no_visible_text") is True
+            flag_counts = el.get("no_visible_text") is True
             if not has_text and not flag_counts:
                 missing.append("caption or figure_text")
             if not (el.get("description") or "").strip():
@@ -505,11 +578,42 @@ def check_figures_complete(doc_data: dict, input_format: str | None = None) -> d
     return {"name": "figures_complete", "passed": not incomplete, "detail": detail, "pages": pages, "incomplete": incomplete}
 
 
-def _words(text: str) -> set[str]:
-    return set(_COVERAGE_WORD.findall(text.lower()))
+def check_pptx_figures_covered(doc_data: dict, census: dict[int, list[dict]]) -> dict:
+    """pptx only: every figure a slide shows has an element.
+    check_figures_complete sees only the images that exist; this one sees
+    the ones that were never extracted.
+
+    `census` is pptx-triage's `pages[].figure_shapes` by page, read from
+    the slide's shape tree apart from pptx-extract. A census shape is
+    covered by an `image` or `table` element whose `source_shape_id` is the
+    shape's id, or the id of a group that contains it (`groups`).
+
+    A vision-tier page's body is a transcription with no source_shape_id
+    (its image shard keeps them). There a shape missing by id still counts
+    as covered when the page has at least as many image and table elements
+    as census shapes."""
+    uncovered = []
+    for page_number, shapes in sorted(census.items()):
+        page = doc_data["pages"].get(page_number, {})
+        figures = [el for el in page.get("elements", []) if el.get("type") in ("image", "table")]
+        ids = {el.get("source_shape_id") for el in figures}
+        missing = [s for s in shapes if s["shape_id"] not in ids and not ids & set(s.get("groups", []))]
+        if missing and page.get("tier") == "vision" and len(figures) >= len(shapes):
+            continue
+        uncovered += [{"page": page_number, "shape_id": s["shape_id"], "kind": s["kind"]} for s in missing]
+    pages = sorted({u["page"] for u in uncovered})
+    detail = (
+        "figures with no element: " + "; ".join(f"page {u['page']} shape {u['shape_id']} ({u['kind']})" for u in uncovered)
+        if uncovered else "every figure on the slides has an image or table element"
+    )
+    return {"name": "pptx_figures_covered", "passed": not uncovered, "detail": detail, "pages": pages, "uncovered": uncovered}
 
 
-def _element_words(el: dict) -> set[str]:
+def _words(text: str) -> Counter:
+    return Counter(_COVERAGE_WORD.findall(text.lower()))
+
+
+def _element_words(el: dict) -> Counter:
     """Words of the text an element carries from the page: its text,
     caption, figure_text and table cells -- never the agent's description."""
     parts = [el.get("text") or "", el.get("caption") or "", el.get("figure_text") or ""]
@@ -517,31 +621,42 @@ def _element_words(el: dict) -> set[str]:
     return _words(" ".join(parts))
 
 
-def check_text_layer_coverage(doc_data: dict, source_words: dict[int, set[str]]) -> dict:
+def check_text_layer_coverage(doc_data: dict, source_words: dict[int, Counter]) -> dict:
     """Dropped text on a `text`-tier page, checked against the page's own
     text layer (`source_words`, from `pdf_text_layer_words`) instead of by
-    eye. The neighbouring pages count too: a page-break join moves the
-    start of page n+1 onto page n."""
+    eye. Words are counted per page, so a word lost on the page is missing
+    even when it also occurs nearby. A page-break join moves the start of
+    page n+1 onto page n: an element's words count for every page in its
+    `pages` (a joined table's repeated header is in no output of its own),
+    and a neighbouring page's surplus (its output words beyond its own
+    text layer) counts too."""
     pages = doc_data["pages"]
-    page_words = {
-        n: set().union(*(_element_words(el) for el in page.get("elements", []))) for n, page in pages.items()
-    }
+    page_words = {n: Counter() for n in pages}
+    for n, page in pages.items():
+        for el in page.get("elements", []):
+            words = _element_words(el)
+            for m in {n, *el.get("pages", [])}:
+                page_words.setdefault(m, Counter()).update(words)
+
+    def surplus(m: int) -> Counter:
+        return page_words.get(m, Counter()) - Counter(source_words.get(m) or ())
+
     failing, details = [], []
     for n, page in sorted(pages.items()):
-        src = source_words.get(n)
+        src = Counter(source_words.get(n) or ())
         if page.get("tier") != "text" or page.get("skipped") or not src:
             continue
-        out = page_words.get(n - 1, set()) | page_words[n] | page_words.get(n + 1, set())
-        missing = sorted(src - out)
-        if len(missing) >= COVERAGE_MIN_MISSING and len(missing) / len(src) >= COVERAGE_MAX_MISSING_FRACTION:
+        missing = src - page_words[n] - surplus(n - 1) - surplus(n + 1)
+        count, total = sum(missing.values()), sum(src.values())
+        if count >= COVERAGE_MIN_MISSING and count / total >= COVERAGE_MAX_MISSING_FRACTION:
             failing.append(n)
-            details.append(f"page {n}: {len(missing)} of {len(src)} text-layer words missing, e.g. {', '.join(missing[:8])}")
+            details.append(f"page {n}: {count} of {total} text-layer words missing, e.g. {', '.join(sorted(missing)[:8])}")
     detail = "; ".join(details) if details else "every text-tier page's text-layer words are in the output"
     return {"name": "text_layer_coverage", "passed": not failing, "detail": detail, "pages": failing}
 
 
-def pdf_text_layer_words(input_path: Path, furniture: dict) -> dict[int, set[str]]:
-    """{page: words} of each PDF page's horizontal text lines outside the
+def pdf_text_layer_words(input_path: Path, furniture: dict) -> dict[int, Counter]:
+    """{page: word counts} of each PDF page's horizontal text lines outside the
     furniture bands and side margins, line-end hyphens joined the way
     extraction joins them."""
     import fitz  # PyMuPDF
@@ -550,7 +665,7 @@ def pdf_text_layer_words(input_path: Path, furniture: dict) -> dict[int, set[str
     with fitz.open(input_path) as pdf:
         for n, page in enumerate(pdf, start=1):
             width, height = page.rect.width, page.rect.height
-            rect = furniture_lib.page_content_rect(furniture, width, height)
+            rect = furniture_lib.page_band_rect(furniture, width, height)
             lines = [
                 "".join(span["text"] for span in line["spans"])
                 for block in page.get_text("dict")["blocks"]
@@ -691,6 +806,11 @@ def main() -> None:
         ),
         check_text_layer_coverage(doc_data, pdf_text_layer_words(input_path, furniture) if input_format == "pdf" else {}),
     ]
+    if input_format == "pptx":
+        triage_pages = _load_json(paths.triage_json(args.doc)).get("pages") or []
+        checks.append(check_pptx_figures_covered(
+            doc_data, {p["page_number"]: p.get("figure_shapes") or [] for p in triage_pages}
+        ))
 
     # Task A5b: large_region_excluded is a WARNING, not one of the checks
     # above -- it never affects `passed`. See check_large_region_excluded's
@@ -701,6 +821,7 @@ def main() -> None:
         check_large_region_excluded(doc_data, page_areas)
         + check_orphan_figure_caption(doc_data)
         + check_table_as_figure(doc_data)
+        + toc_unparsed_warnings(next(c for c in checks if c["name"] == "toc_headings_match"))
     )
 
     result = {"doc": args.doc, "passed": all(c["passed"] for c in checks), "checks": checks, "warnings": warnings}

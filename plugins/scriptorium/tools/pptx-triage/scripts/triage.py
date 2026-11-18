@@ -9,25 +9,62 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+import furniture as furniture_lib  # noqa: E402
 import paths  # noqa: E402
 import pptx_shapes  # noqa: E402
 import preflight  # noqa: E402
 
 from pptx import Presentation
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 
-def slide_has_visual(slide) -> bool:
-    return any(pptx_shapes.is_picture(s) or s.has_chart for s in pptx_shapes.iter_shapes(slide.shapes))
+def footer_furniture(presentation) -> dict:
+    """`furniture` with one `line_patterns` entry per footer, slide-number or
+    date placeholder line that has letters. pptx-extract never emits these
+    placeholders; the patterns let merge.py and gates.py's
+    furniture_absent catch them in a vision transcription. A digit-only
+    line (a slide number, a numeric date) is left out: with no page
+    geometry it would match any bare number in the body. So is a line that
+    is also body text somewhere in the deck (a footer repeating the deck
+    title): the pattern would fail or strip that body text."""
+    pages: dict[str, set[int]] = {}
+    body_keys: set[str] = set()
+
+    def visit(shapes, n: int) -> None:
+        for shape in shapes:
+            if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                visit(shape.shapes, n)
+                continue
+            if not shape.has_text_frame:
+                continue
+            furniture = pptx_shapes.is_furniture_placeholder(shape)
+            for para in shape.text_frame.paragraphs:
+                key = furniture_lib.furniture_key(para.text)
+                if furniture:
+                    pages.setdefault(key, set()).add(n)
+                else:
+                    body_keys.add(key)
+
+    for n, slide in enumerate(presentation.slides, start=1):
+        visit(slide.shapes, n)
+    return {
+        **furniture_lib.empty_furniture(),
+        "line_patterns": [
+            {"masked": key, "page_count": len(found)}
+            for key, found in sorted(pages.items())
+            if key and not furniture_lib.is_digit_only_pattern(key) and key not in body_keys
+        ],
+    }
 
 
 def classify_slide(slide, page_number: int) -> dict:
-    image_count = sum(1 for shape in pptx_shapes.iter_shapes(slide.shapes) if pptx_shapes.is_picture(shape))
+    figures = pptx_shapes.figure_shapes(slide)
     return {
         "page_number": page_number,
         "tier": "text",
-        "image_count": image_count,
+        "image_count": len(figures),
+        "figure_shapes": figures,
         "reason": "native slide content (pptx is digital-native, no OCR needed)",
-        "has_visual": slide_has_visual(slide),
     }
 
 
@@ -46,20 +83,20 @@ def main() -> None:
         preflight.fail(pptx_path, "has no slides")
     pages = [classify_slide(slide, i) for i, slide in enumerate(presentation.slides, start=1)]
 
-    loop_size = "tight" if any(p["has_visual"] for p in pages) else "loose"
-    for p in pages:
-        del p["has_visual"]
+    loop_size = "tight" if any(p["image_count"] for p in pages) else "loose"
     result = {
         "doc": args.doc,
         "page_count": len(pages),
         "pages": pages,
         "loop_size": loop_size,
+        "furniture": footer_furniture(presentation),
     }
 
     out_path = paths.triage_json(args.doc)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(result, indent=2), encoding="utf-8", newline="")
-    print(json.dumps(result, indent=2))
+    # Context-rot rule: the census (figure_shapes) stays in triage.json, out of the orchestrator's stdout.
+    print(json.dumps({**result, "pages": [{k: v for k, v in p.items() if k != "figure_shapes"} for p in pages]}, indent=2))
 
 
 if __name__ == "__main__":

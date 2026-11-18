@@ -76,7 +76,8 @@ Detection pipeline, per page:
    off) and `figure_text` (missing the labels entirely).
 3. Each padded candidate is dropped if it:
    - is "tiny" -- smaller than `MIN_CLUSTER_AREA_FRACTION` of the page
-     area, almost certainly a stray rule/line rather than a real figure;
+     area, almost certainly a stray rule/line rather than a real figure,
+     unless it is curve-dense with no text inside (STROKE_GRAPHIC_MIN_CURVES);
    - is a "text_box" (fix wave I1) -- its drawings form exactly one
      axis-aligned rectangle (one `re` item, or at most
      `TEXT_BOX_MAX_LINE_ITEMS` axis-aligned lines, no curves) and at least
@@ -103,12 +104,15 @@ Detection pipeline, per page:
      Follow-up R16: a cluster that covers more than
      GRID_TABLE_MAX_CLUSTER_FRACTION of the page (or content rect) never
      uses the grid-table rule; a page-sized form stays a table.
+     Nor when the overlapping tables together cover less than
+     TABLE_IN_FIGURE_MAX_COVER of the cluster: small tables inside a large
+     drawing are part of it, recorded as "table_in_figure".
 
 Task A5b: every candidate this pipeline drops -- a pre-filtered frame
 drawing, the page's repeated drawings, or an excluded cluster -- is also
 returned as an "excluded region" (`{"bbox": [...], "reason":
 "frame_drawing"|"repeated_drawing"|"tiny"|"text_box"|"furniture_band"|
-"table_overlap"|"grid_table"}`; a "repeated_drawing" entry also has a `count`) via
+"table_overlap"|"grid_table"|"table_in_figure"}`; a "repeated_drawing" entry also has a `count`) via
 `detect_figure_regions_with_exclusions`, so a large
 region that a filter removes is never silently dropped -- it's visible to
 `extract-images` (which writes it into the page's image shard as
@@ -163,6 +167,11 @@ REGION_PADDING = 10.0
 # magnitude smaller).
 MIN_CLUSTER_AREA_FRACTION = 0.01
 
+# A cluster under that size is still a figure when its drawings hold at
+# least this many curve items and no text line lies inside it: hand-drawn
+# strokes (a signature), not a stray rule or a bullet.
+STROKE_GRAPHIC_MIN_CURVES = 20
+
 # Overlap-ratio thresholds (see _overlap_ratio) for "this candidate region
 # is basically on top of a real table" and "this text line is basically
 # inside a figure region" respectively. Not the same value on purpose: a
@@ -200,6 +209,13 @@ GRID_CORNER_ARC_MAX = 12.0  # pt
 # there is one). A page-sized ruled form or cover page with sparse cells is
 # a table, not a chart; the cluster is excluded as table_overlap.
 GRID_TABLE_MAX_CLUSTER_FRACTION = 0.60
+
+# Overlapping tables that together cover less than this fraction of a
+# cluster's (padded) area do not exclude it: the cluster is a figure and
+# each table is recorded as "table_in_figure" (extract_text emits no table
+# for it). A table's own ruling plus REGION_PADDING covers far more. Not for
+# a cluster over GRID_TABLE_MAX_CLUSTER_FRACTION (a page border's cluster).
+TABLE_IN_FIGURE_MAX_COVER = 0.15
 
 # Follow-up R12: a table detected inside the content rect that covers more
 # than this fraction of it (and matches it within FRAME_MATCH_TOLERANCE) is
@@ -343,9 +359,12 @@ def page_tables(
                 pl_page = pl_page.crop(crop)
             else:
                 crop = None
-        caps = _open_edge_caps(pl_page, crop)
+        visible, unhighlighted = _without_fill_rects(pl_page, crop)
+        pl_tables = _find_tables(unhighlighted, crop)
+        if not pl_tables and len(unhighlighted.rects) < len(visible.rects):
+            pl_tables = _find_tables(visible, crop)  # a borderless table drawn only by its shading
         chars = None
-        for table in pl_page.find_tables({"explicit_horizontal_lines": caps} if caps else {}):
+        for table in pl_tables:
             if furniture_lib.matches_any_frame(table.bbox, frame_tables):
                 continue
             if crop is not None and _is_content_frame(table.bbox, crop):
@@ -362,17 +381,138 @@ def page_tables(
             for row in table.rows:
                 texts = glyphs.cell_texts(chars, row.cells)
                 raw_rows.append([None if cell is None else text for cell, text in zip(row.cells, texts)])
+            bbox, cells = list(table.bbox), [list(c) for c in table.cells]
+            for top, bottom in _rows_below_header(unhighlighted, table):
+                row_cells = [[c[0], top, c[2], bottom] for c in table.rows[0].cells]
+                raw_rows.append(glyphs.cell_texts(chars, row_cells))
+                cells += row_cells
+                bbox[3] = bottom
             real = [cell for row in raw_rows for cell in row if cell is not None]
             filled = sum(1 for cell in real if str(cell).strip())
             found.append({
-                "bbox": list(table.bbox),
+                "bbox": bbox,
                 "rows": [[cell if cell is not None else "" for cell in row] for row in raw_rows],
-                "cells": [list(c) for c in table.cells],
+                "cells": cells,
                 "filled_cells": filled,
                 "filled_fraction": filled / len(real) if real else 0.0,
             })
     pl_doc.pages[page_number - 1].close()  # free the page's parsed objects, as closing the doc used to
     return found
+
+
+# A ruled header row with no ruled rows under it (1 row, at least
+# HEADER_ROW_MIN_COLUMNS cells) takes the unruled rows printed below it.
+# A row is the words at one y (within HEADER_ROW_SAME_Y); a phrase is a
+# run of words less than HEADER_ROW_WORD_GAP font sizes apart, and each
+# phrase must lie inside one header cell (HEADER_ROW_X_SLACK). The rows
+# stop at a gap over HEADER_ROW_MAX_GAP row heights, a horizontal rule, a
+# font larger than the first row's, or a phrase across cells (a
+# paragraph). The first row must fill at least 2 cells.
+HEADER_ROW_MIN_COLUMNS = 3
+HEADER_ROW_SAME_Y = 3.0  # pt
+HEADER_ROW_WORD_GAP = 0.6
+HEADER_ROW_X_SLACK = 2.0  # pt
+HEADER_ROW_MAX_GAP = 1.5
+
+
+def _rows_below_header(pl_page, table) -> list[tuple[float, float]]:
+    """`(top, bottom)` of each unruled row a header-only `table` takes
+    (see HEADER_ROW_MIN_COLUMNS). The rows tile the space below the header
+    with no gaps, so every line of them lies in a cell."""
+    header = table.rows[0].cells if len(table.rows) == 1 else []
+    if len(header) < HEADER_ROW_MIN_COLUMNS or any(c is None for c in header):
+        return []
+    x0, _top, x1, bottom = table.bbox
+    words = sorted(
+        (w for w in pl_page.extract_words(extra_attrs=["size"]) if w["top"] >= bottom - 1 and w["x1"] > x0 and w["x0"] < x1),
+        key=lambda w: (w["top"], w["x0"]),
+    )
+    rules = [e["top"] for e in pl_page.edges if e["orientation"] == "h" and e["x1"] > x0 and e["x0"] < x1]
+    rows: list[list[float]] = []  # [top, bottom] per row
+    size = None
+    while words:
+        row = [w for w in words if w["top"] - words[0]["top"] <= HEADER_ROW_SAME_Y]
+        words = words[len(row):]
+        top, row_bottom = min(w["top"] for w in row), max(w["bottom"] for w in row)
+        prev = rows[-1][1] if rows else bottom
+        row_size = max(w["size"] for w in row)
+        size = size or row_size
+        if top - prev > HEADER_ROW_MAX_GAP * (row_bottom - top) or row_size > size + 0.5:
+            break
+        if any(prev + 1 < y < top for y in rules):
+            break
+        phrases: list[list[float]] = []
+        for w in sorted(row, key=lambda w: w["x0"]):
+            if phrases and w["x0"] - phrases[-1][1] < HEADER_ROW_WORD_GAP * w["size"]:
+                phrases[-1][1] = w["x1"]
+            else:
+                phrases.append([w["x0"], w["x1"]])
+        columns = [
+            next((i for i, c in enumerate(header) if c[0] - HEADER_ROW_X_SLACK <= p[0] and p[1] <= c[2] + HEADER_ROW_X_SLACK), None)
+            for p in phrases
+        ]
+        if None in columns or (not rows and len(set(columns)) < 2):
+            break
+        rows.append([top, row_bottom])
+    tiled = []
+    for i, (_top, row_bottom) in enumerate(rows):
+        start = tiled[-1][1] if tiled else bottom
+        end = (row_bottom + rows[i + 1][0]) / 2 if i + 1 < len(rows) else row_bottom + 1
+        tiled.append((start, end))
+    return tiled
+
+
+def _find_tables(pl_page, crop):
+    caps = _open_edge_caps(pl_page, crop)
+    return pl_page.find_tables({"explicit_horizontal_lines": caps} if caps else {})
+
+
+# A fill-only rect thicker than HIGHLIGHT_MIN_SIDE on both sides with an
+# edge more than HIGHLIGHT_RULE_TOLERANCE from every thin rule (a thin rect
+# or a line) is a text highlight, not a cell: its edges are no table edges.
+HIGHLIGHT_MIN_SIDE = 2.0  # pt
+HIGHLIGHT_RULE_TOLERANCE = 1.5  # pt
+
+
+def _is_white(color) -> bool:
+    """True for a pdfplumber colour that is white: gray or RGB channels at
+    INVISIBLE_FILL_MIN or more, or CMYK channels near 0."""
+    if isinstance(color, (int, float)):
+        color = (color,)
+    if not isinstance(color, (tuple, list)) or not color or not all(isinstance(c, (int, float)) for c in color):
+        return False
+    if len(color) == 4:
+        return all(c <= 1 - INVISIBLE_FILL_MIN for c in color)
+    return all(c >= INVISIBLE_FILL_MIN for c in color)
+
+
+def _without_fill_rects(pl_page, crop: list[float] | None):
+    """`(visible, unhighlighted)`: `pl_page` without its invisible
+    fill-only rects (white, no stroke: they paint nothing, so they draw no
+    table edge), and that page without its highlight rects too
+    (HIGHLIGHT_MIN_SIDE). A rect that matches the crop rect is the content
+    frame's own fill, which closes a table cut at the crop edge; it stays."""
+    def frame(o) -> bool:
+        return crop is not None and furniture_lib.bbox_matches([o["x0"], o["top"], o["x1"], o["bottom"]], crop)
+
+    def fill_only(o) -> bool:
+        return o["object_type"] == "rect" and bool(o.get("fill")) and not o.get("stroke") and not frame(o)
+
+    def thick(o) -> bool:
+        return fill_only(o) and o["width"] > HIGHLIGHT_MIN_SIDE and o["height"] > HIGHLIGHT_MIN_SIDE
+
+    visible = pl_page.filter(lambda o: not (fill_only(o) and _is_white(o.get("non_stroking_color"))))
+    rules = visible.filter(lambda o: not thick(o)).edges
+    xs = [e["x0"] for e in rules if e["orientation"] == "v"]
+    ys = [e["top"] for e in rules if e["orientation"] == "h"]
+
+    def highlight(o) -> bool:
+        return thick(o) and not (
+            _near_any(o["x0"], xs, HIGHLIGHT_RULE_TOLERANCE) and _near_any(o["x1"], xs, HIGHLIGHT_RULE_TOLERANCE)
+            and _near_any(o["top"], ys, HIGHLIGHT_RULE_TOLERANCE) and _near_any(o["bottom"], ys, HIGHLIGHT_RULE_TOLERANCE)
+        )
+
+    return visible, visible.filter(lambda o: not highlight(o))
 
 
 _plumber_cache: dict = {}
@@ -506,7 +646,9 @@ def _off_grid_item_bbox(item, xs: list[float], ys: list[float], table_bbox, tole
     """The bbox of one path item when it is NOT on the table's cell
     boundaries (`xs`, `ys`, within `tolerance`), else None. An
     axis-aligned line is on them when it lies on a boundary y (horizontal)
-    or x (vertical); a rect when all four edges do; a small curve at a
+    or x (vertical); a rect, clipped to the table bbox, when all four
+    edges do (a fill overshooting the table edge is shading, a rule
+    outside it is border); a small curve at a
     table corner is a rounded corner (`_is_corner_arc`). Anything else (a
     diagonal, a curve, a bar) is off the grid."""
     op = item[0]
@@ -518,7 +660,9 @@ def _off_grid_item_bbox(item, xs: list[float], ys: list[float], table_bbox, tole
             return None
         return [min(p1.x, p2.x), min(p1.y, p2.y), max(p1.x, p2.x), max(p1.y, p2.y)]
     if op == "re" or (op == "qu" and item[1].is_rectangular):
-        r = item[1] if op == "re" else item[1].rect
+        r = (item[1] if op == "re" else item[1].rect) & fitz.Rect(table_bbox)
+        if r.is_empty:
+            return None
         on_grid = (
             _near_any(r.x0, xs, tolerance) and _near_any(r.x1, xs, tolerance)
             and _near_any(r.y0, ys, tolerance) and _near_any(r.y1, ys, tolerance)
@@ -541,8 +685,8 @@ def _has_data_series(
 ) -> bool:
     """Re-review 2 I1, rule (a): True when one drawing of `drawings` has
     path items off the table's cell boundaries (`_off_grid_item_bbox`),
-    and their union reaches into the table but does not stay inside one
-    cell. A data series crosses cells; a check mark, a cross or a diagonal
+    and their union (each item clipped to the table bbox) reaches into the
+    table but does not stay inside one cell. A data series crosses cells; a check mark, a cross or a diagonal
     "n/a" stroke stays inside its cell."""
     cells = table.get("cells") or []
     if not cells:
@@ -552,9 +696,11 @@ def _has_data_series(
     table_bbox = table["bbox"]
     for d in drawings:
         off = [
-            b for b in (_off_grid_item_bbox(item, xs, ys, table_bbox, tolerance) for item in d.get("items", []))
+            [max(b[0], table_bbox[0]), max(b[1], table_bbox[1]), min(b[2], table_bbox[2]), min(b[3], table_bbox[3])]
+            for b in (_off_grid_item_bbox(item, xs, ys, table_bbox, tolerance) for item in d.get("items", []))
             if b is not None
         ]
+        off = [b for b in off if b[0] <= b[2] and b[1] <= b[3]]
         if not off:
             continue
         union = _union_bbox(off)
@@ -669,6 +815,13 @@ def _is_text_box(cluster_rect, drawings: list[dict], page_lines: list[dict]) -> 
     return any(line_in_region(line["bbox"], raw_bbox) for line in page_lines)
 
 
+def _is_stroke_graphic(cluster_rect, drawings: list[dict], page_lines: list[dict]) -> bool:
+    """See STROKE_GRAPHIC_MIN_CURVES."""
+    curves = sum(1 for d in _drawings_in_cluster(cluster_rect, drawings) for item in d.get("items", []) if item[0] == "c")
+    raw_bbox = [cluster_rect.x0, cluster_rect.y0, cluster_rect.x1, cluster_rect.y1]
+    return curves >= STROKE_GRAPHIC_MIN_CURVES and not any(line_in_region(line["bbox"], raw_bbox) for line in page_lines)
+
+
 def _boxes_adjacent(a, b, max_gap: float = BOX_GROUP_MAX_GAP) -> bool:
     """True when bboxes `a` and `b` are at most `max_gap` apart on one axis
     and overlap on the other (see BOX_GROUP_MAX_GAP)."""
@@ -746,7 +899,7 @@ def detect_figure_regions_with_exclusions(
 
     `excluded_regions`: Task A5b -- every drawing/cluster a filter removed,
     `[{"bbox": [...], "reason": "frame_drawing"|"repeated_drawing"|"tiny"|
-    "text_box"|"furniture_band"|"table_overlap"|"grid_table"|"invisible_drawing"|
+    "text_box"|"furniture_band"|"table_overlap"|"grid_table"|"table_in_figure"|"invisible_drawing"|
     "bitmap_panel"}]`,
     sorted the same way.
     A "grid_table" entry is a pdfplumber table that is a chart's grid; its
@@ -803,12 +956,16 @@ def detect_figure_regions_with_exclusions(
     if content_rect:
         reference_area = max(1e-6, (content_rect[2] - content_rect[0]) * (content_rect[3] - content_rect[1]))
 
+    # The padding stops at the content rect (or the page): it never takes in
+    # the title block. The drawing itself is never cut.
+    limits = content_rect or [0.0, 0.0, page_width, page_height]
+
     def padded(raw) -> list[float]:
         return [
-            max(0.0, raw[0] - REGION_PADDING),
-            max(0.0, raw[1] - REGION_PADDING),
-            min(page_width, raw[2] + REGION_PADDING),
-            min(page_height, raw[3] + REGION_PADDING),
+            max(0.0, min(raw[0], limits[0]), raw[0] - REGION_PADDING),
+            max(0.0, min(raw[1], limits[1]), raw[1] - REGION_PADDING),
+            min(page_width, max(raw[2], limits[2]), raw[2] + REGION_PADDING),
+            min(page_height, max(raw[3], limits[3]), raw[3] + REGION_PADDING),
         ]
 
     regions = []
@@ -818,12 +975,21 @@ def detect_figure_regions_with_exclusions(
             excluded_regions.append({"bbox": bbox, "reason": "furniture_band"})
             return
         overlapping = [t for t in tables if _overlaps_table(bbox, t["bbox"])]
-        if overlapping:
+        area = max(0.0, bbox[2] - bbox[0]) * max(0.0, bbox[3] - bbox[1])
+        page_sized = area / reference_area > GRID_TABLE_MAX_CLUSTER_FRACTION
+        if (
+            overlapping and not page_sized
+            and sum(_overlap_ratio(bbox, t["bbox"]) for t in overlapping) < TABLE_IN_FIGURE_MAX_COVER
+        ):
+            # Small tables inside a large drawing (a legend, labels on
+            # backgrounds) are part of the figure; not on a page-sized
+            # cluster (a page border joins every drawing into one).
+            for t in overlapping:
+                excluded_regions.append({"bbox": list(t["bbox"]), "reason": "table_in_figure"})
+        elif overlapping:
             # Follow-up R11: a chart's grid read as a table does not hide
             # the chart. Only when every overlapping table is a grid table,
             # and (R16) the cluster is not page-sized.
-            area = max(0.0, bbox[2] - bbox[0]) * max(0.0, bbox[3] - bbox[1])
-            page_sized = area / reference_area > GRID_TABLE_MAX_CLUSTER_FRACTION
             if page_sized or not all(is_grid_table(t, members) for t in overlapping):
                 excluded_regions.append({"bbox": bbox, "reason": "table_overlap"})
                 return
@@ -841,7 +1007,7 @@ def detect_figure_regions_with_exclusions(
             continue
         bbox = padded(raw)
         area = max(0.0, bbox[2] - bbox[0]) * max(0.0, bbox[3] - bbox[1])
-        if area / page_area < MIN_CLUSTER_AREA_FRACTION:
+        if area / page_area < MIN_CLUSTER_AREA_FRACTION and not _is_stroke_graphic(rect, significant, page_lines):
             excluded_regions.append({"bbox": bbox, "reason": "tiny"})
             continue
         if _is_text_box(rect, significant, page_lines):
@@ -859,7 +1025,7 @@ def detect_figure_regions_with_exclusions(
             for raw in group:
                 excluded_regions.append({"bbox": padded(raw), "reason": "text_box"})
 
-    _absorb_edge_labels(regions, page_lines)
+    _absorb_edge_labels(regions, page_lines, page_height, content_rect)
     # A panel is a figure as printed: no table or band rule applies to it.
     regions.extend({"bbox": panel} for panel in panels)
     regions.sort(key=lambda r: r["bbox"][1])
@@ -881,7 +1047,9 @@ def _rect_gap(a, b) -> float:
     return max(dx, dy)
 
 
-def _absorb_edge_labels(regions: list[dict], page_lines: list[dict]) -> None:
+def _absorb_edge_labels(
+    regions: list[dict], page_lines: list[dict], page_height: float | None = None, content_rect: list[float] | None = None
+) -> None:
     """Follow-up R22: grow each region over the short label lines printed
     just outside it ("CW", "Unom", "10%"). A label line has at most
     EDGE_LABEL_MAX_CHARS characters and EDGE_LABEL_MAX_WORDS words, is not
@@ -891,14 +1059,16 @@ def _absorb_edge_labels(regions: list[dict], page_lines: list[dict]) -> None:
     label under an axis that reaches into the padding qualifies. Known
     limit: a short body line printed that close to a drawing qualifies
     too; a line at normal spacing above or below a figure does not. A
-    label goes to the nearest region. Changes `regions` in place."""
+    label goes to the nearest region. A line in the furniture band (with
+    `content_rect`, outside it) is page furniture, never a label. Changes
+    `regions` in place."""
     if not regions:
         return
     for line in page_lines:
         text = line["text"]
         if len(text) > EDGE_LABEL_MAX_CHARS or len(text.split()) > EDGE_LABEL_MAX_WORDS:
             continue
-        if CAPTION_PATTERN.match(text):
+        if CAPTION_PATTERN.match(text) or furniture_lib.in_furniture_band(line["bbox"], page_height, content_rect):
             continue
         if any(line_in_region(line["bbox"], r["bbox"]) for r in regions):
             continue
@@ -1228,9 +1398,12 @@ def furniture_graphics(
     return sorted(graphics, key=lambda g: (g[1], g[0]))
 
 
-def bitmap_bboxes(page, furniture_xrefs: set[int] | None = None) -> list[list[float]]:
+def bitmap_bboxes(
+    page, furniture_xrefs: set[int] | None = None, content_rect: list[float] | None = None
+) -> list[list[float]]:
     """Placement bbox for every bitmap XObject on `page`, skipping any xref
-    in `furniture_xrefs` (a repeated logo, etc.) -- the same universe
+    in `furniture_xrefs` (a repeated logo, etc.), plus `unlisted_bitmaps`
+    (with `content_rect` for its band test) -- the same universe
     extract_images.py's own extract_bitmaps() turns into `image` elements,
     factored out here (bbox only, no image bytes) so extract_text.py can
     compute the same set independently to find + exclude each bitmap's
@@ -1245,7 +1418,33 @@ def bitmap_bboxes(page, furniture_xrefs: set[int] | None = None) -> list[list[fl
             bboxes.append(list(page.get_image_bbox(img)))
         except Exception:
             continue
-    return bboxes
+    return bboxes + [b["bbox"] for b in unlisted_bitmaps(page, furniture_xrefs, content_rect)]
+
+
+def unlisted_bitmaps(
+    page, furniture_xrefs: set[int] | None = None, content_rect: list[float] | None = None
+) -> list[dict]:
+    """Bitmaps drawn on `page` that no placement of its image list covers
+    (an inline image, or one inside a form XObject that the list misses):
+    `{"bbox", "xref"}` per placement, `xref` 0 for an inline image. A
+    furniture xref, or a bitmap in the furniture band (an inline header
+    logo has no xref to match), is left out."""
+    furniture_xrefs = furniture_xrefs or set()
+    placed = []
+    for img in page.get_images(full=True):
+        try:
+            placed += [list(r) for r in page.get_image_rects(img[0])]
+        except Exception:
+            continue
+    found = []
+    for info in page.get_image_info(xrefs=True):
+        bbox = list(info["bbox"])
+        if info.get("xref") in furniture_xrefs or any(furniture_lib.bbox_matches(bbox, p) for p in placed):
+            continue
+        if furniture_lib.in_furniture_band(bbox, page.rect.height, content_rect):
+            continue
+        found.append({"bbox": bbox, "xref": info.get("xref", 0)})
+    return found
 
 
 def figure_text_for_region(page, region_bbox) -> str | None:

@@ -2,10 +2,10 @@
 
 The pptx sibling of `extract-text` + `extract-images` combined into one
 tool, since `python-pptx` gives structured access to both a slide's text
-and its embedded pictures in the same pass — there's no separate
-vector-region detection step like the PDF pipeline has, because a pptx
-diagram is either a native shape tree (already structured, no extraction
-needed) or a picture (handled here).
+and its embedded pictures in the same pass. A drawing made of shapes has
+no picture to save, so a figure the slide draws (a group of autoshapes,
+an embedded object, a chart) is cropped from the rendered slide instead.
+Its text boxes are still read as text.
 
 ## How
 
@@ -24,26 +24,60 @@ produced for a slide. It only ever writes **its own** shard files.
 - The **title placeholder** becomes a `heading` (level 1). There's no
   font-size ratio classification like `extract-text` uses (pptx headings
   are structural — a title placeholder — not inferred from size).
+- **Footer, slide-number and date placeholders** are page furniture and
+  are skipped (a date field's cached text is the last-save date anyway).
 - Every other text-bearing shape's paragraphs become `paragraph` elements,
-  one per non-empty paragraph.
+  one per non-empty paragraph. Struck-through runs (`strike="sngStrike"` or
+  `"dblStrike"`) are wrapped in Markdown `~~...~~`, in table cells too; the
+  HTML output shows them as `<del>`.
 - **Tables** (`shape.has_table`) become `table` elements (row-major list of
   lists, cell text as-is).
 - **Pictures** (`shape.shape_type == PICTURE`) are saved to
   `output/<doc>/assets/page{N}_bitmap{idx}.<ext>` and become `image`
   elements with an empty caption — same contract as `extract-images`, so
-  the same `describe_image.py` script (its `--caption` alias — pptx has no
-  script-side caption detection) fills them in afterward.
+  the same `describe_image.py` script fills them in afterward. A picture's
+  crop (`a:srcRect`) is applied, so the asset is the part the slide shows
+  (a negative value is an outset and is clamped, not padded); a picture
+  cropped away entirely is skipped. An EMF/WMF picture, or one PIL cannot
+  read, is cropped from the slide PDF instead (below).
+- **Slide-PDF crops**: some figures are taken from the rendered slide, not
+  from the file: `page{N}_shape{id}.png`, `kind: "vector"`, cut at the
+  shape's bbox from `work/<doc>/<doc>.pdf` (`render.py`'s LibreOffice
+  conversion, run on first need only, so a deck with no such figure needs
+  no LibreOffice) with `render_region.py`'s `crop_png`. If the slide PDF
+  can't be made, the figure gets no element and a warning on stderr.
+- **Drawn figures**: a top-level group whose members draw a figure — at
+  least 2 drawing shapes (a connector, a custom geometry, or a preset
+  geometry other than `rect` with no text), or a picture and at least 1
+  drawing shape, at any depth — becomes one slide-PDF crop at the group's
+  bbox, which also shows arrows and labels drawn over a picture. Its
+  member pictures, objects and charts get no element of their own (the
+  crop shows them as the slide does); its text is extracted as usual.
+  A shape filled with a picture (`spPr/a:blipFill`) is cropped the same
+  way, and its text kept.
+- Every image element records `source_shape_id`, the id of the shape it
+  came from.
 - **Speaker notes**, if present, become a trailing `paragraph` prefixed
   `"Speaker notes: "` so they're preserved without being confused for
   on-slide content.
-- Reading order follows each shape's vertical position (`top`) on the
-  slide, then notes last.
-- **Charts** (`shape.has_chart`) are not extracted as images in this
-  version — pptx-triage flags a slide with a chart as `loop_size: "tight"`
-  so the grader looks closely, but rendering a chart to a picture asset
-  isn't implemented yet. If a grade fails on a chart-bearing slide with
-  `missing_image`, that's the known gap — the fix is a chart-to-image
-  export path, not a captioning fix.
+- Reading order follows each shape's vertical position on the slide,
+  then notes last. A group member's position is mapped through its
+  groups' transforms (`a:chOff`/`a:chExt`), so it is in slide space. Each
+  body element carries that position as `top` and each image as `bbox`,
+  in points (1 pt = 12700 EMU), and `merge.py` sorts the two shards into
+  one stream on it.
+- **Hidden shapes** (`cNvPr hidden="1"`), and every member of a hidden
+  group, are skipped.
+- **Embedded objects, charts and SmartArt** (a `graphicFrame` whose
+  `a:graphicData` uri ends in `/ole`, `/chart` or `/diagram`) become a
+  slide-PDF crop at the frame's bbox: exactly what the slide prints,
+  with no EMF decoding. A frame thinner or shorter than 0.1% of the slide
+  (an add-in helper stub) is skipped. An embedded Excel worksheet
+  (`progId` `Excel.Sheet.*`) whose workbook names an `oleSize` range
+  becomes a `table` element instead (with `source_shape_id`): the active
+  sheet's cells in that range only, without hidden rows, hidden columns
+  and empty rows. Cells outside `oleSize` are never read: they are not on
+  the slide. Values are the cached results (`data_only`), unformatted.
 
 ## Output
 

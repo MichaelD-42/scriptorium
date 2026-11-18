@@ -19,6 +19,48 @@ PDF, PowerPoint (`.pptx`), Word (`.docx`), Excel (`.xlsx`), HTML (`.html`),
 and standalone images (`.png`/`.jpg`/`.jpeg`/`.webp`/`.tiff`) are
 implemented today.
 
+## 0.8.0
+
+Extraction, gate and environment fixes.
+
+- **Queue routing**: a human item no longer throws away the document's page
+  retries. Retryable pages are retried first; the document goes to
+  needs-human once nothing retryable is left.
+- **pptx**: embedded worksheets, charts and SmartArt produce an element (a
+  table from the visible worksheet range, else a crop of the rendered
+  slide). A group that draws a figure becomes one image. Cropped pictures
+  are exported cropped. Struck-through text is marked `~~…~~` (`<del>` in
+  HTML). Footer, slide-number and date placeholders are furniture. Shapes
+  in groups sort by their slide position; hidden shapes are skipped. New
+  gate `pptx_figures_covered` checks every figure on a slide has an
+  element.
+- **Captions**: agents no longer write captions for any format; `caption`
+  is the printed caption only. An older agent caption is marked
+  `caption_source: "agent"` and shown as interpretation.
+- **PDF tables**: fill-only rects (white label backgrounds, text
+  highlights) no longer make phantom tables, rows or columns. A ruled
+  header row takes the unruled rows below it. Table text is no longer
+  duplicated as a paragraph, and text in an open cell is no longer
+  dropped. A table that overhangs its frame or drifts a few points from
+  its rules stays a table, not a chart.
+- **PDF figures**: a diagram with a few small tables inside stays a figure.
+  Figures stay inside the content frame. Small signature-like drawings and
+  inline images are extracted.
+- **Headings**: numbered headings deeper than the TOC, and bold or
+  underlined sub-headings, are headings. Trailing-dot numbers (`4.1.1.`)
+  are levelled by their dot depth.
+- **Running headers** deeper than the 12% band are found from the drawn
+  header box and removed, so page-break joins work again.
+- **Gates**: title-block lines are no longer reported as unparsed TOC
+  lines; unparsed lines alone are a warning. Text-layer coverage counts
+  words per page.
+- **Environment**: `soffice` and tesseract are found through
+  `SCRIPTORIUM_SOFFICE`/`SCRIPTORIUM_TESSERACT`, PATH, or a Windows install
+  under WSL. A missing `soffice` gives one clear message.
+  `check_env.sh` installs behind a proxy, prints options that need no root
+  and writes `runs/env.json`. `plan.py` flags image pages planned before the
+  scripts ran.
+
 ## 0.7.1
 
 Fixes from a repository audit.

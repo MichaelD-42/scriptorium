@@ -18,8 +18,17 @@ import reqif_builder  # noqa: E402
 
 import yaml
 from jinja2 import Environment, FileSystemLoader
+from markupsafe import Markup, escape
 
 TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
+
+# Struck text in an element's text is written as Markdown `~~...~~`
+# (pptx-extract); the HTML output shows it as <del>.
+STRIKE_RE = re.compile(r"~~(\S(?:.*?\S)?)~~")
+
+
+def strike_html(text) -> Markup:
+    return Markup(STRIKE_RE.sub(r"<del>\1</del>", str(escape(text))))
 
 
 def render_markdown_table(rows: list[list[str]]) -> str:
@@ -65,13 +74,16 @@ def render_image_markdown(el: dict, asset_prefix: str = "") -> list[str]:
        verbatim, so a downstream mechanical validator can grep the markers
        to exclude this span from a "verbatim" check. No markers at all if
        none of the three are present (never an empty pair).
+
+    A caption an agent wrote (`caption_source: "agent"`) is not document
+    text: it goes first inside the markers, and never into alt.
     """
     lines = []
+    caption = elements_lib.printed_caption(el)
 
-    alt = el.get("description") or el.get("caption") or ""
+    alt = el.get("description") or caption
     lines.append(f"![{alt}]({asset_prefix}{el['asset']})")
 
-    caption = el.get("caption") or ""
     if caption:
         lines.append(caption)
 
@@ -80,6 +92,8 @@ def render_image_markdown(el: dict, asset_prefix: str = "") -> list[str]:
         lines.append("\n".join(f"> {line}" for line in figure_text.splitlines()))
 
     interpretation_parts = []
+    if el.get("caption_source") == "agent" and el.get("caption"):
+        interpretation_parts.append(el["caption"])
     description = el.get("description") or ""
     if description:
         interpretation_parts.append(description)
@@ -220,6 +234,7 @@ def to_html(doc_data: dict) -> str:
         for el in page["elements"]
     )
     env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)), autoescape=True)
+    env.filters["strike"] = strike_html
     template = env.get_template("output.html.j2")
     return template.render(doc=doc_data["doc"], pages=pages, has_mermaid=has_mermaid)
 

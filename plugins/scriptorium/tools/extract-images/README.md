@@ -4,6 +4,9 @@ Handles both image kinds a PDF can contain:
 
 - **Bitmaps**: images embedded via `/Image` XObjects (photos, scanned
   figures, logos) — extracted directly from the PDF at native resolution.
+  A bitmap the page's image list misses (an inline image, or one inside a
+  form XObject; `lib/figures.py`'s `unlisted_bitmaps`) is found from the
+  page's image placements, unless it lies in the furniture band.
 - **Vector graphics**: diagrams/charts drawn with PDF path operators
   (lines, curves, fills) rather than embedded as an image. These have no
   extractable "image" to pull out, so this tool clusters a page's vector
@@ -50,13 +53,21 @@ Handles both image kinds a PDF can contain:
   - it overlaps a real (non-frame) table's bbox — unless every overlapping
     table is a grid table (follow-up R11, re-review 2: the cluster has a
     data series, a drawing off the table's cell boundaries that does not
-    stay inside one cell; or at most 10% of the table's cells hold text.
+    stay inside one cell, each part clipped to the table bbox first, so a
+    fill or rule overhanging the table edge is no series; or at most 10%
+    of the table's cells hold text.
     A spanned cell's positions are not empty cells). Then the cluster is a
     figure, the table is recorded as `grid_table` with its `filled_cells`,
     and `extract-text` emits no table for it. A
     cluster that covers more than 60% of the page (or of the content rect)
-    never uses this rule (follow-up R16): a page-sized form stays a table; or
-  - it's too small to be more than a stray line.
+    never uses this rule (follow-up R16): a page-sized form stays a table.
+    Overlapping tables that together cover less than 15% of the cluster
+    do not exclude it either: they are part of a large drawing (a legend,
+    labels on background boxes), recorded as `table_in_figure`, and
+    `extract-text` emits no table for them; or
+  - it's too small to be more than a stray line (under 1% of the page),
+    unless its drawings hold 20 or more curves and no text line lies
+    inside it: hand-drawn strokes such as a signature.
 
   This is what catches a diagram or chart sitting on an otherwise
   text-heavy page — the old whole-page rule (gated on the page having
@@ -112,7 +123,10 @@ extractor may replace such a `figure_text` with `describe_image.py
   characters, 2 words, not a caption) within 6 pt of a region and beside
   it (its y-range overlaps the region's) grows the region first, so the
   label lands in `figure_text` and in the crop. Known limit: a short body
-  line printed that close to a drawing is taken too.
+  line printed that close to a drawing is taken too. A line in the
+  furniture band (outside the content rect, when triage found one) is
+  never a label, and a region's padding stops at the content rect, so a
+  figure drawn just below the frame top does not take in the title block.
 - Every `image` element (bitmap or vector-region) also gets a
   script-authoritative `caption`: `lib/figures.py`'s `find_caption_line`
   searches the text layer within 60pt directly above or below the
@@ -132,8 +146,8 @@ extractor may replace such a `figure_text` with `describe_image.py
   — same "shared detection, no ordering dependency" pattern as
   `figure_text` above, so the two scripts can never disagree about which
   line is the caption. This only applies to PDF image elements — pptx/docx/
-  xlsx/html images have no text-layer/bbox convention to search and keep
-  `caption` agent-authored via `describe_image.py`'s `--caption` (below).
+  xlsx/html images have no text-layer/bbox convention to search, so their
+  `caption` stays empty.
 - If `work/<doc>/triage.json` has a `furniture` section (`pdf-triage`'s
   furniture detection), a bitmap whose xref is in `image_xrefs` (e.g. a logo
   repeated on every page) is skipped entirely — no `image` element is
@@ -146,14 +160,14 @@ extractor may replace such a `figure_text` with `describe_image.py
 - **`excluded_regions` (Task A5b, "no silent drops")**: the page's image
   shard also carries `excluded_regions: [{"bbox": [...], "reason":
   "frame_drawing"|"repeated_drawing"|"tiny"|"text_box"|"furniture_band"|
-  "table_overlap"|"grid_table"|"invisible_drawing"|"bitmap_panel"}]` — every candidate a filter dropped on this page (the
+  "table_overlap"|"grid_table"|"table_in_figure"|"invisible_drawing"|"bitmap_panel"}]` — every candidate a filter dropped on this page (the
   page's `repeated_drawings` matches give ONE `repeated_drawing` entry with
   their union bbox and a `count`, not one entry per line), always present (an empty list
   when nothing was dropped), so a large region that a filter removes is
   never simply invisible. `merge.py` passes it through to the merged page
   dict the same way `skipped` already does. `grade-output`'s
   `large_region_excluded` gate flags (as a warning, not a hard failure) any
-  entry here whose reason isn't `frame_drawing`/`repeated_drawing`/`tiny`/`text_box`/`grid_table`/`invisible_drawing`/`bitmap_panel` and whose area is
+  entry here whose reason isn't `frame_drawing`/`repeated_drawing`/`tiny`/`text_box`/`grid_table`/`table_in_figure`/`invisible_drawing`/`bitmap_panel` and whose area is
   more than 20% of the page — see `grade-output`'s README.md.
 - If `work/<doc>/triage.json` marks a given page `"role": "toc"`
   (`pdf-triage`'s printed-TOC-page detection), that page's shard is written
@@ -186,10 +200,11 @@ extractor may replace such a `figure_text` with `describe_image.py
     faithfully reconstruct — validated the same way `mermaid_image.py`
     validates its own stdin-read source (must start with a recognized
     diagram keyword).
-  - `--caption` still exists as a backward-compatible alias — deprecated
-    and warned-about for a PDF element (whose `caption` `extract-images`
-    already set), but still the real way to set `caption` for a pptx/docx/
-    xlsx/html image element, which has no script-side caption detection.
+  - `--caption` still exists as a deprecated, warned-about alias. It
+    stores the text with `"caption_source": "agent"`: assemble renders such
+    a caption inside the interpretation markers, never as alt text, a
+    `<figcaption>` or a ReqIF LONG-NAME, and `text_mode_grade.py`'s
+    `bad_caption` ignores it.
   - `--figure-text` (optional, PDF vector-region elements only) lands a
     vision transcription — only used when the region's script-side
     `figure_text` (above) came back null/absent, i.e. the region had no
@@ -200,9 +215,8 @@ extractor may replace such a `figure_text` with `describe_image.py
   - `--no-visible-text` (Task A9 fix round 1) sets `"no_visible_text":
     true`: the agent checked the render and the image has no printed
     caption and no visible text. It is refused (exit 1) when the element
-    has a caption or figure_text, together with `--caption`/
-    `--figure-text`, or for a document that is not pdf or image (fix
-    round 2): for pptx/docx/xlsx/html the agent writes `--caption`. It is not rendered in the output; the description
+    has a caption or figure_text, or together with `--caption`/
+    `--figure-text`. It works for every input format. It is not rendered in the output; the description
     already renders inside the interpretation markers.
 
   `mermaid_image.py` (below) still exists standalone too, for a

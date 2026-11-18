@@ -42,13 +42,10 @@ def extract_image_document(input_path: Path, assets_dir: Path) -> list[dict]:
 
 def extract_bitmaps(
     fitz_doc, page, page_number: int, assets_dir: Path, furniture_xrefs: set[int],
-    ocr_lang: str | None = None, tessdata_dir: str | None = None,
+    ocr_lang: str | None = None, tessdata_dir: str | None = None, content_rect: list[float] | None = None,
 ) -> list[dict]:
-    found = []
-    idx = 0
-    # Follow-up R31: a bitmap on a mosaic panel is part of the panel's figure
-    # (extract_vector_regions renders the panel).
-    panels = figures_lib.bitmap_panels(page, furniture_xrefs)
+    # Each placement: (bbox or None, a loader for extract_image-style bytes).
+    placements = []
     for img in page.get_images(full=True):
         xref = img[0]
         if xref in furniture_xrefs:
@@ -56,23 +53,31 @@ def extract_bitmaps(
             # an image element for it.
             continue
         try:
-            if any(figures_lib._inside(list(page.get_image_bbox(img)), p, figures_lib.PANEL_TOLERANCE) for p in panels):
-                continue
+            bbox = list(page.get_image_bbox(img))
         except Exception:
-            pass
+            bbox = None  # get_image_bbox couldn't resolve a placement (rare)
+        placements.append((bbox, lambda xref=xref: fitz_doc.extract_image(xref)))
+    # A bitmap the image list misses: inline, or inside a form XObject.
+    for unlisted in figures_lib.unlisted_bitmaps(page, furniture_xrefs, content_rect):
+        placements.append((unlisted["bbox"], lambda u=unlisted: _unlisted_image(fitz_doc, page, u)))
+    # Follow-up R31: a bitmap on a mosaic panel is part of the panel's figure
+    # (extract_vector_regions renders the panel).
+    panels = figures_lib.bitmap_panels(page, furniture_xrefs)
+    found = []
+    idx = 0
+    for bbox, load in placements:
+        if bbox and any(figures_lib._inside(bbox, p, figures_lib.PANEL_TOLERANCE) for p in panels):
+            continue
         idx += 1
         try:
-            base = fitz_doc.extract_image(xref)
+            base = load()
         except Exception:
             continue
         ext = base.get("ext", "png")
         out_name = f"page{page_number}_bitmap{idx}.{ext}"
         out_path = assets_dir / out_name
         out_path.write_bytes(base["image"])
-        try:
-            bbox = list(page.get_image_bbox(img))
-        except Exception:
-            bbox = [0, 0, 0, 0]  # get_image_bbox couldn't resolve a placement (rare); keep the field present anyway
+        bbox = bbox or [0, 0, 0, 0]  # keep the field present anyway
         element = {"type": "image", "kind": "bitmap", "asset": f"assets/{out_name}", "bbox": bbox}
         _set_caption_if_found(element, page, bbox)
         if ocr_lang:
@@ -84,6 +89,17 @@ def extract_bitmaps(
                 element["figure_text_source"] = "ocr"
         found.append(element)
     return found
+
+
+def _unlisted_image(fitz_doc, page, unlisted: dict) -> dict:
+    """`extract_image`-style `{"image", "ext"}` for an `unlisted_bitmaps`
+    entry: by its xref, or for an inline image from the page's image block."""
+    if unlisted["xref"]:
+        return fitz_doc.extract_image(unlisted["xref"])
+    for block in page.get_text("dict", clip=fitz.Rect(unlisted["bbox"]))["blocks"]:
+        if block["type"] == 1 and furniture_lib.bbox_matches(list(block["bbox"]), unlisted["bbox"]):
+            return {"image": block["image"], "ext": block.get("ext", "png")}
+    raise ValueError("no image block at the inline image's bbox")
 
 
 def _set_caption_if_found(element: dict, page, bbox: list[float]) -> None:
@@ -189,7 +205,7 @@ def main() -> None:
         page = fitz_doc[page_number - 1]
         content_rect = furniture_lib.page_content_rect(furniture, page.rect.width, page.rect.height)
         image_elements = extract_bitmaps(
-            fitz_doc, page, page_number, assets_dir, furniture_xrefs, args.ocr_lang, args.tessdata_dir
+            fitz_doc, page, page_number, assets_dir, furniture_xrefs, args.ocr_lang, args.tessdata_dir, content_rect
         )
         vector_elements, excluded_regions = extract_vector_regions(
             page, page_number, assets_dir, pdf_path, frame_tables, frame_drawings,

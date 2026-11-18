@@ -59,6 +59,35 @@ def test_text_joined_onto_the_previous_page_counts(tmp_path):
     assert check["passed"], check["detail"]
 
 
+def test_words_lost_on_a_page_count_even_when_they_occur_nearby():
+    """Page 1 prints a table label twice; the output keeps one. The same
+    words on page 2 do not cover the loss."""
+    label = "Sensor Interface Module Wiring"
+    source = {1: gates._words(f"{label} {label} {BODY}"), 2: gates._words(label)}
+    check = gates.check_text_layer_coverage(_doc([f"{label} {BODY}"], [label]), source)
+    assert check["pages"] == [1], check["detail"]
+
+
+def test_repeated_header_of_a_joined_table_counts_for_its_page():
+    """A table continued on page 2 repeats its header there; the join keeps
+    the header once, on page 1's element, which lists both pages."""
+    header = ["Parameter Name", "Default Value", "Measurement Unit"]
+    rows = [header, ["Voltage", "Twelve", "Volts"], ["Current", "Three", "Amperes"]]
+    table = {"type": "table", "rows": rows, "pages": [1, 2]}
+    source = {
+        1: gates._words(" ".join(" ".join(r) for r in rows[:2])),
+        2: gates._words(" ".join(" ".join(r) for r in (header, rows[2]))),
+    }
+    doc_data = {
+        "pages": {
+            1: {"page_number": 1, "tier": "text", "elements": [table]},
+            2: {"page_number": 2, "tier": "text", "elements": []},
+        }
+    }
+    check = gates.check_text_layer_coverage(doc_data, source)
+    assert check["passed"], check["detail"]
+
+
 def test_ocr_and_vision_pages_are_not_checked(tmp_path):
     words = gates.pdf_text_layer_words(_pdf(tmp_path), furniture_lib.empty_furniture())
     check = gates.check_text_layer_coverage(
