@@ -43,6 +43,7 @@ def extract_image_document(input_path: Path, assets_dir: Path) -> list[dict]:
 def extract_bitmaps(
     fitz_doc, page, page_number: int, assets_dir: Path, furniture_xrefs: set[int],
     ocr_lang: str | None = None, tessdata_dir: str | None = None, content_rect: list[float] | None = None,
+    zones: list[list[float]] | None = None,
 ) -> list[dict]:
     # Each placement: (bbox or None, a loader for extract_image-style bytes).
     placements = []
@@ -66,8 +67,8 @@ def extract_bitmaps(
     found = []
     idx = 0
     for bbox, load in placements:
-        if bbox and any(figures_lib._inside(bbox, p, figures_lib.PANEL_TOLERANCE) for p in panels):
-            continue
+        if bbox and any(figures_lib._inside(bbox, p, figures_lib.PANEL_TOLERANCE) for p in panels + (zones or [])):
+            continue  # part of a panel or a figure zone, rendered whole
         idx += 1
         try:
             base = load()
@@ -119,6 +120,7 @@ def extract_vector_regions(
     dpi: int = VECTOR_REGION_DPI,
     repeated_drawings: list[dict] | None = None,
     content_rect: list[float] | None = None,
+    furniture_xrefs: set[int] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Task A5: one image element per surviving figure region (see
     `lib/figures.py`'s `detect_figure_regions_with_exclusions` for the full
@@ -139,7 +141,7 @@ def extract_vector_regions(
     shard by `main()` below so nothing a filter removes vanishes silently."""
     regions, excluded_regions = figures_lib.detect_figure_regions_with_exclusions(
         page, page_number, pdf_path, frame_tables=frame_tables, frame_drawings=frame_drawings,
-        repeated_drawings=repeated_drawings, content_rect=content_rect,
+        repeated_drawings=repeated_drawings, content_rect=content_rect, furniture_xrefs=furniture_xrefs,
     )
     zoom = dpi / 72
     found = []
@@ -150,6 +152,8 @@ def extract_vector_regions(
         pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), clip=fitz.Rect(*bbox))
         pix.save(out_path)
         element = {"type": "image", "kind": "vector", "asset": f"assets/{out_name}", "bbox": bbox}
+        if region.get("zone"):
+            element["zone"] = True
         _set_caption_if_found(element, page, bbox)
         figure_text = figures_lib.figure_text_for_region(page, bbox)
         if figure_text:
@@ -204,12 +208,13 @@ def main() -> None:
 
         page = fitz_doc[page_number - 1]
         content_rect = furniture_lib.page_content_rect(furniture, page.rect.width, page.rect.height)
-        image_elements = extract_bitmaps(
-            fitz_doc, page, page_number, assets_dir, furniture_xrefs, args.ocr_lang, args.tessdata_dir, content_rect
-        )
         vector_elements, excluded_regions = extract_vector_regions(
             page, page_number, assets_dir, pdf_path, frame_tables, frame_drawings,
-            repeated_drawings=repeated_drawings, content_rect=content_rect,
+            repeated_drawings=repeated_drawings, content_rect=content_rect, furniture_xrefs=furniture_xrefs,
+        )
+        image_elements = extract_bitmaps(
+            fitz_doc, page, page_number, assets_dir, furniture_xrefs, args.ocr_lang, args.tessdata_dir, content_rect,
+            zones=[e["bbox"] for e in vector_elements if e.get("zone")],
         )
         image_elements += vector_elements
 

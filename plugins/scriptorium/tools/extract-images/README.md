@@ -69,6 +69,24 @@ Handles both image kinds a PDF can contain:
     unless its drawings hold 20 or more curves and no text line lies
     inside it: hand-drawn strokes such as a signature.
 
+  **Figure zones.** After these filters, a figure drawn from many small
+  parts is joined into one region (`_merge_figure_zones`). Parts are the
+  kept regions, the `tiny` clusters and the page's bitmaps. Label lines
+  are lines in a font smaller than 0.9 x the document's body size. Parts
+  and labels join when they are at most 24 pt apart vertically and no
+  flow line lies inside their union. A flow line is body text, a
+  `[...]` marker line, a caption or a numbered heading. A group with two
+  or more parts, or one part and a label outside it, becomes one region
+  (`"zone": true` on the `image` element). The region covers at least 1%
+  of the page, and its padding stops at the flow lines above and below.
+  It is rendered as one crop, its labels become `figure_text`, a bitmap
+  inside it gets no element of its own, and a table mostly inside it is
+  `table_in_figure`. A table only partly inside it keeps the parts as
+  they were. A cluster of 4 or more label lines with no part is recorded
+  as `figure_labels`, and `grade-output` warns `figure_without_image`.
+  Known limit: labels in the body font size do not join a zone (the R22
+  edge-label rule below still takes short ones).
+
   This is what catches a diagram or chart sitting on an otherwise
   text-heavy page — the old whole-page rule (gated on the page having
   little text overall) missed this case entirely.
@@ -145,7 +163,11 @@ extractor may replace such a `figure_text` with `describe_image.py
   excluded from `extract-text`'s paragraph/heading output on the same page
   — same "shared detection, no ordering dependency" pattern as
   `figure_text` above, so the two scripts can never disagree about which
-  line is the caption. This only applies to PDF image elements — pptx/docx/
+  line is the caption. With no numbered caption, a one-line title
+  directly below the image (at most 18 pt below, at most 12 words, no
+  closing `.`/`:`/`;`, not a label, a short line, a marker or a
+  numbered heading, and no line right under it) is the caption
+  ("Overview of the assembly"). This only applies to PDF image elements — pptx/docx/
   xlsx/html images have no text-layer/bbox convention to search, so their
   `caption` stays empty.
 - If `work/<doc>/triage.json` has a `furniture` section (`pdf-triage`'s
@@ -160,14 +182,14 @@ extractor may replace such a `figure_text` with `describe_image.py
 - **`excluded_regions` (Task A5b, "no silent drops")**: the page's image
   shard also carries `excluded_regions: [{"bbox": [...], "reason":
   "frame_drawing"|"repeated_drawing"|"tiny"|"text_box"|"furniture_band"|
-  "table_overlap"|"grid_table"|"table_in_figure"|"invisible_drawing"|"bitmap_panel"}]` — every candidate a filter dropped on this page (the
+  "table_overlap"|"grid_table"|"table_in_figure"|"invisible_drawing"|"bitmap_panel"|"figure_labels"}]` — every candidate a filter dropped on this page (the
   page's `repeated_drawings` matches give ONE `repeated_drawing` entry with
   their union bbox and a `count`, not one entry per line), always present (an empty list
   when nothing was dropped), so a large region that a filter removes is
   never simply invisible. `merge.py` passes it through to the merged page
   dict the same way `skipped` already does. `grade-output`'s
   `large_region_excluded` gate flags (as a warning, not a hard failure) any
-  entry here whose reason isn't `frame_drawing`/`repeated_drawing`/`tiny`/`text_box`/`grid_table`/`table_in_figure`/`invisible_drawing`/`bitmap_panel` and whose area is
+  entry here whose reason isn't `frame_drawing`/`repeated_drawing`/`tiny`/`text_box`/`grid_table`/`table_in_figure`/`invisible_drawing`/`bitmap_panel`/`figure_labels` and whose area is
   more than 20% of the page — see `grade-output`'s README.md.
 - If `work/<doc>/triage.json` marks a given page `"role": "toc"`
   (`pdf-triage`'s printed-TOC-page detection), that page's shard is written

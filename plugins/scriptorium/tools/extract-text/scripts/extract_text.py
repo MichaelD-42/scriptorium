@@ -1502,7 +1502,7 @@ def main() -> None:
         # lines belong to figure_text, not to a paragraph/heading element.
         figure_regions, region_exclusions = figures_lib.detect_figure_regions_with_exclusions(
             page, page_number, pdf_path, frame_tables, frame_drawings, repeated_drawings=repeated_drawings,
-            content_rect=content_rect,
+            content_rect=content_rect, furniture_xrefs=furniture_xrefs,
         )
         # Follow-up R11: a chart's grid that pdfplumber read as a table is
         # part of the figure, so it is not a table element; so is a small

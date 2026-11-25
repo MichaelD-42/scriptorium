@@ -136,6 +136,7 @@ from pathlib import Path
 import fitz  # PyMuPDF
 import pdfplumber
 
+import fonts
 import furniture as furniture_lib
 import glyphs
 import toc as toc_lib
@@ -890,6 +891,7 @@ def detect_figure_regions_with_exclusions(
     frame_drawings: list[dict] | None = None,
     repeated_drawings: list[dict] | None = None,
     content_rect: list[float] | None = None,
+    furniture_xrefs: set[int] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """The full detection pipeline (see module docstring): returns
     `(regions, excluded_regions)`.
@@ -944,11 +946,8 @@ def detect_figure_regions_with_exclusions(
             union = [min(union[0], b[0]), min(union[1], b[1]), max(union[2], b[2]), max(union[3], b[3])]
         excluded_regions.append({"bbox": union, "reason": "repeated_drawing", "count": len(repeated_bboxes)})
 
-    if not significant:
-        excluded_regions.sort(key=lambda r: r["bbox"][1])
-        return [], excluded_regions
-
-    clusters = page.cluster_drawings(drawings=significant)
+    # No drawings: bitmaps and labels may still form a figure zone.
+    clusters = page.cluster_drawings(drawings=significant) if significant else []
     tables = page_tables(pdf_path, page_number, frame_tables, content_rect)
     panels = bitmap_panels(page)
     page_lines = _page_lines(page)
@@ -1025,6 +1024,10 @@ def detect_figure_regions_with_exclusions(
             for raw in group:
                 excluded_regions.append({"bbox": padded(raw), "reason": "text_box"})
 
+    _merge_figure_zones(
+        page, regions, excluded_regions, page_lines, tables, padded, furniture_xrefs, content_rect, page_area,
+        panels,
+    )
     _absorb_edge_labels(regions, page_lines, page_height, content_rect)
     # A panel is a figure as printed: no table or band rule applies to it.
     regions.extend({"bbox": panel} for panel in panels)
@@ -1083,6 +1086,137 @@ def _absorb_edge_labels(
         region["bbox"] = _union_bbox([region["bbox"], list(line["bbox"])])
 
 
+# Figure zones: a figure drawn from many small parts (tiny drawings, a few
+# bitmaps, several chart clusters) with labels in a smaller font is one
+# figure. A label line is smaller than ZONE_LABEL_SIZE_FACTOR x the body
+# size. Parts and labels join when at most ZONE_MAX_GAP apart vertically
+# and no flow line (body text, a "[...]" marker, a heading) lies inside
+# their union.
+ZONE_LABEL_SIZE_FACTOR = 0.9
+ZONE_MAX_GAP = 24.0  # pt
+# A cluster of this many label lines with no drawing or bitmap is recorded
+# as `figure_labels`: a figure the detector may have missed.
+ZONE_MIN_LABEL_CLUSTER = 4
+MARKER_PATTERN = re.compile(r"^\[[^\[\]]+\]$")
+SECTION_NUMBER_PATTERN = re.compile(r"^\d+(\.\d+)+\.?(\s|$)")
+
+_BODY_SIZES: dict = {}
+
+
+def _document_body_size(page) -> float:
+    """fonts.document_body_size for `page`'s document, computed once per
+    open document."""
+    doc = page.parent
+    key = (id(doc), doc.name, doc.page_count)
+    if key not in _BODY_SIZES:
+        _BODY_SIZES[key] = fonts.document_body_size(doc)
+    return _BODY_SIZES[key]
+
+
+def line_kind(line: dict, body_size: float) -> str:
+    """"label" (a smaller font than the body: figure text), "flow" (body
+    text, a marker, a caption, a numbered heading: never inside a figure)
+    or "neutral" (a short body-size line, at most EDGE_LABEL_MAX_CHARS and
+    EDGE_LABEL_MAX_WORDS: may be either)."""
+    text = line["text"]
+    if MARKER_PATTERN.match(text) or CAPTION_PATTERN.match(text):
+        return "flow"
+    if body_size and 0 < line.get("size", 0) < ZONE_LABEL_SIZE_FACTOR * body_size:
+        return "label"
+    if SECTION_NUMBER_PATTERN.match(text):
+        return "flow"
+    if len(text) <= EDGE_LABEL_MAX_CHARS and len(text.split()) <= EDGE_LABEL_MAX_WORDS:
+        return "neutral"
+    return "flow"
+
+
+def _merge_figure_zones(
+    page, regions: list[dict], excluded_regions: list[dict], page_lines: list[dict], tables: list[dict],
+    padded, furniture_xrefs: set[int] | None, content_rect: list[float] | None, reference_area: float,
+    panels: list[list[float]] | None = None,
+) -> None:
+    """Join a figure's parts into one region (see ZONE_LABEL_SIZE_FACTOR).
+    Parts are the kept regions, the `tiny` clusters and the page's bitmaps;
+    the label lines around them join too. A group becomes one region
+    (`"zone": True`) when it holds at least two parts, or one part and a
+    label outside it, and covers at least MIN_CLUSTER_AREA_FRACTION of the
+    page. A table mostly inside a zone is the figure's (`table_in_figure`);
+    a table only partly inside it, or a flow line inside the zone, keeps
+    the parts as they were. A group of ZONE_MIN_LABEL_CLUSTER or more
+    labels with no part, not inside a table (a small-font table), is
+    recorded as `figure_labels`. A bitmap or label on a bitmap panel
+    belongs to the panel's figure and takes no part. Changes `regions`
+    and `excluded_regions` in place."""
+    page_height = page.rect.height
+    body_size = _document_body_size(page)
+    flow, labels = [], []
+    for line in page_lines:
+        if furniture_lib.in_furniture_band(line["bbox"], page_height, content_rect):
+            continue
+        kind = line_kind(line, body_size)
+        if kind == "flow":
+            flow.append(line["bbox"])
+        elif kind == "label":
+            labels.append(line["bbox"])
+    parts = [r["bbox"] for r in regions] + [r["bbox"] for r in excluded_regions if r["reason"] == "tiny"]
+    parts += [
+        b for b in bitmap_bboxes(page, furniture_xrefs, content_rect)
+        if not furniture_lib.in_furniture_band(b, page_height, content_rect)
+    ]
+    items = [(list(b), True) for b in parts] + [(list(b), False) for b in labels]
+    items = [it for it in items if not any(_inside(it[0], p, PANEL_TOLERANCE) for p in panels or [])]
+
+    def clear(bbox) -> bool:
+        return not any(line_in_region(f, bbox) for f in flow)
+
+    parent = list(range(len(items)))
+
+    def root(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i, (a, _) in enumerate(items):
+        for j in range(i + 1, len(items)):
+            b = items[j][0]
+            gap = max(0.0, max(a[1], b[1]) - min(a[3], b[3]))
+            if gap <= ZONE_MAX_GAP and clear(_union_bbox([a, b])):
+                parent[root(j)] = root(i)
+    groups: dict[int, list[tuple[list[float], bool]]] = {}
+    for i, item in enumerate(items):
+        groups.setdefault(root(i), []).append(item)
+
+    for group in groups.values():
+        part_boxes = [b for b, is_part in group if is_part]
+        label_boxes = [b for b, is_part in group if not is_part]
+        union = _union_bbox([b for b, _ in group])
+        if not part_boxes:
+            label_boxes = [l for l in label_boxes if not any(line_in_region(l, t["bbox"]) for t in tables)]
+            if len(label_boxes) >= ZONE_MIN_LABEL_CLUSTER:
+                excluded_regions.append({"bbox": union, "reason": "figure_labels"})
+            continue
+        loose_labels = [l for l in label_boxes if not any(line_in_region(l, p) for p in part_boxes)]
+        if len(part_boxes) < 2 and not loose_labels:
+            continue
+        zone = padded(union)
+        for f in flow:  # the padding stops at a flow line above or below
+            if _x_overlaps(f, zone) and zone[1] < f[3] <= union[1]:
+                zone[1] = f[3]
+            if _x_overlaps(f, zone) and union[3] <= f[1] < zone[3]:
+                zone[3] = f[1]
+        area = (zone[2] - zone[0]) * (zone[3] - zone[1])
+        if area / reference_area < MIN_CLUSTER_AREA_FRACTION or not clear(zone):
+            continue
+        overlapping = [t for t in tables if _overlaps_table(zone, t["bbox"])]
+        if any(_overlap_ratio(t["bbox"], zone) < 0.5 for t in overlapping):
+            continue
+        for t in overlapping:
+            excluded_regions.append({"bbox": list(t["bbox"]), "reason": "table_in_figure"})
+        regions[:] = [r for r in regions if not _inside(r["bbox"], zone, REGION_PADDING)]
+        regions.append({"bbox": zone, "zone": True})
+
+
 def detect_figure_regions(
     page, page_number: int, pdf_path: Path,
     frame_tables: list[dict] | None = None,
@@ -1120,7 +1254,8 @@ def _page_lines(page) -> list[dict]:
             stripped = glyphs.line_text(line, symbol_fonts).strip()
             if not stripped:
                 continue
-            lines.append({"text": stripped, "bbox": list(line["bbox"])})
+            size = max((span["size"] for span in line.get("spans", []) if span["text"].strip()), default=0.0)
+            lines.append({"text": stripped, "bbox": list(line["bbox"]), "size": size})
     return lines
 
 
@@ -1232,7 +1367,52 @@ def find_caption_line(page, bbox: list[float], distance: float = CAPTION_SEARCH_
         lines, bbox, distance, is_figure_caption, edge_slack=CAPTION_EDGE_SLACK
     ) or _nearest_caption_line(lines, bbox, distance, CAPTION_PATTERN.match, edge_slack=CAPTION_EDGE_SLACK)
     # Follow-up R22: a caption that wraps keeps its next line(s).
-    return _extend_caption(caption, lines, bbox) if caption else None
+    if caption:
+        return _extend_caption(caption, lines, bbox)
+    return _unnumbered_caption(page, lines, bbox)
+
+
+# An unnumbered caption ("Overview of the assembly") starts at most
+# this far below the image and has at most this many words.
+UNNUMBERED_CAPTION_MAX_GAP = 18.0  # pt
+UNNUMBERED_CAPTION_MAX_WORDS = 12
+
+
+def _unnumbered_caption(page, lines: list[dict], bbox: list[float]) -> dict | None:
+    """find_caption_line's fallback: the first line directly below `bbox`
+    (within UNNUMBERED_CAPTION_MAX_GAP, overlapping it horizontally) when
+    it reads as a one-line title: a flow line (not a label or a short
+    line such as "Selected"), not a marker or numbered heading,
+    at most UNNUMBERED_CAPTION_MAX_WORDS words, no closing ".", ":" or ";",
+    and no line right under it (a paragraph's first line has one). Known
+    limit: a one-line body sentence without a full stop printed that close
+    under a figure is taken as its caption."""
+    x0, _y0, x1, y1 = bbox
+    below = sorted(
+        (
+            l for l in lines
+            if y1 - CAPTION_EDGE_SLACK <= l["bbox"][1] <= y1 + UNNUMBERED_CAPTION_MAX_GAP
+            and _x_overlaps(bbox, l["bbox"]) and not line_in_region(l["bbox"], bbox)
+        ),
+        key=lambda l: l["bbox"][1],
+    )
+    if not below:
+        return None
+    line, text = below[0], below[0]["text"]
+    if (
+        line_kind(line, _document_body_size(page)) != "flow"
+        or MARKER_PATTERN.match(text) or SECTION_NUMBER_PATTERN.match(text)
+        or len(text.split()) > UNNUMBERED_CAPTION_MAX_WORDS or text.endswith((".", ":", ";"))
+    ):
+        return None
+    height = line["bbox"][3] - line["bbox"][1]
+    if any(
+        other is not line and _x_overlaps(line["bbox"], other["bbox"])
+        and line["bbox"][3] - 1.0 <= other["bbox"][1] < line["bbox"][3] + 0.5 * height
+        for other in lines
+    ):
+        return None
+    return line
 
 
 # Follow-up R22: at most this many continuation lines join a caption.

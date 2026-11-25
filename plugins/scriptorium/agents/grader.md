@@ -51,12 +51,14 @@ the assembled output's format/location.
 2. Read `work/<doc>/gates-report.json`'s top-level `warnings` list (it
    exists once gates.py has run — this is not the deterministic gates
    themselves, which already ran and are not your job; it's the
-   `large_region_excluded` and `orphan_figure_caption` warnings gates.py
+   `large_region_excluded`, `figure_without_image` and
+   `orphan_figure_caption` warnings gates.py
    can't judge for itself, since judging whether a figure was really
    lost needs the same visual judgment the rest of your job already
    requires). Filter to the entries whose `"page"` is in your batch.
-   For each `large_region_excluded` entry: look at that
-   region's `"bbox"` on the page's rendered PNG. If it shows a genuine
+   For each `large_region_excluded` or `figure_without_image` entry
+   (a cluster of figure labels with no image): look at that region's
+   `"bbox"` on the page's rendered PNG. If it shows a genuine
    figure/diagram/photo (not decorative whitespace, a coincidentally
    large stretch of body text, or a real table that was correctly
    excluded), tag that page `missing_image` when you grade it in step 3
