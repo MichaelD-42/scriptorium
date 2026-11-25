@@ -19,7 +19,7 @@ Installs the Python dependencies (PyMuPDF, pdfplumber, pytesseract, Pillow,
 Jinja2, PyYAML, python-pptx, python-docx, openpyxl, beautifulsoup4) plus
 the dev group: `pytest`/`pytest-cov`, and ReportLab for the fixture
 generators in `examples/`. Requires
-[`uv`](https://docs.astral.sh/uv/) and Python 3.11+. Also runs automatically
+[`uv`](https://docs.astral.sh/uv/) and Python 3.12+. Also runs automatically
 via a `SessionStart` hook when the plugin loads in a Claude Code session.
 
 ## Running the plugin from this checkout
@@ -46,7 +46,7 @@ Config lives in `plugins/scriptorium/pyproject.toml`
 (`[tool.pytest.ini_options]`). Two markers gate environment-dependent tests:
 `requires_tesseract` and `requires_libreoffice` (the latter skipped in
 the main CI job and run by its own `libreoffice` job in
-`.github/workflows/ci.yml`). CI runs on Python 3.11 and 3.12, with a
+`.github/workflows/ci.yml`). CI runs on Python 3.12 and 3.14, with a
 coverage floor on 3.12. `tests/test_prompt_contract.py` checks every
 script, subcommand and `--flag` that `commands/` and `agents/` name
 against the scripts' argparse.
