@@ -19,6 +19,20 @@ PDF, PowerPoint (`.pptx`), Word (`.docx`), Excel (`.xlsx`), HTML (`.html`),
 and standalone images (`.png`/`.jpg`/`.jpeg`/`.webp`/`.tiff`) are
 implemented today.
 
+## 0.8.1
+
+PDF figure fix.
+
+- **Figures in one piece**: a figure drawn from many small parts (tiny
+  drawings, bitmaps, chart clusters) with labels in a smaller font than
+  the body is one image, not crops plus loose label paragraphs and empty
+  tables. The figure stops at body text, `[...]` marker lines, captions
+  and numbered headings, so those stay in the text.
+- **Captions without a number**: a one-line title directly below a figure
+  ("Overview of the assembly") is its caption.
+- **New warning** `figure_without_image`: a cluster of figure labels with
+  no image found.
+
 ## 0.8.0
 
 Extraction, gate and environment fixes.

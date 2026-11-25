@@ -184,7 +184,7 @@ runs/env.json                                       check_env.sh's resolved tess
   `pptx_figures_covered` (every census figure has an element), each carrying its own
   `pages` list and structured detail. Also a top-level `warnings` list
   (`large_region_excluded`, `orphan_figure_caption`, `table_as_figure`,
-  `toc_unparsed_lines`) that
+  `figure_without_image`, `toc_unparsed_lines`) that
   never affects `passed` — see `grade-output/README.md`.
 - **`grade-report.json`** — `merge_grades.py`'s output: `overall_passed`
   (`gates.passed AND rubric_passed`) and `rubric_verdict.per_page`, each entry

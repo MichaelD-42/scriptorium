@@ -90,7 +90,7 @@ separate from `checks` — see below.
 For a PDF, `gates.py` also checks every page's `excluded_regions` (written
 by `extract-images`, see its README.md) and, for any entry whose `reason` is
 `furniture_band` or `table_overlap` (never `frame_drawing`/
-`repeated_drawing`/`tiny`/`text_box`/`grid_table`/`table_in_figure`/`invisible_drawing`/`bitmap_panel` — those are expected/benign; an
+`repeated_drawing`/`tiny`/`text_box`/`grid_table`/`table_in_figure`/`invisible_drawing`/`bitmap_panel`/`figure_labels` — those are expected/benign; an
 `invisible_drawing` draws nothing, a `bitmap_panel` drawing is part of its panel's figure; a
 `text_box` keeps its text as body text, and a `grid_table` is a chart's grid
 whose cluster became the image, as is a `table_in_figure`) AND whose bbox
@@ -154,6 +154,17 @@ page `missing_image` only when a real figure next to it has no image in the
 output (a list-of-figures entry or a sentence that starts with "Figure 3"
 gets no tag); `merge_grades.py` lifts it to `grade-report.json`; and
 `commands/extract.md`'s Decide step records it and reports it to the human.
+
+## `figure_without_image` (warning, not a gate)
+
+`gates.py` appends a `{"name": "figure_without_image", "page": ...,
+"bbox": ..., "detail": ...}` entry to the same `warnings` list for every
+`figure_labels` excluded region that no `image` element overlaps: a
+cluster of small-font label lines with no drawing or bitmap that
+`extract-images` found. Its figure may be missing from the output. It is
+wired exactly like `large_region_excluded`: it never flips `passed`, and
+the `grader` subagent tags the page `missing_image` only when the render
+shows a real figure there.
 
 ## `table_as_figure` (warning, not a gate)
 

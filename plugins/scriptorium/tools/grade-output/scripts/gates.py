@@ -40,7 +40,7 @@ MIN_OUTPUT_BYTES = 20
 LARGE_REGION_EXCLUDED_AREA_FRACTION = 0.2
 # Follow-up R11: "grid_table" is a chart's grid read as a table; its cluster
 # is the image, so nothing is lost; so is a "table_in_figure".
-LARGE_REGION_EXCLUDED_BENIGN_REASONS = {"frame_drawing", "repeated_drawing", "tiny", "text_box", "grid_table", "table_in_figure", "invisible_drawing", "bitmap_panel"}
+LARGE_REGION_EXCLUDED_BENIGN_REASONS = {"frame_drawing", "repeated_drawing", "tiny", "text_box", "grid_table", "table_in_figure", "invisible_drawing", "bitmap_panel", "figure_labels"}
 
 # Task A9: a `table` element whose bbox is within
 # furniture_lib.FRAME_MATCH_TOLERANCE of a triage `frame_tables` entry is the
@@ -154,6 +154,32 @@ def check_large_region_excluded(doc_data: dict, page_areas: dict[int, float]) ->
                         f"was excluded (reason: {region.get('reason')}) -- verify this wasn't a real figure"
                     ),
                 })
+    return warnings
+
+
+def check_figure_without_image(doc_data: dict) -> list[dict]:
+    """A WARNING (never a hard gate failure, like
+    check_large_region_excluded) for every `figure_labels` entry in a
+    page's `excluded_regions` that no `image` element overlaps: a cluster
+    of small-font label lines with no drawing or bitmap the detector found,
+    so the figure may be missing from the output."""
+    warnings = []
+    for page in doc_data["pages"].values():
+        images = [el["bbox"] for el in page.get("elements", []) if el.get("type") == "image" and el.get("bbox")]
+        for region in page.get("excluded_regions", []):
+            if region.get("reason") != "figure_labels":
+                continue
+            if any(furniture_lib.overlap_ratio(region["bbox"], b) > 0 for b in images):
+                continue
+            warnings.append({
+                "name": "figure_without_image",
+                "page": page.get("page_number"),
+                "bbox": region["bbox"],
+                "detail": (
+                    f"page {page.get('page_number')}: a cluster of figure labels has no image -- "
+                    "check the page render for a figure the extraction missed"
+                ),
+            })
     return warnings
 
 
@@ -820,6 +846,7 @@ def main() -> None:
     warnings = (
         check_large_region_excluded(doc_data, page_areas)
         + check_orphan_figure_caption(doc_data)
+        + check_figure_without_image(doc_data)
         + check_table_as_figure(doc_data)
         + toc_unparsed_warnings(next(c for c in checks if c["name"] == "toc_headings_match"))
     )
