@@ -149,11 +149,12 @@ def cmd_init(args) -> None:
         sys.exit(1)
     state = load_state()
     for path in sorted(Path("input").iterdir()):
-        ext = path.suffix.lstrip(".").lower()
-        if ext not in paths.SUPPORTED_INPUT_EXTS:
+        # Split the name ourselves: Python 3.14's pathlib gives "..pdf" no
+        # suffix, which would skip it silently instead of warning below.
+        doc, _, ext = path.name.rpartition(".")
+        if ext.lower() not in paths.SUPPORTED_INPUT_EXTS:
             continue
-        doc = path.stem
-        if doc in (".", ".."):  # work/<doc> would be work/ or the project root, and init deletes it
+        if doc in ("", ".", ".."):  # work/<doc> would be work/ or the project root, and init deletes it
             print(f"warning: {path} skipped; not a usable document name", file=sys.stderr)
             continue
         chosen = paths.input_file(doc)

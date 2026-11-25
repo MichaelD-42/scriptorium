@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/MichaelD-42/scriptorium/actions/workflows/ci.yml/badge.svg)](https://github.com/MichaelD-42/scriptorium/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Python 3.11 | 3.12](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](plugins/scriptorium/pyproject.toml)
+[![Python 3.12 | 3.14](https://img.shields.io/badge/python-3.12%20%7C%203.14-blue.svg)](plugins/scriptorium/pyproject.toml)
 
 A Claude Code plugin that extracts documents into structured text — headings,
 tables, figures with descriptions — and checks its own result before handing

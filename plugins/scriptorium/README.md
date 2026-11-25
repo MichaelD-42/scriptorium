@@ -19,6 +19,18 @@ PDF, PowerPoint (`.pptx`), Word (`.docx`), Excel (`.xlsx`), HTML (`.html`),
 and standalone images (`.png`/`.jpg`/`.jpeg`/`.webp`/`.tiff`) are
 implemented today.
 
+## 0.8.2
+
+Python support.
+
+- **Python 3.12 and 3.14**: CI tests both; Python 3.11 is no longer
+  supported (`requires-python = ">=3.12"`). uv fetches a matching Python
+  on its own, so an install needs no action.
+- **Fix** (Python 3.14): an `input/` file named only dots and an extension
+  (`..pdf`) is reported as "not a usable document name" again. Python
+  3.14's pathlib gives such a name no suffix, so `state.py init` skipped it
+  without a word. Nothing was deleted either way.
+
 ## 0.8.1
 
 PDF figure fix.

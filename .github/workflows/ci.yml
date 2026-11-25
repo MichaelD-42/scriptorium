@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.12", "3.14"]
     steps:
       - uses: actions/checkout@v4
 
@@ -31,10 +31,9 @@ jobs:
 
       - name: Run tests
         working-directory: plugins/scriptorium
-        # Coverage once, on 3.12: its sys.monitoring core keeps subprocess coverage
-        # cheap; on 3.11 the fallback tracer makes the suite ~8x slower.
+        # Coverage once, on 3.12; 3.14 runs the suite without it.
         # The floor sits a little under the local figure: CI skips the LibreOffice tests.
-        run: uv run pytest ${{ matrix.python-version == '3.11' && '--no-cov' || '--cov-fail-under=94' }}
+        run: uv run pytest ${{ matrix.python-version == '3.12' && '--cov-fail-under=94' || '--no-cov' }}
 
       # The LLM-free extraction eval: fails when a corpus score drops below
       # its floor in evals/extraction/corpus.json. Deterministic, so once.
